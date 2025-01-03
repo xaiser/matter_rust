@@ -1,0 +1,11 @@
+[package]
+name = "matter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[features]
+default = []
+panic_handler = []
+chip_config_error_source = []
