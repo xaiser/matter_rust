@@ -15,7 +15,7 @@ pub struct LayerImplThreadX {
 }
 
 impl LayerImplThreadX {
-    pub fn default() -> Self {
+    pub const fn default() -> Self {
         LayerImplThreadX {
             m_layer_state: ObjectLifeCycle::default(),
         }

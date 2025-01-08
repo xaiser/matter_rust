@@ -23,7 +23,7 @@ impl ObjectLifeCycle {
         return false;
     }
 
-    pub fn default() -> Self {
+    pub const fn default() -> Self {
         ObjectLifeCycle {
             m_state: State::Uninitialized,
         }

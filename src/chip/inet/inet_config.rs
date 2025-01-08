@@ -1,0 +1,1 @@
+pub const INET_CONFIG_NUM_TEST_ENDPOINTS: usize = 8;
