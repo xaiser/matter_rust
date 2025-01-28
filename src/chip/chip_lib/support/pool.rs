@@ -97,8 +97,9 @@ impl<ElementType, const M: usize, const N: usize> BitMapObjectPool<ElementType, 
         let diff = unsafe { element.offset_from(first_element) };
         verify_or_die!(diff >= 0);
         let diff = diff as usize;
-        verify_or_die!(diff % mem::size_of::<ElementType>() == 0);
-        let index = diff as usize / mem::size_of::<ElementType>();
+        //verify_or_die!(diff % mem::size_of::<ElementType>() == 0);
+        //let index = diff as usize / mem::size_of::<ElementType>();
+        let index = diff;
         verify_or_die!(index < self.capacity());
         return index;
     }
@@ -120,7 +121,8 @@ impl<ElementType, const M: usize, const N: usize> BitMapObjectPool<ElementType, 
     }
 
     pub fn allocate(&mut self, init_value: ElementType) -> * mut ElementType {
-        for word in 0..(self.capacity() / K_BIT_CHUNK_SIZE) {
+        //for word in 0..(self.capacity() / K_BIT_CHUNK_SIZE) {
+        for word in (0..).take_while(|word| word * K_BIT_CHUNK_SIZE < self.capacity()) {
             let usage = &self.m_usage[word];
             let mut value = usage.load(Ordering::Relaxed);
             let mut offset: usize = 0;
@@ -173,6 +175,13 @@ impl<ElementType, const M: usize, const N: usize> ObjectPool<ElementType, KInlin
     {}
 }
 
+#[macro_export]
+macro_rules! create_object_pool {
+    ($element_type: ty, $num_element: expr) => {
+        BitMapObjectPool::<$element_type, {($num_element + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE}, $num_element>::new();
+    };
+}
+
 
 #[cfg(test)]
 mod test {
@@ -208,15 +217,117 @@ mod test {
       }
 
       #[test]
+      fn new_object_pool() {
+          let object_pool = create_object_pool!(StubStruct, 10);
+          assert_eq!(10,object_pool.capacity());
+      }
+
+      #[test]
       fn allocate_one() {
-          let s = StubStruct {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let s = object_pool.create_object(
+          StubStruct {
               inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
               the_string: "test",
-          };
-          assert_eq!(1,1);
+          });
+          assert_eq!(false, s.is_null());
+          assert_eq!(false, object_pool.exhausted());
+          unsafe {
+              assert_eq!(1, (*s).the_int);
+          }
+      }
+
+      #[test]
+      fn full() {
+          let mut object_pool = create_object_pool!(StubStruct, 1);
+          let s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          let b = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 2,
+              the_string: "test",
+          });
+          assert_eq!(false, s.is_null());
+          assert_eq!(true, b.is_null());
+          assert_eq!(true, object_pool.exhausted());
+      }
+
+      #[test]
+      fn allocate_two() {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          let b = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 2,
+              the_string: "test",
+          });
+          assert_eq!(false, s.is_null());
+          assert_eq!(false, b.is_null());
+          assert_eq!(false, object_pool.exhausted());
+          assert_eq!(2, object_pool.allocated());
+      }
+
+      #[test]
+      fn release_one() {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let mut s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          assert_eq!(1, object_pool.allocated());
+          object_pool.release_object(s);
+          assert_eq!(0, object_pool.allocated());
+      }
+
+      #[test]
+      fn release_two() {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          let b = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 2,
+              the_string: "test",
+          });
+          assert_eq!(2, object_pool.allocated());
+          object_pool.release_object(s);
+          object_pool.release_object(b);
+          assert_eq!(0, object_pool.allocated());
       }
   }
 }
