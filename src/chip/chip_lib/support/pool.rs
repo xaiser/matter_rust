@@ -31,13 +31,15 @@ pub trait ObjectPool<ElementType, Mem> {
     fn release_object(&mut self, element: * mut ElementType);
     fn releaes_all(&mut self);
     //fn for_each_active_object<F: FnOnce(*mut ElementType) -> Loop>(&mut self, f: F)
-    fn for_each_active_object<F>(&mut self, f: F)
+    fn for_each_active_object<F>(&mut self, f: F) -> Loop
         where
             F: FnOnce(*mut ElementType) -> Loop + FnMut(*mut ElementType) -> Loop;
 
+    /*
     fn for_each_active_object_const<F>(&mut self, f: F)
         where
             F: Fn(*mut ElementType) -> Loop;
+    */
 }
 
 impl<ElementType, const M: usize, const N: usize> StaticAllocatorBitMap for BitMapObjectPool<ElementType, M, N> {
@@ -164,21 +166,41 @@ impl<ElementType, const M: usize, const N: usize> ObjectPool<ElementType, KInlin
     fn releaes_all(&mut self)
     {}
 
-    fn for_each_active_object<F>(&mut self, f: F)
+    fn for_each_active_object<F>(&mut self, mut f: F) -> Loop
         where
             F: FnOnce(*mut ElementType) -> Loop + FnMut(*mut ElementType) -> Loop
-    {}
+    {
+        let capacity = self.capacity();
+        //for word in (0..).take_while(|&word| word * K_BIT_CHUNK_SIZE < self.capacity()) {
+        for word in (0..).take_while(|&word| word * K_BIT_CHUNK_SIZE < capacity) {
+            let usage = &self.m_usage[word];
+            let value = usage.load(Ordering::Relaxed);
+            //for offset in (0..).clone().take_while(|&offset| offset < K_BIT_CHUNK_SIZE && offset + word * K_BIT_CHUNK_SIZE < self.capacity())
+            for offset in (0..).clone().take_while(|&offset| offset < K_BIT_CHUNK_SIZE && offset + word * K_BIT_CHUNK_SIZE < capacity)
+            {
+                if (value & (K_BIT1 << offset)) != 0 {
+                    if f(self.at(word * K_BIT_CHUNK_SIZE + offset)) == Loop::Break {
+                        return Loop::Break;
+                    }
+                }
+            }
+        }
+        return Loop::Finish;
+    }
 
+    /*
     fn for_each_active_object_const<F>(&mut self, f: F)
         where
-            F: Fn(*mut ElementType) -> Loop
-    {}
+            F: FnOnce(*mut ElementType) -> Loop + Fn(*mut ElementType) -> Loop
+    {
+    }
+    */
 }
 
 #[macro_export]
 macro_rules! create_object_pool {
     ($element_type: ty, $num_element: expr) => {
-        BitMapObjectPool::<$element_type, {($num_element + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE}, $num_element>::new();
+        BitMapObjectPool::<$element_type, {($num_element + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE}, $num_element>::new()
     };
 }
 
@@ -292,7 +314,7 @@ mod test {
       #[test]
       fn release_one() {
           let mut object_pool = create_object_pool!(StubStruct, 10);
-          let mut s = object_pool.create_object(
+          let s = object_pool.create_object(
           StubStruct {
               inner: StubStructInner {
                   init: true,
@@ -328,6 +350,57 @@ mod test {
           object_pool.release_object(s);
           object_pool.release_object(b);
           assert_eq!(0, object_pool.allocated());
+      }
+
+      #[test]
+      fn loop_activate_one() {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let _s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          let mut inits: Vec<u32> = Vec::new();
+          assert_eq!(Loop::Finish, object_pool.for_each_active_object(|element: * mut StubStruct| {
+              unsafe {
+                  inits.push((*element).the_int);
+              }
+              Loop::Continue
+          }));
+          assert_eq!(1, inits[0]);
+      }
+
+      #[test]
+      fn loop_activate_two() {
+          let mut object_pool = create_object_pool!(StubStruct, 10);
+          let _s = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 1,
+              the_string: "test",
+          });
+          let _b = object_pool.create_object(
+          StubStruct {
+              inner: StubStructInner {
+                  init: true,
+              },
+              the_int: 12,
+              the_string: "test",
+          });
+          let mut inits: Vec<u32> = Vec::new();
+          assert_eq!(Loop::Finish, object_pool.for_each_active_object(|element: * mut StubStruct| {
+              unsafe {
+                  inits.push((*element).the_int);
+              }
+              Loop::Continue
+          }));
+          assert_eq!(1, inits[0]);
+          assert_eq!(12, inits[1]);
       }
   }
 }
