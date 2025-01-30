@@ -74,12 +74,12 @@ impl PacketBuffer
     }
 
     pub fn reserve_start_const(&self) -> * const u8 {
-        let start = self as * const Self;
+        let start = self as * const Self as * const u8;
         return unsafe {start.add(PacketBuffer::KSTRUCTURESIZE as usize).cast::<u8>()}
     }
 
     pub fn reserve_start(&mut self) -> * mut u8 {
-        let start = self as * mut Self;
+        let start = self as * mut Self as * mut u8;
         return unsafe {start.add(PacketBuffer::KSTRUCTURESIZE as usize).cast::<u8>()}
     }
 
