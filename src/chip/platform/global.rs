@@ -17,9 +17,7 @@ pub fn system_layer_impl() -> * mut crate::chip::system::LayerImpl {
     }
     */
     static mut G_SYSTEM_LAYER_IMPL: crate::chip::system::LayerImpl = crate::chip::system::LayerImpl::default();
-    unsafe {
-        return ptr::addr_of_mut!(G_SYSTEM_LAYER_IMPL);
-    }
+    return ptr::addr_of_mut!(G_SYSTEM_LAYER_IMPL);
 }
 
 pub fn system_layer() -> * mut crate::chip::system::LayerImpl

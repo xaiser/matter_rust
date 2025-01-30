@@ -5,6 +5,12 @@ edition = "2021"
 
 [dependencies]
 
+[profile.dev]
+opt-level = 0
+debug = true
+lto = false
+panic = "abort"
+
 [features]
 default = []
 panic_handler = []

@@ -355,14 +355,10 @@ mod test {
           set_up();
           let before_alloc: u64;
           let after_drop: u64;
-          unsafe {
-              before_alloc = ptr::addr_of!(S_FREE_LIST) as u64;
-          }
+          before_alloc = ptr::addr_of!(S_FREE_LIST) as u64;
           let buffer = PacketBufferHandle::new(1,1);
           mem::drop(buffer);
-          unsafe {
-              after_drop = ptr::addr_of!(S_FREE_LIST) as u64;
-          }
+          after_drop = ptr::addr_of!(S_FREE_LIST) as u64;
           assert_eq!(before_alloc, after_drop);
       }
   }

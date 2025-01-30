@@ -1,4 +1,5 @@
 #[repr(u8)]
+#[derive(PartialEq,Clone,Copy)]
 pub enum IPAddressType
 {
     KUnknown,
@@ -15,7 +16,7 @@ pub struct IPAddress
 
 impl IPAddress
 {
-    pub const Any: IPAddress = IPAddress {
+    pub const ANY: IPAddress = IPAddress {
         addr: (0, 0, 0, 0)
     };
 
@@ -32,7 +33,7 @@ impl IPAddress
     }
 
     pub fn ip_type(&self) -> IPAddressType {
-        if self.addr == IPAddress::Any.addr {
+        if self.addr == IPAddress::ANY.addr {
             return IPAddressType::KAny;
         }
 
@@ -67,8 +68,8 @@ mod test {
   #[test]
   fn compare_any() {
       set_up();
-      let a = IPAddress::Any;
-      let b = IPAddress::Any;
+      let a = IPAddress::ANY;
+      let b = IPAddress::ANY;
       assert_eq!(a == b, true);
   }
 }

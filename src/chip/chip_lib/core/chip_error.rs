@@ -221,6 +221,13 @@ macro_rules! chip_error_incorrect_state{
     };
 }
 
+#[macro_export]
+macro_rules! chip_error_inbound_message_too_big{
+    () => {
+        chip_core_error!(0xc2)
+    };
+}
+
 #[cfg(test)]
 mod test {
   use super::*;
