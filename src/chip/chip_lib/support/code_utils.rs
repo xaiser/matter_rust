@@ -14,3 +14,12 @@ macro_rules! verify_or_return_error {
         verify_or_return_value!($expr, $code $(, $action)*);
     };
 }
+
+#[macro_export]
+macro_rules! verify_or_die {
+    ($expr:expr) => {
+        if !$expr {
+            panic!();
+        }
+    };
+}
