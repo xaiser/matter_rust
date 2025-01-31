@@ -20,6 +20,10 @@ impl IPAddress
         addr: (0, 0, 0, 0)
     };
 
+    pub const ANY_IPV4: IPAddress = IPAddress {
+        addr: (0, 0, 0xFFFF_u32.to_be(), 0)
+    };
+
     pub const fn default() -> Self {
         IPAddress {
             addr: (0, 0, 0, 0)
@@ -36,8 +40,11 @@ impl IPAddress
         if self.addr == IPAddress::ANY.addr {
             return IPAddressType::KAny;
         }
+        if self.addr.0 == 0 && self.addr.1 == 0 && self.addr.2 == 0xFFFF_u32.to_be() {
+            return IPAddressType::KIPv4;
+        }
 
-        return IPAddressType::KUnknown;
+        return IPAddressType::KIPv6;
     }
 }
 

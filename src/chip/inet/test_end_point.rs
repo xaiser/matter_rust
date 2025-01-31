@@ -11,6 +11,7 @@ use super::inet_interface::InterfaceId;
 use super::inet_config::*;
 use crate::chip::system::LayerImpl as SystemLayer;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
+use crate::chip::system::system_packet_buffer::PacketBuffer;
 use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
@@ -24,7 +25,7 @@ use core::ptr;
 type TestEndPointManager = EndPointManagerImplPool<TestEndPoint, {TestEndPoint::NUM_END_POINTS}>;
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum State {
     KReady,
     KBound,
@@ -32,7 +33,7 @@ enum State {
     KClosed,
 }
 
-pub type OnMessageReceivedFunct = fn(*mut TestEndPoint, &PacketBufferHandle, &IPPacketInfo) -> ();
+pub type OnMessageReceivedFunct = fn(*mut TestEndPoint, PacketBufferHandle, &IPPacketInfo) -> ();
 pub type OnMessageErrorFunct = fn(*mut TestEndPoint, ChipError, &IPPacketInfo) -> ();
 
 #[derive(Clone, Copy)]
@@ -41,7 +42,7 @@ pub struct TestEndPoint {
     m_state: State,
     m_on_message_received: Option<OnMessageReceivedFunct>,
     m_on_receive_error: Option<OnMessageErrorFunct>,
-    m_app_state: * mut u8,
+    pub m_app_state: * mut u8,
     m_bound_port: u16,
     m_bound_interface: Option<InterfaceId>
 }
@@ -94,7 +95,7 @@ impl TestEndPoint {
 
     pub fn get_bound_port(&self) -> u16
     {
-        return 0;
+        return self.m_bound_port;
     }
 
     pub fn listen(&mut self, on_message_received: Option<OnMessageReceivedFunct>, on_receive_error: Option<OnMessageErrorFunct>, app_state: * mut u8) -> ChipError
@@ -145,7 +146,7 @@ impl TestEndPoint {
     pub fn free(&mut self)
     {}
 
-    pub fn test_get_msg(&mut self, pkt_info: &IPPacketInfo, msg: &PacketBufferHandle) -> ()
+    pub fn test_get_msg(&mut self, pkt_info: &IPPacketInfo, msg: PacketBufferHandle) -> ()
     {
         match self.m_on_message_received.as_ref() {
             Some(cb) => {
@@ -206,12 +207,13 @@ mod test {
   use super::*;
   use std::*;
   static mut END_POINT_MANAGER: TestEndPointManager = TestEndPointManager::default();
-  mod new {
+  mod inet_manager {
       use super::super::*;
       use super::*;
       use std::*;
       use crate::chip::platform::global::system_layer;
       use crate::chip::system::system_layer::Layer;
+      use crate::chip::chip_lib::support::iterators::Loop;
 
       fn set_up() {
           unsafe {
@@ -226,9 +228,229 @@ mod test {
       }
 
       #[test]
-      fn new_packet_buffer() {
+      fn new_a_test_end_point() {
           set_up();
-          assert_eq!(1,1);
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point();
+              assert_eq!(true, ep.is_ok());
+          }
+      }
+
+      #[test]
+      fn new_two_test_end_point() {
+          set_up();
+          unsafe {
+              let ep1 = END_POINT_MANAGER.new_end_point();
+              let ep2 = END_POINT_MANAGER.new_end_point();
+              assert_eq!(true, ep1.is_ok());
+              assert_eq!(true, ep2.is_ok());
+          }
+      }
+
+      #[test]
+      fn new_but_full() {
+          set_up();
+          unsafe {
+              for i in 0..TestEndPoint::NUM_END_POINTS {
+                  let ep1 = END_POINT_MANAGER.new_end_point();
+              }
+              let ep_full = END_POINT_MANAGER.new_end_point();
+              assert_eq!(false, ep_full.is_ok());
+          }
+      }
+
+      #[test]
+      fn release_one() {
+          set_up();
+          unsafe {
+              let mut ep1: * mut TestEndPoint = ptr::null_mut();
+              for i in 0..TestEndPoint::NUM_END_POINTS {
+                  match END_POINT_MANAGER.new_end_point() {
+                      Ok(p) => { ep1 = p },
+                      Err(_) => {}
+                  }
+              }
+              END_POINT_MANAGER.release_end_point(ep1);
+              let last_ep = END_POINT_MANAGER.new_end_point();
+              assert_eq!(true, last_ep.is_ok());
+          }
+      }
+
+      #[test]
+      fn release_two() {
+          set_up();
+          unsafe {
+              let mut ep1: * mut TestEndPoint = ptr::null_mut();
+              let mut ep2: * mut TestEndPoint = ptr::null_mut();
+              for i in 0..TestEndPoint::NUM_END_POINTS {
+                  match END_POINT_MANAGER.new_end_point() {
+                      Ok(p) => { 
+                          if ep1.is_null() == true {
+                              ep1 = p;
+                          }
+                          else if ep2.is_null() == true {
+                              ep2 = p;
+                          }
+                      },
+                      Err(_) => {}
+                  }
+              }
+              END_POINT_MANAGER.release_end_point(ep1);
+              END_POINT_MANAGER.release_end_point(ep2);
+              let last_ep_1 = END_POINT_MANAGER.new_end_point();
+              let last_ep_2 = END_POINT_MANAGER.new_end_point();
+              assert_eq!(true, last_ep_1.is_ok());
+              assert_eq!(true, last_ep_2.is_ok());
+          }
+      }
+
+      #[test]
+      fn for_each_one() {
+          set_up();
+          unsafe {
+              let mut count: u32 = 0;
+              let ep = END_POINT_MANAGER.new_end_point();
+              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|p| {
+                  count += 1;
+                  return Loop::Continue;
+              }));
+              assert_eq!(1, count);
+          }
+      }
+
+      #[test]
+      fn for_each_two() {
+          set_up();
+          unsafe {
+              let mut count: u32 = 0;
+              let _ = END_POINT_MANAGER.new_end_point();
+              let _ = END_POINT_MANAGER.new_end_point();
+              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|p| {
+                  count += 1;
+                  return Loop::Continue;
+              }));
+              assert_eq!(2, count);
+          }
       }
   }
+
+  mod inet_end_point {
+      use super::super::*;
+      use super::*;
+      use std::*;
+      use crate::chip::platform::global::system_layer;
+      use crate::chip::system::system_layer::Layer;
+
+      fn on_receive(ep: * mut TestEndPoint, msg: PacketBufferHandle, pkt_info: &IPPacketInfo) {
+          unsafe {
+              let vp: * mut Vec<u32> = (*ep).m_app_state as * mut Vec<u32>;
+              let pb = msg.get_raw();
+              let buffer = (*pb).start();
+              (*vp).push(pkt_info.src_port as u32);
+              (*vp).push(pkt_info.dest_port as u32);
+              for i in 0..(*pb).data_len() as usize {
+                  (*vp).push(*buffer.add(i) as u32);
+              }
+          }
+      }
+
+      fn on_error(ep: * mut TestEndPoint, error: ChipError, pkt_info: &IPPacketInfo) {
+          unsafe {
+              let vp: * mut Vec<u32> = (*ep).m_app_state as * mut Vec<u32>;
+              (*vp).push(pkt_info.src_port as u32);
+              (*vp).push(pkt_info.dest_port as u32);
+              (*vp).push(error.as_integer() as u32);
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              /* reinit system layer */
+              let sl = system_layer();
+              (*sl).init();
+
+              /* reinit end point manager */
+              END_POINT_MANAGER = TestEndPointManager::default();
+              END_POINT_MANAGER.init(system_layer());
+          }
+      }
+
+      #[test]
+      fn new_a_test_end_point() {
+          set_up();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              assert_eq!(State::KReady, (*ep).m_state);
+          }
+      }
+
+      #[test]
+      fn bind() {
+          set_up();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              assert_eq!(chip_no_error!(), (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888));
+          }
+      }
+
+      #[test]
+      fn bind_fail() {
+          set_up();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              assert_eq!(inet_error_wrong_address_type!(), (*ep).bind(IPAddressType::KIPv6, &IPAddress::ANY_IPV4.clone(), 888));
+          }
+      }
+
+      #[test]
+      fn test_on_receive() {
+          set_up();
+          let mut v: Vec<u32> = Vec::new();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888);
+              (*ep).listen(Some(on_receive), None, ptr::addr_of!(v) as * mut u8);
+
+              let mut src_pkt_info = IPPacketInfo::default();
+              src_pkt_info.dest_port = 888;
+              src_pkt_info.src_port = 666;
+
+              let msg = PacketBufferHandle::new_with_data(&[1,2,3], 0, 0).unwrap();
+
+              (*ep).test_get_msg(&src_pkt_info, msg);
+
+              assert_eq!(5, v.len());
+              assert_eq!(666, v[0]);
+              assert_eq!(888, v[1]);
+              assert_eq!(1, v[2]);
+              assert_eq!(2, v[3]);
+              assert_eq!(3, v[4]);
+          }
+      }
+
+      #[test]
+      fn test_on_msg_error() {
+          set_up();
+          let mut v: Vec<u32> = Vec::new();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888);
+              (*ep).listen(None, Some(on_error), ptr::addr_of!(v) as * mut u8);
+
+              let mut src_pkt_info = IPPacketInfo::default();
+              src_pkt_info.dest_port = 888;
+              src_pkt_info.src_port = 666;
+
+              let msg = PacketBufferHandle::new_with_data(&[1,2,3], 0, 0).unwrap();
+
+              (*ep).test_get_msg(&src_pkt_info, msg);
+
+              assert_eq!(3, v.len());
+              assert_eq!(666, v[0]);
+              assert_eq!(888, v[1]);
+              assert_eq!(chip_error_inbound_message_too_big!().as_integer(), v[2]);
+          }
+      }
+  }
+
 }

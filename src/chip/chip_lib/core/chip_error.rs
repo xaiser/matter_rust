@@ -95,6 +95,7 @@ macro_rules! chip_core_error{
 }
 
 
+#[derive(Debug)]
 pub struct ChipError 
 {
     m_error: StorageType,
@@ -201,6 +202,11 @@ impl ChipError
     #[allow(unused_variables)]
     pub const fn new_error_error_source(error: StorageType, file: &'static str, line: u32) -> Self {
         chip_initialize_error_source!(error, file, line)
+    }
+
+    pub const fn as_integer(&self) -> StorageType
+    {
+        return self.m_error;
     }
 
 }

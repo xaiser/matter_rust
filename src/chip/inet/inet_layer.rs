@@ -29,7 +29,7 @@ pub trait EndPointManager {
 
     fn system_layer(&self) -> * mut LayerImpl;
 
-    fn delete_end_point(&mut self, point: &Self::EndPointType);
+    fn delete_end_point(&mut self, point: * mut Self::EndPointType);
 
     fn new_end_point(&mut self) -> Result<* mut Self::EndPointType, ChipError>;
     
@@ -39,7 +39,7 @@ pub trait EndPointManager {
 
     fn for_each_end_point<F>(&mut self, f: F) -> Loop
         where
-            F: Fn(* mut Self::EndPointType) -> Loop + FnMut(* mut Self::EndPointType) -> Loop;
+            F: FnMut(* mut Self::EndPointType) -> Loop;
 }
 
 pub trait EndPointProperties {
@@ -96,7 +96,8 @@ where
         return self.m_system_layer;
     }
 
-    fn delete_end_point(&mut self, point: &Self::EndPointType) {
+    fn delete_end_point(&mut self, point: * mut Self::EndPointType) {
+        self.release_end_point(point);
     }
     
     fn new_end_point(&mut self) -> Result<* mut Self::EndPointType, ChipError>
@@ -123,7 +124,7 @@ where
 
     fn for_each_end_point<F>(&mut self, f: F) -> Loop
         where
-            F: Fn(* mut Self::EndPointType) -> Loop + FnMut(* mut Self::EndPointType) -> Loop
+            F: FnMut(* mut Self::EndPointType) -> Loop
     {
         return self.m_end_point_pool.for_each_active_object(f);
     }

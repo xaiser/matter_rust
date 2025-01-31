@@ -132,6 +132,14 @@ impl PacketBuffer
         self.len = self.len - consume_length;
         self.tot_len = self.tot_len - consume_length;
     }
+
+    pub fn start(&mut self) -> * mut u8 {
+        return self.payload;
+    }
+
+    pub fn data_len(&mut self) -> u32 {
+        return self.len;
+    }
 }
 
 pub struct PacketBufferHandle
