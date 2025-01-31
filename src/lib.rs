@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 #![cfg_attr(test, allow(unused_imports))]
 #![cfg_attr(not(test), no_std)]
 

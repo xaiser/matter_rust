@@ -1,5 +1,3 @@
-use crate::chip_sdk_error;
-
 #[macro_export]
 macro_rules! chip_inet_error {
     ($e: expr) => {

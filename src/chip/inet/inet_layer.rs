@@ -2,7 +2,10 @@ use crate::ChipError;
 use crate::chip::system::system_layer::Layer;
 use crate::chip::system::LayerImpl;
 use crate::chip::chip_lib::support::object_life_cycle::ObjectLifeCycle;
+use crate::chip::chip_lib::support::pool::*;
+//use crate::chip::chip_lib::support::internal::pool::*;
 use super::end_point_basis::EndPointBasis;
+use crate::chip::chip_lib::support::internal::pool::K_BIT_CHUNK_SIZE;
 
 use core::ptr;
 
@@ -12,6 +15,7 @@ use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_incorrect_state;
+//use crate::create_object_pool;
 
 pub trait EndPointManager {
     type EndPointType;
@@ -31,23 +35,30 @@ pub trait EndPointProperties {
     const SYSTEM_STATE_KEY: i32;
 }
 
-pub struct EndPointManagerImplPool<EndPointImpl, const N: usize> {
+pub struct EndPointManagerImplPool<EndPointImpl, const N: usize> 
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     m_layer_state: ObjectLifeCycle,
     m_system_layer: * mut LayerImpl,
-    m_end_point_pool: [EndPointImpl; N],
+    m_end_point_pool: BitMapObjectPool<EndPointImpl, N>,
 }
 
-impl<EndPointImpl: Copy, const N: usize> EndPointManagerImplPool<EndPointImpl, N> {
-    pub const fn default(init_value: EndPointImpl) -> Self {
+impl<EndPointImpl: Copy, const N: usize> EndPointManagerImplPool<EndPointImpl, N>
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
+    pub const fn default(init_value: EndPointImpl) -> Self 
+    {
         EndPointManagerImplPool {
             m_layer_state: ObjectLifeCycle::default(),
             m_system_layer: ptr::null_mut(),
-            m_end_point_pool: [init_value; N],
+            m_end_point_pool: BitMapObjectPool::<EndPointImpl, N>::new(),
         }
     }
 }
 
-impl<EndPointImpl: EndPointProperties + EndPointBasis + Copy, const N: usize> EndPointManager for EndPointManagerImplPool<EndPointImpl, N> {
+impl<EndPointImpl: EndPointProperties + EndPointBasis + Copy, const N: usize> EndPointManager for EndPointManagerImplPool<EndPointImpl, N> 
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     type EndPointType = EndPointImpl;
 
     fn init(&mut self, system_layer: * mut LayerImpl) -> ChipError 

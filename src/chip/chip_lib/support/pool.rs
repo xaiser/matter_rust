@@ -5,7 +5,7 @@ use super::internal::pool::K_BIT1;
 use super::iterators::Loop;
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::mem::MaybeUninit;
-use core::{ptr, mem};
+use core::{ptr};
 use crate::verify_or_die;
 
 pub struct KInline;
@@ -17,12 +17,15 @@ struct Data<ElementType, const N: usize> {
     //pub m_memory_view_for_debug: [T; N],
 }
 
-pub struct BitMapObjectPool<ElementType, const M: usize, const N: usize> {
+//pub struct BitMapObjectPool<ElementType, const M: usize, const N: usize> {
+pub struct BitMapObjectPool<ElementType, const N: usize> 
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     m_allocated: usize,
     m_high_water_mark: usize,
     m_capacity: usize,
-    //m_usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
-    m_usage: [AtomicU32; M],
+    m_usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
+    //m_usage: [AtomicU32; M],
     m_data: Data<ElementType, N>,
 }
 
@@ -42,7 +45,9 @@ pub trait ObjectPool<ElementType, Mem> {
     */
 }
 
-impl<ElementType, const M: usize, const N: usize> StaticAllocatorBitMap for BitMapObjectPool<ElementType, M, N> {
+impl<ElementType, const N: usize> StaticAllocatorBitMap for BitMapObjectPool<ElementType, N>
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     fn capacity(&self) -> usize {
         self.m_capacity
     }
@@ -51,7 +56,9 @@ impl<ElementType, const M: usize, const N: usize> StaticAllocatorBitMap for BitM
     }
 }
 
-impl<ElementType, const M: usize, const N: usize> Statistics for BitMapObjectPool<ElementType, M, N> {
+impl<ElementType, const N: usize> Statistics for BitMapObjectPool<ElementType, N>
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     fn allocated(&self) -> usize {
         self.m_allocated
     }
@@ -73,21 +80,26 @@ impl<ElementType, const M: usize, const N: usize> Statistics for BitMapObjectPoo
 
 }
 
-impl<ElementType, const M: usize, const N: usize> BitMapObjectPool<ElementType, M, N> {
-    pub fn new() -> Self {
+impl<ElementType, const N: usize> BitMapObjectPool<ElementType, N> 
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
+    pub const fn new() -> Self {
         let memory: [MaybeUninit<ElementType>; N] =  [const { MaybeUninit::uninit() }; N];
-        //let usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE];
-        let usage: [AtomicU32; M] = [const {AtomicU32::new(0) }; M];
+        //let _usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE];
+        //let usage: [AtomicU32; M] = [const {AtomicU32::new(0) }; M];
 
+        /*
         for u in &usage {
             u.store(0, Ordering::Relaxed);
         }
+        */
 
         BitMapObjectPool {
             m_allocated: 0,
             m_high_water_mark: 0,
             m_capacity: N,
-            m_usage: usage,
+            //m_usage: usage,
+            m_usage: [const {AtomicU32::new(0)}; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
             m_data: Data {
                 m_memory: memory,
             }
@@ -145,7 +157,9 @@ impl<ElementType, const M: usize, const N: usize> BitMapObjectPool<ElementType, 
     }
 }
 
-impl<ElementType, const M: usize, const N: usize> ObjectPool<ElementType, KInline> for BitMapObjectPool<ElementType, M, N> {
+impl<ElementType, const N: usize> ObjectPool<ElementType, KInline> for BitMapObjectPool<ElementType, N>
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]: {
     fn create_object(&mut self, init_value: ElementType) -> * mut ElementType {
         return self.allocate(init_value);
     }
@@ -200,7 +214,8 @@ impl<ElementType, const M: usize, const N: usize> ObjectPool<ElementType, KInlin
 #[macro_export]
 macro_rules! create_object_pool {
     ($element_type: ty, $num_element: expr) => {
-        BitMapObjectPool::<$element_type, {($num_element + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE}, $num_element>::new()
+        //BitMapObjectPool::<$element_type, {($num_element + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE}, $num_element>::new()
+        BitMapObjectPool::<$element_type, $num_element>::new()
     };
 }
 
