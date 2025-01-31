@@ -5,6 +5,7 @@ use super::ip_packet_info::IPPacketInfo;
 use super::ip_address::IPAddress;
 use super::ip_address::IPAddressType;
 use super::end_point_basis::EndPointBasis;
+use super::end_point_basis::DefaultWithMgr;
 use super::end_point_basis::EndPointDeletor;
 use super::inet_interface::InterfaceId;
 use super::inet_config::*;
@@ -45,10 +46,12 @@ pub struct TestEndPoint {
     m_bound_interface: Option<InterfaceId>
 }
 
-impl TestEndPoint {
-    pub const fn default() -> Self {
+impl DefaultWithMgr for TestEndPoint {
+    type EndPointManagerType = TestEndPointManager;
+    fn default(mgr: * mut TestEndPointManager) -> Self
+    {
         TestEndPoint {
-            m_end_point_manager: ptr::null_mut(),
+            m_end_point_manager: mgr,
             m_state: State::KReady,
             m_on_message_received: None,
             m_on_receive_error: None,
@@ -57,6 +60,13 @@ impl TestEndPoint {
             m_bound_interface: None
         }
     }
+}
+
+impl TestEndPoint {
+    /*
+    pub fn default(mgr: * mut TestEndPointManager) -> Self {
+    }
+    */
 
     pub fn bind_with_interface(&mut self, addr_type: IPAddressType, addr: &IPAddress, port: u16, intf_id: Option<InterfaceId>) -> ChipError
     {
@@ -195,7 +205,7 @@ impl EndPointProperties for TestEndPoint {
 mod test {
   use super::*;
   use std::*;
-  static mut END_POINT_MANAGER: TestEndPointManager = TestEndPointManager::default(TestEndPoint::default());
+  static mut END_POINT_MANAGER: TestEndPointManager = TestEndPointManager::default();
   mod new {
       use super::super::*;
       use super::*;
@@ -210,19 +220,13 @@ mod test {
               (*sl).init();
 
               /* reinit end point manager */
-              END_POINT_MANAGER = TestEndPointManager::default(TestEndPoint::default());
+              END_POINT_MANAGER = TestEndPointManager::default();
               END_POINT_MANAGER.init(system_layer());
           }
       }
 
       #[test]
       fn new_packet_buffer() {
-          set_up();
-          assert_eq!(1,1);
-      }
-
-      #[test]
-      fn new_packet_buffer_1() {
           set_up();
           assert_eq!(1,1);
       }

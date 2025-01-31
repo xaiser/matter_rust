@@ -222,6 +222,13 @@ macro_rules! chip_error_incorrect_state{
 }
 
 #[macro_export]
+macro_rules! chip_error_end_point_pool_full{
+    () => {
+        chip_core_error!(0xc1)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_inbound_message_too_big{
     () => {
         chip_core_error!(0xc2)

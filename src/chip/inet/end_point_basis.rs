@@ -5,6 +5,11 @@ pub trait EndPointDeletor<EndPointType> {
     fn release(obj: &mut EndPointType);
 }
 
+pub trait DefaultWithMgr{
+    type EndPointManagerType;
+    fn default(mgr: * mut Self::EndPointManagerType) -> Self;
+}
+
 pub trait EndPointBasis {
     type EndPointManagerType: EndPointManager;
 
