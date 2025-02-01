@@ -11,7 +11,6 @@ use super::inet_interface::InterfaceId;
 use super::inet_config::*;
 use crate::chip::system::LayerImpl as SystemLayer;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
-use crate::chip::system::system_packet_buffer::PacketBuffer;
 use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
@@ -129,7 +128,7 @@ impl TestEndPoint {
         self.send_to_with_interface(addr, port, msg, None)
     }
 
-    pub fn send_msg(&self, pkt_info: &IPPacketInfo, msg: &PacketBufferHandle) -> ChipError
+    pub fn send_msg(&self, _pkt_info: &IPPacketInfo, _msg: &PacketBufferHandle) -> ChipError
     {
         // do something
         chip_no_error!()
@@ -251,8 +250,8 @@ mod test {
       fn new_but_full() {
           set_up();
           unsafe {
-              for i in 0..TestEndPoint::NUM_END_POINTS {
-                  let ep1 = END_POINT_MANAGER.new_end_point();
+              for _i in 0..TestEndPoint::NUM_END_POINTS {
+                  let _ep1 = END_POINT_MANAGER.new_end_point();
               }
               let ep_full = END_POINT_MANAGER.new_end_point();
               assert_eq!(false, ep_full.is_ok());
@@ -264,7 +263,7 @@ mod test {
           set_up();
           unsafe {
               let mut ep1: * mut TestEndPoint = ptr::null_mut();
-              for i in 0..TestEndPoint::NUM_END_POINTS {
+              for _i in 0..TestEndPoint::NUM_END_POINTS {
                   match END_POINT_MANAGER.new_end_point() {
                       Ok(p) => { ep1 = p },
                       Err(_) => {}
@@ -282,7 +281,7 @@ mod test {
           unsafe {
               let mut ep1: * mut TestEndPoint = ptr::null_mut();
               let mut ep2: * mut TestEndPoint = ptr::null_mut();
-              for i in 0..TestEndPoint::NUM_END_POINTS {
+              for _i in 0..TestEndPoint::NUM_END_POINTS {
                   match END_POINT_MANAGER.new_end_point() {
                       Ok(p) => { 
                           if ep1.is_null() == true {
@@ -309,8 +308,8 @@ mod test {
           set_up();
           unsafe {
               let mut count: u32 = 0;
-              let ep = END_POINT_MANAGER.new_end_point();
-              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|p| {
+              let _ep = END_POINT_MANAGER.new_end_point();
+              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|_p| {
                   count += 1;
                   return Loop::Continue;
               }));
@@ -325,7 +324,7 @@ mod test {
               let mut count: u32 = 0;
               let _ = END_POINT_MANAGER.new_end_point();
               let _ = END_POINT_MANAGER.new_end_point();
-              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|p| {
+              assert_eq!(Loop::Finish, END_POINT_MANAGER.for_each_end_point(|_p| {
                   count += 1;
                   return Loop::Continue;
               }));
@@ -340,6 +339,7 @@ mod test {
       use std::*;
       use crate::chip::platform::global::system_layer;
       use crate::chip::system::system_layer::Layer;
+      use crate::chip::system::system_packet_buffer::PacketBuffer;
 
       fn on_receive(ep: * mut TestEndPoint, msg: PacketBufferHandle, pkt_info: &IPPacketInfo) {
           unsafe {
@@ -405,7 +405,7 @@ mod test {
       #[test]
       fn test_on_receive() {
           set_up();
-          let mut v: Vec<u32> = Vec::new();
+          let v: Vec<u32> = Vec::new();
           unsafe {
               let ep = END_POINT_MANAGER.new_end_point().unwrap();
               (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888);
@@ -431,7 +431,7 @@ mod test {
       #[test]
       fn test_on_msg_error() {
           set_up();
-          let mut v: Vec<u32> = Vec::new();
+          let v: Vec<u32> = Vec::new();
           unsafe {
               let ep = END_POINT_MANAGER.new_end_point().unwrap();
               (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888);

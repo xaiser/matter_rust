@@ -239,18 +239,15 @@ mod test {
       }
 
       struct StubStruct<'a> {
-          inner: StubStructInner,
+          _inner: StubStructInner,
           the_int: u32,
-          the_string: &'a str,
+          _the_string: &'a str,
       }
 
       impl Drop for StubStruct<'_> {
           fn drop(&mut self) {
               self.the_int = 0;
           }
-      }
-
-      fn set_up() {
       }
 
       #[test]
@@ -264,11 +261,11 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           assert_eq!(false, s.is_null());
           assert_eq!(false, object_pool.exhausted());
@@ -282,19 +279,19 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 1);
           let s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           let b = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 2,
-              the_string: "test",
+              _the_string: "test",
           });
           assert_eq!(false, s.is_null());
           assert_eq!(true, b.is_null());
@@ -306,19 +303,19 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           let b = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 2,
-              the_string: "test",
+              _the_string: "test",
           });
           assert_eq!(false, s.is_null());
           assert_eq!(false, b.is_null());
@@ -331,11 +328,11 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           assert_eq!(1, object_pool.allocated());
           object_pool.release_object(s);
@@ -347,19 +344,19 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           let b = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 2,
-              the_string: "test",
+              _the_string: "test",
           });
           assert_eq!(2, object_pool.allocated());
           object_pool.release_object(s);
@@ -372,11 +369,11 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let _s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           let mut inits: Vec<u32> = Vec::new();
           assert_eq!(Loop::Finish, object_pool.for_each_active_object(|element: * mut StubStruct| {
@@ -393,19 +390,19 @@ mod test {
           let mut object_pool = create_object_pool!(StubStruct, 10);
           let _s = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 1,
-              the_string: "test",
+              _the_string: "test",
           });
           let _b = object_pool.create_object(
           StubStruct {
-              inner: StubStructInner {
+              _inner: StubStructInner {
                   init: true,
               },
               the_int: 12,
-              the_string: "test",
+              _the_string: "test",
           });
           let mut inits: Vec<u32> = Vec::new();
           assert_eq!(Loop::Finish, object_pool.for_each_active_object(|element: * mut StubStruct| {

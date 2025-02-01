@@ -3,3 +3,4 @@ pub mod code_utils;
 pub mod pool;
 pub mod internal;
 pub mod iterators;
+pub mod logging;
