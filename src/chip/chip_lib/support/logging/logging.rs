@@ -1,5 +1,6 @@
 use super::constants::LogCategory;
 use super::constants::LogModule;
+use crate::chip::platform::log_v;
 
 use core::fmt;
 
@@ -91,7 +92,7 @@ pub fn log(module: LogModule, category: u8, args: fmt::Arguments) {
         let redirect = LOG_REDIRECT_CB.clone();
 
         if redirect.is_none() == true {
-            //platform::logV(module_name, category, args);
+            log_v(module_name, category, args);
         } else {
             redirect.unwrap()(module_name, category, args);
         }
@@ -112,3 +113,22 @@ pub fn is_category_enabled(category: u8) -> bool {
 pub fn is_category_enabled(_category: u8) -> bool {
     return true;
 }
+
+#[cfg(test)]
+mod test {
+  use super::*;
+  use std::*;
+
+  mod new {
+      use super::super::*;
+      use std::*;
+      use crate::chip::chip_lib::support::logging::constants::LogModule;
+
+      #[test]
+      fn test_print() {
+          log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
+          assert_eq!(1,1);
+      }
+  }
+}
+
