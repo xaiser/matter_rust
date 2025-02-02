@@ -1,10 +1,10 @@
-use super::constants::LogCategory;
-use super::constants::LogModule;
+pub use super::constants::LogCategory;
+pub use super::constants::LogModule;
 use crate::chip::platform::log_v;
 
 use core::fmt;
 
-pub type LogRedirectCallback = Option<fn(&str, u8, fmt::Arguments) -> ()>;
+pub type LogRedirectCallback = Option<fn(&str, LogCategory, fmt::Arguments) -> ()>;
 
 #[cfg(feature = "chip_log_filtering")]
 static mut LOG_FILTER: LogCategory = LogCategory::KLogCategoryMax;
@@ -53,6 +53,26 @@ static MODULENAMES: [&'static str; LogModule::KLogModuleMax as usize] = [
     "CSM", // CASESessionManager
 ];
 
+macro_rules! chip_internal_log {
+    ($mod:ident, $cat:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log_impl!($mod, 
+            crate::chip::logging::LogCategory::from_str(concat!(stringify!(KLogCategory), stringify!($cat))).unwrap(), 
+            $msg $(, $args)*)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_internal_log_impl {
+    ($mod:ident, $cat:expr, $msg: expr $(, $args: expr)*) => {
+        if crate::chip::logging::is_category_enabled($cat) {
+            crate::chip::logging::log(
+                crate::chip::logging::LogModule::from_str(concat!(stringify!(KLogModule), stringify!($mod))).unwrap(), 
+                $cat,
+                format_args!($msg $(, $args)*));
+        }
+    };
+}
+
 fn get_module_name(module: LogModule) -> &'static str
 {
     if module < LogModule::KLogModuleMax {
@@ -86,7 +106,7 @@ pub fn set_log_filter(category: u8) {
 pub fn set_log_filter(_category: u8) {
 }
 
-pub fn log(module: LogModule, category: u8, args: fmt::Arguments) {
+pub fn log(module: LogModule, category: LogCategory, args: fmt::Arguments) {
     let module_name = get_module_name(module);
     unsafe {
         let redirect = LOG_REDIRECT_CB.clone();
@@ -105,12 +125,12 @@ pub fn log_byte_span(module: u8, category: u8, args: fmt::Arguments) {
 */
 
 #[cfg(feature = "chip_log_filtering")]
-pub fn is_category_enabled(category: u8) -> bool {
+pub fn is_category_enabled(category: LogCategory) -> bool {
     return category <= gLogFilter;
 }
 
 #[cfg(not(feature = "chip_log_filtering"))]
-pub fn is_category_enabled(_category: u8) -> bool {
+pub fn is_category_enabled(_category: LogCategory) -> bool {
     return true;
 }
 
@@ -123,11 +143,16 @@ mod test {
       use super::super::*;
       use std::*;
       use crate::chip::chip_lib::support::logging::constants::LogModule;
+      use crate::chip::chip_lib::support::logging::constants::LogCategory;
+      use core::str::FromStr;
 
       #[test]
       fn test_print() {
-          log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
-          assert_eq!(1,1);
+          //log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
+          //chip_internal_log_impl!(Inet, Progress, "P {}", 123);
+          chip_internal_log!(Inet, Progress, "P {}", 123);
+          assert_eq!(1,10);
+          //assert_eq!(LogModule::KLogModuleInet,LogModule::from_str("KLogModuleInet").unwrap());
       }
   }
 }
