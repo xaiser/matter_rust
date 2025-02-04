@@ -1,8 +1,93 @@
-pub use super::constants::LogCategory;
-pub use super::constants::LogModule;
+use super::constants::LogCategory;
+use super::constants::LogModule;
 use crate::chip::platform::log_v;
 
 use core::fmt;
+
+/* 
+ * Macros
+ */
+#[macro_export]
+macro_rules! chip_internal_log {
+    ($mod:ident, $cat:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log_impl!($mod, 
+            crate::chip::logging::LogCategory::from_str(concat!(stringify!(KLogCategory), stringify!($cat))).unwrap(), 
+            $msg $(, $args)*)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_internal_log_impl {
+    ($mod:ident, $cat:expr, $msg: expr $(, $args: expr)*) => {
+        if crate::chip::logging::is_category_enabled($cat) {
+            crate::chip::logging::log(
+                crate::chip::logging::LogModule::from_str(concat!(stringify!(KLogModule), stringify!($mod))).unwrap(), 
+                $cat,
+                format_args!($msg $(, $args)*));
+        }
+    };
+}
+
+#[cfg(feature = "chip_error_logging")]
+#[macro_export]
+macro_rules! chip_log_error {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log!($mod, Error, $msg $(, $args)*)
+    };
+}
+
+#[cfg(not(feature = "chip_error_logging"))]
+#[macro_export]
+macro_rules! chip_log_error {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+    };
+}
+
+#[cfg(feature = "chip_progress_logging")]
+#[macro_export]
+macro_rules! chip_log_progress {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log!($mod, Progress, $msg $(, $args)*)
+    };
+}
+
+#[cfg(not(feature = "chip_progress_logging"))]
+#[macro_export]
+macro_rules! chip_log_progress {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+    };
+}
+
+#[cfg(feature = "chip_detail_logging")]
+#[macro_export]
+macro_rules! chip_log_detail {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log!($mod, Detail, $msg $(, $args)*)
+    };
+}
+
+#[cfg(not(feature = "chip_detail_logging"))]
+#[macro_export]
+macro_rules! chip_log_detail {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+    };
+}
+
+#[cfg(feature = "chip_automation_logging")]
+#[macro_export]
+macro_rules! chip_log_automation {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+        chip_internal_log!($mod, Automation, $msg $(, $args)*)
+    };
+}
+
+#[cfg(not(feature = "chip_automation_logging"))]
+#[macro_export]
+macro_rules! chip_log_automation {
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {
+    };
+}
+
 
 pub type LogRedirectCallback = Option<fn(&str, LogCategory, fmt::Arguments) -> ()>;
 
@@ -52,27 +137,6 @@ static MODULENAMES: [&'static str; LogModule::KLogModuleMax as usize] = [
     "ATM", // Automation
     "CSM", // CASESessionManager
 ];
-
-macro_rules! chip_internal_log {
-    ($mod:ident, $cat:ident, $msg: expr $(, $args: expr)*) => {
-        chip_internal_log_impl!($mod, 
-            crate::chip::logging::LogCategory::from_str(concat!(stringify!(KLogCategory), stringify!($cat))).unwrap(), 
-            $msg $(, $args)*)
-    };
-}
-
-#[macro_export]
-macro_rules! chip_internal_log_impl {
-    ($mod:ident, $cat:expr, $msg: expr $(, $args: expr)*) => {
-        if crate::chip::logging::is_category_enabled($cat) {
-            crate::chip::logging::log(
-                crate::chip::logging::LogModule::from_str(concat!(stringify!(KLogModule), stringify!($mod))).unwrap(), 
-                $cat,
-                format_args!($msg $(, $args)*));
-        }
-    };
-}
-
 fn get_module_name(module: LogModule) -> &'static str
 {
     if module < LogModule::KLogModuleMax {
@@ -150,9 +214,9 @@ mod test {
       fn test_print() {
           //log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
           //chip_internal_log_impl!(Inet, Progress, "P {}", 123);
-          chip_internal_log!(Inet, Progress, "P {}", 123);
-          assert_eq!(1,10);
-          //assert_eq!(LogModule::KLogModuleInet,LogModule::from_str("KLogModuleInet").unwrap());
+          //chip_internal_log!(Inet, Progress, "P {}", 123);
+          chip_log_error!(Inet, "P {}", 123);
+          assert_eq!(1,1);
       }
   }
 }

@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::chip::logging::LogCategory;
 
 #[cfg(test)]

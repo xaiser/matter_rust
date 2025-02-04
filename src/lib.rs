@@ -1,5 +1,6 @@
 #![feature(generic_const_exprs)]
 #![allow(static_mut_refs)]
+#![allow(incomplete_features)]
 #![cfg_attr(test, allow(unused_imports))]
 #![cfg_attr(not(test), no_std)]
 

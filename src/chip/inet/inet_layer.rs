@@ -9,6 +9,8 @@ use super::end_point_basis::DefaultWithMgr;
 use crate::chip::chip_lib::support::internal::pool::K_BIT_CHUNK_SIZE;
 use crate::chip::chip_lib::support::iterators::Loop;
 
+use core::str::FromStr;
+
 use core::ptr;
 
 use crate::verify_or_return_error;
@@ -18,7 +20,9 @@ use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_end_point_pool_full;
-//use crate::create_object_pool;
+use crate::chip_log_progress;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
 
 pub trait EndPointManager {
     type EndPointType;
@@ -82,6 +86,8 @@ where
         }
         self.m_system_layer = system_layer;
         self.m_layer_state.set_initialized();
+
+        chip_log_progress!(Inet, "init inet layer");
 
         return chip_no_error!();
     }

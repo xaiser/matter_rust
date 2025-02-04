@@ -12,7 +12,11 @@ lto = false
 panic = "abort"
 
 [features]
-default = []
+default = ["chip_error_logging", "chip_progress_logging", "chip_detail_logging", "chip_automation_logging"]
 panic_handler = []
 chip_config_error_source = []
 chip_log_filtering = []
+chip_error_logging = []
+chip_progress_logging = []
+chip_detail_logging = []
+chip_automation_logging = []
