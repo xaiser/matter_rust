@@ -1,28 +1,37 @@
-use create::chip::*;
+use crate::chip::NodeId;
+
+pub trait LastTransportType {
+    fn last_type(&self) -> Self;
+}
 
 #[repr(u8)]
-pub enum Type
-{
-    kUndefined,
-    kUdp,
-    kBle,
-    kTcp,
-    kWiFiPAF,
-    kLast = kWiFiPAF, // This is not an actual transport type, it just refers to the last transport type
-};
+#[derive(Clone,Copy)]
+pub enum Type {
+    KUndefined,
+    KUdp,
+    KBle,
+    KTcp,
+    KWiFiPAF,
+}
 
-pub struct PeerAddress
-{
+impl LastTransportType for Type {
+    fn last_type(&self) -> Self {
+        return Type::KWiFiPAF;
+    }
+}
+
+pub struct PeerAddress {
     m_transport_type: Type,
     m_remote_id: NodeId,
-};
+}
 
-impl PeerAddress
-{
-    pub fn default() -> Self {
-        Self { m_transport_type: Type::kUndefined, m_remote_id: 0 }
+impl Default for PeerAddress {
+    fn default() -> Self {
+        Self { m_transport_type: Type::KUndefined, m_remote_id: 0 }
     }
+}
 
+impl PeerAddress {
     pub fn new_full_address(the_type: Type, id: NodeId) -> Self {
         Self { m_transport_type: the_type, m_remote_id: id }
     }
@@ -32,10 +41,10 @@ impl PeerAddress
     }
 
     pub fn get_transport_type(&self) -> Type {
-        self.m_transport_type
+        self.m_transport_type.clone()
     }
 
     pub fn set_transport_type(self, the_type: Type) -> Self {
         Self { m_transport_type: the_type, m_remote_id: self.m_remote_id}
     }
-};
+}

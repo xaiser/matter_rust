@@ -7,7 +7,7 @@ pub enum InterfaceType
     Thread,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct InterfaceId
 {
 }

@@ -21,7 +21,7 @@ use crate::chip_inet_error;
 use crate::ChipError;
 use core::ptr;
 
-type TestEndPointManager = EndPointManagerImplPool<TestEndPoint, {TestEndPoint::NUM_END_POINTS}>;
+pub type TestEndPointManager = EndPointManagerImplPool<TestEndPoint, {TestEndPoint::NUM_END_POINTS}>;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -143,7 +143,10 @@ impl TestEndPoint {
     }
 
     pub fn free(&mut self)
-    {}
+    {
+        self.close();
+        //self.release();
+    }
 
     pub fn test_get_msg(&mut self, pkt_info: &IPPacketInfo, msg: PacketBufferHandle) -> ()
     {
