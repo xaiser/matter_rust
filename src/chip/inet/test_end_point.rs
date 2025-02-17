@@ -37,13 +37,13 @@ pub type OnMessageErrorFunct = fn(*mut TestEndPoint, ChipError, &IPPacketInfo) -
 
 #[derive(Clone, Copy)]
 pub struct TestEndPoint {
+    pub m_app_state: * mut u8,
     m_end_point_manager: * mut TestEndPointManager,
     m_state: State,
     m_on_message_received: Option<OnMessageReceivedFunct>,
     m_on_receive_error: Option<OnMessageErrorFunct>,
-    pub m_app_state: * mut u8,
     m_bound_port: u16,
-    m_bound_interface: Option<InterfaceId>
+    m_bound_interface: Option<InterfaceId>,
 }
 
 impl DefaultWithMgr for TestEndPoint {

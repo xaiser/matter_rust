@@ -8,6 +8,8 @@ use crate::chip::inet::end_point_basis::DefaultWithMgr;
 use crate::ChipError;
 use crate::chip_no_error;
 
+use core::ptr;
+
 enum State
 {
     KNotReady,
@@ -105,7 +107,7 @@ where
             m_delegate: ptr::null_mut(),
             m_test_end_point: ptr::null_mut(),
             m_test_end_point_type: IPAddressType::KIPv6,
-            m_state: KNotReady,
+            m_state: State::KNotReady,
         }
     }
 }
