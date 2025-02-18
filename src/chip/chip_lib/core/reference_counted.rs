@@ -96,7 +96,7 @@ mod test {
   #[test]
   fn retain_two() {
       let mut a: TestSubType = TestSubType { m_count: 1 };
-      let b = a.retain();
+      let _b = a.retain();
       let b = a.retain();
 
       unsafe {

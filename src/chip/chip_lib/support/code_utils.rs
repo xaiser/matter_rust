@@ -23,3 +23,12 @@ macro_rules! verify_or_die {
         }
     };
 }
+
+#[macro_export]
+macro_rules! success_or_exit {
+    ($err:expr, $exit:stmt) => {
+        if $err.is_success() == false {
+            $exit
+        }
+    };
+}

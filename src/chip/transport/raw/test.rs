@@ -1,15 +1,26 @@
-use super::base::RawTransportDelegate;
+use super::base::{RawTransportDelegate,Base,MessageTransportContext};
+use super::peer_address::PeerAddress;
 
-use crate::chip::inet::test_end_point::TestEndPoint;
-use crate::chip::inet::ip_address::IPAddressType;
+use crate::chip::system::system_packet_buffer::PacketBufferHandle;
+use crate::chip::inet::test_end_point::{TestEndPoint, TestEndPointManager};
+use crate::chip::inet::ip_address::{IPAddressType,IPAddress};
 use crate::chip::inet::inet_interface::InterfaceId;
 use crate::chip::inet::inet_layer::EndPointManager;
 use crate::chip::inet::end_point_basis::DefaultWithMgr;
 use crate::ChipError;
 use crate::chip_no_error;
 
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_log_progress;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+
+use crate::success_or_exit;
+
 use core::ptr;
 
+#[derive(PartialEq)]
 enum State
 {
     KNotReady,
@@ -46,7 +57,7 @@ impl<ManagerType> TestListenParameter<ManagerType>
 where
     ManagerType: EndPointManager<EndPointType=TestEndPoint>,
 {
-    pub fn get_end_point_manager(&mut self) -> * mut ManagerType {
+    pub fn get_end_point_manager(&self) -> * mut ManagerType {
         self.m_end_point_manager
     }
 
@@ -112,20 +123,46 @@ where
     }
 }
 
-/*
 impl<DelegateType> Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
-    pub fn init(&mut self, param: TestListenParameter) -> ChipError {
-        let err = chip_no_error!();
+    pub fn init(&mut self, params: &TestListenParameter<TestEndPointManager>) -> ChipError {
+        let exit = |err: ChipError, end_point: &mut * mut TestEndPoint| -> ChipError {
+            if err.is_success() == false {
+                chip_log_progress!(Inet, "fail to init test transport {}", err.format());
+                if end_point.is_null() == false {
+                    unsafe {
+                        (*(*end_point)).free();
+                    }
+                    *end_point = ptr::null_mut();
+                }
+            }
+            return err;
+        };
 
         if self.m_state != State::KNotReady {
             self.close();
         }
+
+        unsafe {
+            match (*(params.get_end_point_manager())).new_end_point() {
+                Ok(point) => {
+                    self.m_test_end_point = point;
+                },
+                Err(err) => {
+                    return err;
+                }
+            }
+        }
+        chip_log_detail!(Inet, "Test:: bind&listen port={}", params.get_listen_port());
+        unsafe {
+            let err = (*self.m_test_end_point).bind(params.get_address_type(), &IPAddress::ANY.clone(), params.get_listen_port());
+            success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
+        }
         self.m_state = State::KInitialized;
 
-        return err;
+        return chip_no_error!();
     }
 }
 
@@ -133,7 +170,7 @@ impl<DelegateType> Base<DelegateType> for Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
-    fn set_deletgate(&mut self, _delegate: * mut T)
+    fn set_deletgate(&mut self, _delegate: * mut DelegateType)
     {}
 
     fn send_message(&mut self, _peer_address: &PeerAddress, _msg_buf: PacketBufferHandle) -> ChipError {
@@ -146,8 +183,10 @@ where
 
     fn close(&mut self) { 
         if self.m_test_end_point.is_null() == false {
-            (*self.m_test_end_point).close();
-            (*self.m_test_end_point).free();
+            unsafe {
+                (*self.m_test_end_point).close();
+                (*self.m_test_end_point).free();
+            }
             self.m_test_end_point = ptr::null_mut();
         }
         self.m_state = State::KNotReady;
@@ -156,7 +195,6 @@ where
     fn handle_message_received(&mut self, _peer_address: &PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
     }
 }
-*/
 
 #[cfg(test)]
 mod test {
@@ -189,14 +227,14 @@ mod test {
       #[test]
       fn new_with_end_point_manager() {
           set_up();
-          let mut p = TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER));
+          let p = TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER));
           assert_eq!(p.get_end_point_manager(), ptr::addr_of_mut!(END_POINT_MANAGER));
       }
 
       #[test]
       fn new_with_other_setting() {
           set_up();
-          let mut p = TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_listen_port(11);
+          let p = TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_listen_port(11);
           assert_eq!(p.get_end_point_manager(), ptr::addr_of_mut!(END_POINT_MANAGER));
           assert_eq!(p.get_listen_port(), 11);
       }

@@ -2,6 +2,7 @@
 
 pub type StorageType = u32;
 pub type ValueType = StorageType;
+pub type FormatType = StorageType;
 
 #[repr(u8)]
 pub enum Range
@@ -206,6 +207,14 @@ impl ChipError
 
     pub const fn as_integer(&self) -> StorageType
     {
+        return self.m_error;
+    }
+
+    pub const fn is_success(&self) -> bool {
+        return self.m_error == 0;
+    }
+
+    pub const fn format(&self) -> FormatType {
         return self.m_error;
     }
 

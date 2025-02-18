@@ -6,9 +6,10 @@ use super::ip_address::IPAddress;
 use super::ip_address::IPAddressType;
 use super::end_point_basis::EndPointBasis;
 use super::end_point_basis::DefaultWithMgr;
-use super::end_point_basis::EndPointDeletor;
+//use super::end_point_basis::EndPointDeletor;
 use super::inet_interface::InterfaceId;
 use super::inet_config::*;
+use crate::chip::chip_lib::core::reference_counted::{RCDeleteDeletor, ReferenceCountered};
 use crate::chip::system::LayerImpl as SystemLayer;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip_no_error;
@@ -35,6 +36,8 @@ enum State {
 pub type OnMessageReceivedFunct = fn(*mut TestEndPoint, PacketBufferHandle, &IPPacketInfo) -> ();
 pub type OnMessageErrorFunct = fn(*mut TestEndPoint, ChipError, &IPPacketInfo) -> ();
 
+type RCCountType = i32;
+
 #[derive(Clone, Copy)]
 pub struct TestEndPoint {
     pub m_app_state: * mut u8,
@@ -44,6 +47,7 @@ pub struct TestEndPoint {
     m_on_receive_error: Option<OnMessageErrorFunct>,
     m_bound_port: u16,
     m_bound_interface: Option<InterfaceId>,
+    m_count: RCCountType,
 }
 
 impl DefaultWithMgr for TestEndPoint {
@@ -57,17 +61,13 @@ impl DefaultWithMgr for TestEndPoint {
             m_on_receive_error: None,
             m_app_state : ptr::null_mut(),
             m_bound_port: 0,
-            m_bound_interface: None
+            m_bound_interface: None,
+            m_count: 1,
         }
     }
 }
 
 impl TestEndPoint {
-    /*
-    pub fn default(mgr: * mut TestEndPointManager) -> Self {
-    }
-    */
-
     pub fn bind_with_interface(&mut self, addr_type: IPAddressType, addr: &IPAddress, port: u16, intf_id: Option<InterfaceId>) -> ChipError
     {
         if self.m_state != State::KReady && self.m_state != State::KBound {
@@ -145,7 +145,7 @@ impl TestEndPoint {
     pub fn free(&mut self)
     {
         self.close();
-        //self.release();
+        self.release();
     }
 
     pub fn test_get_msg(&mut self, pkt_info: &IPPacketInfo, msg: PacketBufferHandle) -> ()
@@ -190,11 +190,28 @@ impl EndPointBasis for TestEndPoint {
     }
 }
 
-impl EndPointDeletor<TestEndPoint> for TestEndPoint {
-    fn release(obj: &mut TestEndPoint) {
+impl RCDeleteDeletor<TestEndPoint> for TestEndPoint {
+    fn release(obj: * mut TestEndPoint) {
         unsafe {
-            (*obj.get_end_point_manager()).delete_end_point(obj);
+            (*(*obj).get_end_point_manager()).delete_end_point(obj);
         }
+    }
+}
+
+impl ReferenceCountered<TestEndPoint, TestEndPoint> for TestEndPoint {
+    type CounterType = RCCountType;
+    fn increase(&mut self) -> Self::CounterType {
+        self.m_count += 1;
+        return self.m_count;
+    }
+
+    fn decrease(&mut self) -> Self::CounterType {
+        self.m_count -= 1;
+        return self.m_count;
+    }
+
+    fn get_reference_count(&self) -> Self::CounterType {
+        return self.m_count;
     }
 }
 
