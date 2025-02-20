@@ -13,6 +13,7 @@ use crate::chip_no_error;
 use core::str::FromStr;
 use crate::chip_log_detail;
 use crate::chip_log_progress;
+use crate::chip_log_error;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 
@@ -128,6 +129,7 @@ where
     DelegateType: RawTransportDelegate
 {
     pub fn init(&mut self, params: &TestListenParameter<TestEndPointManager>) -> ChipError {
+        // exit closure
         let exit = |err: ChipError, end_point: &mut * mut TestEndPoint| -> ChipError {
             if err.is_success() == false {
                 chip_log_progress!(Inet, "fail to init test transport {}", err.format());
@@ -154,10 +156,19 @@ where
                     return err;
                 }
             }
-        }
-        chip_log_detail!(Inet, "Test:: bind&listen port={}", params.get_listen_port());
-        unsafe {
+            chip_log_detail!(Inet, "Test:: bind&listen port={}", params.get_listen_port());
             let err = (*self.m_test_end_point).bind(params.get_address_type(), &IPAddress::ANY.clone(), params.get_listen_port());
+            success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
+
+            let err = (*self.m_test_end_point).listen(Some(|ep, buffer, pkt_info| {
+                let test: * mut Self = (*ep).m_app_state as _;
+                let peer_address = PeerAddress::udp_addr_port_interface(pkt_info.src_address.clone(), pkt_info.src_port, pkt_info.interface.unwrap_or(InterfaceId::default()));
+
+                (*test).handle_message_received(peer_address, buffer, ptr::null());
+            }),
+            Some(|ep, err, pkt_info| {
+                chip_log_error!(Inet, "Failed to recieve Test message {}", err.format());
+            }), self as * mut Self as _);
             success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
         }
         self.m_state = State::KInitialized;
@@ -166,12 +177,21 @@ where
     }
 }
 
+/*
+fn OnTestReceive(ep: * mut TestEndPoint, msg: PacketBufferHandle, pkt_info: &IPPacketInfo) {
+    let err = chip_no_error!();
+    let test: * mut Test = (*ep).m_app_state.cast::<* mut Test>();
+}
+*/
+
 impl<DelegateType> Base<DelegateType> for Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
-    fn set_deletgate(&mut self, _delegate: * mut DelegateType)
-    {}
+    fn set_deletgate(&mut self, delegate: * mut DelegateType)
+    {
+        self.m_delegate = delegate;
+    }
 
     fn send_message(&mut self, _peer_address: &PeerAddress, _msg_buf: PacketBufferHandle) -> ChipError {
         return chip_no_error!();
@@ -192,7 +212,7 @@ where
         self.m_state = State::KNotReady;
     }
 
-    fn handle_message_received(&mut self, _peer_address: &PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
+    fn handle_message_received(&mut self, _peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
     }
 }
 

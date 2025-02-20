@@ -471,6 +471,29 @@ mod test {
               assert_eq!(chip_error_inbound_message_too_big!().as_integer(), v[2]);
           }
       }
+
+      #[test]
+      fn test_on_receive_closure() {
+          set_up();
+          let v: Vec<u32> = Vec::new();
+          unsafe {
+              let ep = END_POINT_MANAGER.new_end_point().unwrap();
+              (*ep).bind(IPAddressType::KAny, &IPAddress::ANY.clone(), 888);
+              (*ep).listen(Some(|p, _b, _i| {
+                  (*p).m_bound_port = 999;
+              }), None, ptr::addr_of!(v) as * mut u8);
+
+              let mut src_pkt_info = IPPacketInfo::default();
+              src_pkt_info.dest_port = 888;
+              src_pkt_info.src_port = 666;
+
+              let msg = PacketBufferHandle::new_with_data(&[1,2,3], 0, 0).unwrap();
+
+              (*ep).test_get_msg(&src_pkt_info, msg);
+
+              assert_eq!(999, (*ep).m_bound_port);
+          }
+      }
   }
 
 }

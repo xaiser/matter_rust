@@ -1,5 +1,5 @@
 #[repr(u8)]
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq,Clone,Copy,Debug)]
 pub enum IPAddressType
 {
     KUnknown,
@@ -8,7 +8,7 @@ pub enum IPAddressType
     KAny,
 }
 
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq,Clone,Copy,Debug)]
 pub struct IPAddress
 {
     pub addr: (u32, u32, u32, u32),

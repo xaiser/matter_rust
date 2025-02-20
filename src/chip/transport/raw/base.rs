@@ -18,5 +18,5 @@ pub trait Base<T: RawTransportDelegate> {
 
     fn close(&mut self) { }
 
-    fn handle_message_received(&mut self, peer_address: &PeerAddress, buffer: PacketBufferHandle, ctxt: * const MessageTransportContext);
+    fn handle_message_received(&mut self, peer_address: PeerAddress, buffer: PacketBufferHandle, ctxt: * const MessageTransportContext);
 }
