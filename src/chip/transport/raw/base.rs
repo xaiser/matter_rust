@@ -5,7 +5,7 @@ use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 pub struct MessageTransportContext;
 
 pub trait RawTransportDelegate {
-    fn handle_message_received(&self, peer_address: &PeerAddress, msg: & mut PacketBufferHandle,
+    fn handle_message_received(&self, peer_address: PeerAddress, msg: PacketBufferHandle,
         ctxt: * const MessageTransportContext);
 }
 

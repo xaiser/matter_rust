@@ -28,7 +28,7 @@ enum State
     KInitialized,
 }
 
-#[derive(Clone,Copy)]
+#[derive(Copy)]
 pub struct TestListenParameter<ManagerType>
 where
     ManagerType: EndPointManager<EndPointType=TestEndPoint>,
@@ -37,6 +37,20 @@ where
     m_address_type: IPAddressType,
     m_listen_port: u16,
     m_interface_id: InterfaceId,
+}
+
+impl<ManagerType> Clone for TestListenParameter<ManagerType> 
+where
+    ManagerType: EndPointManager<EndPointType=TestEndPoint>,
+{
+    fn clone(&self) -> Self {
+        TestListenParameter {
+            m_end_point_manager: self.m_end_point_manager,
+            m_address_type: self.m_address_type.clone(),
+            m_listen_port: self.m_listen_port,
+            m_interface_id: self.m_interface_id.clone(),
+        }
+    }
 }
 
 impl<ManagerType> DefaultWithMgr for TestListenParameter<ManagerType>
@@ -128,7 +142,7 @@ impl<DelegateType> Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
-    pub fn init(&mut self, params: &TestListenParameter<TestEndPointManager>) -> ChipError {
+    pub fn init(&mut self, params: TestListenParameter<TestEndPointManager>) -> ChipError {
         // exit closure
         let exit = |err: ChipError, end_point: &mut * mut TestEndPoint| -> ChipError {
             if err.is_success() == false {
@@ -148,6 +162,7 @@ where
         }
 
         unsafe {
+            // create a new end point
             match (*(params.get_end_point_manager())).new_end_point() {
                 Ok(point) => {
                     self.m_test_end_point = point;
@@ -157,20 +172,30 @@ where
                 }
             }
             chip_log_detail!(Inet, "Test:: bind&listen port={}", params.get_listen_port());
+            // bind to address and port
             let err = (*self.m_test_end_point).bind(params.get_address_type(), &IPAddress::ANY.clone(), params.get_listen_port());
             success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
 
-            let err = (*self.m_test_end_point).listen(Some(|ep, buffer, pkt_info| {
+            // setup listen callback
+            let err = (*self.m_test_end_point).listen(
+                // OK callback
+                Some(|ep, buffer, pkt_info| {
                 let test: * mut Self = (*ep).m_app_state as _;
                 let peer_address = PeerAddress::udp_addr_port_interface(pkt_info.src_address.clone(), pkt_info.src_port, pkt_info.interface.unwrap_or(InterfaceId::default()));
 
                 (*test).handle_message_received(peer_address, buffer, ptr::null());
             }),
+            // Fail callback
             Some(|ep, err, pkt_info| {
                 chip_log_error!(Inet, "Failed to recieve Test message {}", err.format());
             }), self as * mut Self as _);
             success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
+
+            chip_log_detail!(Inet, "Test::Inet bound to port={}", (*self.m_test_end_point).get_bound_port());
         }
+
+        self.m_test_end_point_type = params.get_address_type();
+
         self.m_state = State::KInitialized;
 
         return chip_no_error!();
@@ -212,7 +237,10 @@ where
         self.m_state = State::KNotReady;
     }
 
-    fn handle_message_received(&mut self, _peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
+    fn handle_message_received(&mut self, peer_address: PeerAddress, buffer: PacketBufferHandle, ctxt: * const MessageTransportContext) {
+        unsafe {
+            (*self.m_delegate).handle_message_received(peer_address, buffer, ctxt)
+        }
     }
 }
 
@@ -257,6 +285,62 @@ mod test {
           let p = TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_listen_port(11);
           assert_eq!(p.get_end_point_manager(), ptr::addr_of_mut!(END_POINT_MANAGER));
           assert_eq!(p.get_listen_port(), 11);
+      }
+  }
+
+  mod test_transport {
+      use super::*;
+      use super::super::*;
+      use std::*;
+      use crate::chip::platform::global::system_layer;
+      use crate::chip::system::system_layer::Layer;
+      use crate::chip::inet::test_end_point::TestEndPointManager;
+      use std::cell::Cell;
+      static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+
+      #[derive(Default)]
+      struct TestDelegate {
+          pub check: Cell<bool>,
+          pub addr: Cell<PeerAddress>,
+      }
+
+      impl RawTransportDelegate for TestDelegate {
+          fn handle_message_received(&self, peer_address: PeerAddress, buffer: PacketBufferHandle, ctxt: * const MessageTransportContext) {
+              self.check.set(true);
+              self.addr.set(peer_address);
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              /* reinit system layer */
+              let sl = system_layer();
+              (*sl).init();
+
+              /* reinit end point manager */
+              END_POINT_MANAGER = TestEndPointManager::default();
+              END_POINT_MANAGER.init(system_layer());
+
+              TEST_PARAMS.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
+          }
+      }
+
+      #[test]
+      fn init() {
+          set_up();
+          let mut the_test: Test<TestDelegate> = Test::default();
+          unsafe {
+              assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_no_error!());
+          }
+      }
+
+      #[test]
+      fn init_2() {
+          set_up();
+          let mut the_test: Test<TestDelegate> = Test::default();
+          unsafe {
+              assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_no_error!());
+          }
       }
   }
 }
