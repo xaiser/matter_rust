@@ -35,6 +35,7 @@ enum State {
 
 pub type OnMessageReceivedFunct = fn(*mut TestEndPoint, PacketBufferHandle, &IPPacketInfo) -> ();
 pub type OnMessageErrorFunct = fn(*mut TestEndPoint, ChipError, &IPPacketInfo) -> ();
+pub type OnSend = fn(IPPacketInfo, PacketBufferHandle) -> ChipError;
 
 type RCCountType = i32;
 
@@ -48,6 +49,8 @@ pub struct TestEndPoint {
     m_bound_port: u16,
     m_bound_interface: Option<InterfaceId>,
     m_count: RCCountType,
+    // for test purpose
+    m_on_send: Option<OnSend>,
 }
 
 impl DefaultWithMgr for TestEndPoint {
@@ -63,6 +66,7 @@ impl DefaultWithMgr for TestEndPoint {
             m_bound_port: 0,
             m_bound_interface: None,
             m_count: 1,
+            m_on_send: None,
         }
     }
 }
@@ -114,23 +118,25 @@ impl TestEndPoint {
         chip_no_error!()
     }
 
-    pub fn send_to_with_interface(&self, addr: &IPAddress, port: u16, msg: &PacketBufferHandle, intf_id: Option<InterfaceId>) -> ChipError
+    pub fn send_to_with_interface(&self, addr: IPAddress, port: u16, msg: PacketBufferHandle, intf_id: Option<InterfaceId>) -> ChipError
     {
         let mut pkt_info = IPPacketInfo::default();
         pkt_info.dest_address = addr.clone();
         pkt_info.dest_port = port;
         pkt_info.interface = intf_id;
-        return self.send_msg(&pkt_info, msg);
+        return self.send_msg(pkt_info, msg);
     }
 
-    pub fn send_to(&self, addr: &IPAddress, port: u16, msg: &PacketBufferHandle) -> ChipError
+    pub fn send_to(&self, addr: IPAddress, port: u16, msg: PacketBufferHandle) -> ChipError
     {
         self.send_to_with_interface(addr, port, msg, None)
     }
 
-    pub fn send_msg(&self, _pkt_info: &IPPacketInfo, _msg: &PacketBufferHandle) -> ChipError
+    pub fn send_msg(&self, pkt_info: IPPacketInfo, msg: PacketBufferHandle) -> ChipError
     {
-        // do something
+        if let Some(send_impl) = self.m_on_send {
+            return send_impl(pkt_info, msg);
+        }
         chip_no_error!()
     }
 
@@ -165,13 +171,10 @@ impl TestEndPoint {
         }
     }
 
-    pub fn test_send_to<F>(&self, addr: &IPAddress, port: u16, msg: &PacketBufferHandle, mock: F) -> ChipError
-        where
-            F: Fn(&IPAddress,u16,&PacketBufferHandle) -> ChipError + FnMut(&IPAddress,u16,&PacketBufferHandle) -> ChipError
+    pub fn test_send_to(&mut self, mock: OnSend)
     {
-        mock(addr, port, msg)
+        self.m_on_send = Some(mock);
     }
-
 }
 
 impl EndPointBasis for TestEndPoint { 

@@ -250,6 +250,13 @@ macro_rules! chip_error_inbound_message_too_big{
     };
 }
 
+#[macro_export]
+macro_rules! chip_error_invalid_argument{
+    () => {
+        chip_core_error!(0x2f)
+    };
+}
+
 #[cfg(test)]
 mod test {
   use super::*;

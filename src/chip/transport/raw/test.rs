@@ -1,5 +1,5 @@
 use super::base::{RawTransportDelegate,Base,MessageTransportContext};
-use super::peer_address::PeerAddress;
+use super::peer_address::{PeerAddress, Type};
 
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip::inet::test_end_point::{TestEndPoint, TestEndPointManager};
@@ -7,8 +7,14 @@ use crate::chip::inet::ip_address::{IPAddressType,IPAddress};
 use crate::chip::inet::inet_interface::InterfaceId;
 use crate::chip::inet::inet_layer::EndPointManager;
 use crate::chip::inet::end_point_basis::DefaultWithMgr;
+use crate::chip::inet::ip_packet_info::IPPacketInfo;
 use crate::ChipError;
+
 use crate::chip_no_error;
+use crate::chip_core_error;
+use crate::chip_sdk_error;
+use crate::chip_error_invalid_argument;
+use crate::chip_error_incorrect_state;
 
 use core::str::FromStr;
 use crate::chip_log_detail;
@@ -18,10 +24,13 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 
 use crate::success_or_exit;
+use crate::verify_or_die;
+use crate::verify_or_return_error;
+use crate::verify_or_return_value;
 
 use core::ptr;
 
-#[derive(PartialEq)]
+#[derive(PartialEq,Debug)]
 enum State
 {
     KNotReady,
@@ -186,7 +195,7 @@ where
                 (*test).handle_message_received(peer_address, buffer, ptr::null());
             }),
             // Fail callback
-            Some(|ep, err, pkt_info| {
+            Some(|_ep, err, _pkt_info| {
                 chip_log_error!(Inet, "Failed to recieve Test message {}", err.format());
             }), self as * mut Self as _);
             success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
@@ -199,6 +208,13 @@ where
         self.m_state = State::KInitialized;
 
         return chip_no_error!();
+    }
+
+    fn get_gound_port(&self) -> u16 {
+        verify_or_die!(self.m_test_end_point.is_null() == false);
+        unsafe {
+            return (*self.m_test_end_point).get_bound_port();
+        }
     }
 }
 
@@ -218,12 +234,26 @@ where
         self.m_delegate = delegate;
     }
 
-    fn send_message(&mut self, _peer_address: &PeerAddress, _msg_buf: PacketBufferHandle) -> ChipError {
-        return chip_no_error!();
+    fn send_message(&mut self, peer_address: PeerAddress, msg_buf: PacketBufferHandle) -> ChipError {
+        verify_or_return_error!(peer_address.get_transport_type() == Type::KUdp, chip_error_invalid_argument!());
+        verify_or_return_error!(self.m_state == State::KInitialized, chip_error_incorrect_state!());
+        verify_or_return_error!(self.m_test_end_point.is_null() == false, chip_error_incorrect_state!());
+
+        let mut addr_info = IPPacketInfo::default();
+
+        addr_info.dest_address = peer_address.get_address();
+        addr_info.dest_port = peer_address.get_port();
+        addr_info.interface = Some(peer_address.get_interface());
+
+        unsafe {
+            return (*self.m_test_end_point).send_msg(addr_info, msg_buf);
+        }
     }
 
-    fn can_send_to_peer(&mut self, _peer_address: &PeerAddress) -> bool {
-        return true;
+    fn can_send_to_peer(&self, peer_address: &PeerAddress) -> bool {
+        return (self.m_state == State::KInitialized) &&
+            (peer_address.get_transport_type() == Type::KUdp) &&
+            (peer_address.get_address().ip_type() == self.m_test_end_point_type);
     }
 
     fn close(&mut self) { 
@@ -288,7 +318,7 @@ mod test {
       }
   }
 
-  mod test_transport {
+  mod test_transport_init {
       use super::*;
       use super::super::*;
       use std::*;
@@ -305,7 +335,7 @@ mod test {
       }
 
       impl RawTransportDelegate for TestDelegate {
-          fn handle_message_received(&self, peer_address: PeerAddress, buffer: PacketBufferHandle, ctxt: * const MessageTransportContext) {
+          fn handle_message_received(&self, peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
               self.check.set(true);
               self.addr.set(peer_address);
           }
@@ -332,6 +362,7 @@ mod test {
           unsafe {
               assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_no_error!());
           }
+          assert_eq!(the_test.m_state, State::KInitialized);
       }
 
       #[test]
@@ -340,6 +371,195 @@ mod test {
           let mut the_test: Test<TestDelegate> = Test::default();
           unsafe {
               assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_no_error!());
+          }
+      }
+  }
+
+  mod test_transport_send {
+      use super::*;
+      use super::super::*;
+      use std::*;
+      use crate::chip::platform::global::system_layer;
+      use crate::chip::system::system_layer::Layer;
+      use crate::chip::inet::test_end_point::TestEndPointManager;
+      use std::cell::Cell;
+      static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+      static mut TEST_TRANS: Test<TestDelegate> = Test {
+          m_delegate: ptr::null_mut(),
+          m_test_end_point: ptr::null_mut(),
+          m_test_end_point_type: IPAddressType::KIPv6,
+          m_state: State::KNotReady
+      };
+
+      const EXPECTED_SEND_PORT: u16 = 87;
+      const EXPECTED_SEND_ADDR: IPAddress = IPAddress {
+          addr: (1, 2, 3, 4)
+      };
+      const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
+
+      fn on_send_checked(info: IPPacketInfo, mut buffer: PacketBufferHandle) -> ChipError {
+          assert_eq!(info.dest_address, EXPECTED_SEND_ADDR);
+          assert_eq!(info.dest_port, EXPECTED_SEND_PORT);
+          assert_eq!(buffer.is_null(), false);
+          if let Some(msg) = buffer.pop_head() {
+              let buf = msg.get_raw();
+              unsafe {
+                  assert_eq!(4, (*buf).data_len());
+                  let buffer_ptr = (*buf).start();
+                  let expected_data_ptr = EXPECTED_SEND_MSG.as_ptr();
+                  for i in 0..4 {
+                      assert_eq!(ptr::read(buffer_ptr.add(i)), ptr::read(expected_data_ptr.add(i)));
+                  }
+              }
+          } else {
+              assert_eq!(1,2);
+          }
+          return chip_no_error!();
+      }
+
+      #[derive(Default)]
+      struct TestDelegate {
+          pub check: Cell<bool>,
+          pub addr: Cell<PeerAddress>,
+      }
+
+      impl RawTransportDelegate for TestDelegate {
+          fn handle_message_received(&self, peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
+              self.check.set(true);
+              self.addr.set(peer_address);
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              /* reinit system layer */
+              let sl = system_layer();
+              (*sl).init();
+
+              /* reinit end point manager */
+              END_POINT_MANAGER = TestEndPointManager::default();
+              END_POINT_MANAGER.init(system_layer());
+
+              /* reinit the test transport */
+              TEST_PARAMS.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
+              TEST_TRANS = Test::default();
+              TEST_TRANS.init(TEST_PARAMS.assume_init_mut().clone());
+          }
+      }
+
+      #[test]
+      fn send_successfully() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              let pa = PeerAddress::udp_addr_port_interface(EXPECTED_SEND_ADDR.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              assert_eq!(TEST_TRANS.send_message(pa, msg), chip_no_error!());
+          }
+      }
+
+      #[test]
+      fn send_with_uninit() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              /* rset the transport */
+              TEST_TRANS = Test::default();
+
+              let pa = PeerAddress::udp_addr_port_interface(EXPECTED_SEND_ADDR.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              assert_eq!(TEST_TRANS.send_message(pa, msg), chip_error_incorrect_state!());
+          }
+      }
+
+      #[test]
+      fn send_with_wrong_transport_type() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              let pa = PeerAddress::udp_addr_port_interface(EXPECTED_SEND_ADDR.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default()).set_transport_type(Type::KTcp);
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              assert_eq!(TEST_TRANS.send_message(pa, msg), chip_error_invalid_argument!());
+          }
+      }
+
+      #[test]
+      #[should_panic]
+      fn send_with_wrong_address_ip() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              let pa = PeerAddress::udp_addr_port_interface(IPAddress::ANY.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              TEST_TRANS.send_message(pa, msg);
+          }
+      }
+
+      #[test]
+      #[should_panic]
+      fn send_with_wrong_address_port() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              let pa = PeerAddress::udp_addr_port_interface(EXPECTED_SEND_ADDR.clone(),
+              EXPECTED_SEND_PORT + 1,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              TEST_TRANS.send_message(pa, msg);
+          }
+      }
+
+      #[test]
+      #[should_panic]
+      fn send_with_wrong_data() {
+          set_up();
+          unsafe {
+              /* set up send check stub */
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_send_to(on_send_checked);
+
+              let pa = PeerAddress::udp_addr_port_interface(EXPECTED_SEND_ADDR.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let fake_msg: [u8; 4] = [1; 4];
+
+              let msg = PacketBufferHandle::new_with_data(&fake_msg[0..4],0,8).unwrap();
+
+              TEST_TRANS.send_message(pa, msg);
           }
       }
   }

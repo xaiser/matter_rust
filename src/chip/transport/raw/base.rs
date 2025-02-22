@@ -12,9 +12,9 @@ pub trait RawTransportDelegate {
 pub trait Base<T: RawTransportDelegate> {
     fn set_deletgate(&mut self, delegate: * mut T);
 
-    fn send_message(&mut self, peer_address: &PeerAddress, msg_buf: PacketBufferHandle) -> ChipError;
+    fn send_message(&mut self, peer_address: PeerAddress, msg_buf: PacketBufferHandle) -> ChipError;
 
-    fn can_send_to_peer(&mut self, peer_address: &PeerAddress) -> bool;
+    fn can_send_to_peer(&self, peer_address: &PeerAddress) -> bool;
 
     fn close(&mut self) { }
 

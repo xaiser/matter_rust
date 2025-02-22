@@ -8,7 +8,7 @@ pub trait LastTransportType {
 }
 
 #[repr(u8)]
-#[derive(Clone,Copy)]
+#[derive(Clone,Copy,PartialEq)]
 pub enum Type {
     KUndefined,
     KUdp,
@@ -74,6 +74,10 @@ impl PeerAddress {
 
     pub fn get_port(&self) -> u16 {
         self.m_port
+    }
+
+    pub fn get_interface(&self) -> InterfaceId {
+        self.m_interface.clone()
     }
 
     pub fn set_transport_type(mut self, the_type: Type) -> Self {
