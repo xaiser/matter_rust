@@ -229,7 +229,7 @@ impl<DelegateType> Base<DelegateType> for Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
-    fn set_deletgate(&mut self, delegate: * mut DelegateType)
+    fn set_delegate(&mut self, delegate: * mut DelegateType)
     {
         self.m_delegate = delegate;
     }
@@ -562,5 +562,95 @@ mod test {
               TEST_TRANS.send_message(pa, msg);
           }
       }
-  }
+  } // mod test_transport_send
+  mod test_transport_receive {
+      use super::*;
+      use super::super::*;
+      use std::*;
+      use crate::chip::platform::global::system_layer;
+      use crate::chip::system::system_layer::Layer;
+      use crate::chip::inet::test_end_point::TestEndPointManager;
+      use std::cell::Cell;
+      use std::cell::UnsafeCell;
+      static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+      static mut TEST_TRANS: Test<TestDelegate> = Test {
+          m_delegate: ptr::null_mut(),
+          m_test_end_point: ptr::null_mut(),
+          m_test_end_point_type: IPAddressType::KIPv6,
+          m_state: State::KNotReady
+      };
+
+      const EXPECTED_SEND_PORT: u16 = 87;
+      const EXPECTED_SEND_ADDR: IPAddress = IPAddress {
+          addr: (1, 2, 3, 4)
+      };
+      const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
+
+      #[derive(Default)]
+      struct TestDelegate {
+          pub check: Cell<bool>,
+          pub addr: Cell<PeerAddress>,
+          pub data: UnsafeCell<Vec<u32>>,
+      }
+
+      impl RawTransportDelegate for TestDelegate {
+          fn handle_message_received(&self, peer_address: PeerAddress, buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
+              self.check.set(true);
+              self.addr.set(peer_address);
+
+              unsafe {
+                  let pb = buffer.get_raw();
+                  let data_buffer = (*pb).start();
+
+                  for i in 0..(*pb).data_len() as usize {
+                      (*self.data.get()).push(*data_buffer.add(i) as u32);
+                  }
+              }
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              /* reinit system layer */
+              let sl = system_layer();
+              (*sl).init();
+
+              /* reinit end point manager */
+              END_POINT_MANAGER = TestEndPointManager::default();
+              END_POINT_MANAGER.init(system_layer());
+
+              /* reinit the test transport */
+              TEST_PARAMS.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
+              TEST_TRANS = Test::default();
+              TEST_TRANS.init(TEST_PARAMS.assume_init_mut().clone());
+          }
+      }
+
+      #[test]
+      fn receive_successfully() {
+          set_up();
+          unsafe {
+              let mut d = TestDelegate::default();
+              TEST_TRANS.set_delegate(ptr::addr_of_mut!(d));
+
+              let mut src_pkt_info = IPPacketInfo::default();
+              src_pkt_info.src_port = EXPECTED_SEND_PORT;
+              src_pkt_info.src_address = EXPECTED_SEND_ADDR.clone();
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4], 0, 0).unwrap();
+
+              let ep = TEST_TRANS.m_test_end_point;
+              (*ep).test_get_msg(&src_pkt_info, msg);
+
+              assert_eq!(d.check.get(), true);
+              assert_eq!(d.addr.get().get_address(), EXPECTED_SEND_ADDR.clone());
+              assert_eq!(d.addr.get().get_port(), EXPECTED_SEND_PORT);
+              unsafe {
+                  for i in 0..4 {
+                      assert_eq!((*d.data.get())[i], EXPECTED_SEND_MSG[i].into());
+                  }
+              }
+          }
+      }
+  } // test_transport_receive
 }

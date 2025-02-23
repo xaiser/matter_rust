@@ -23,6 +23,7 @@ impl LastTransportType for Type {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct PeerAddress {
     m_transport_type: Type,
     m_remote_id: NodeId,
