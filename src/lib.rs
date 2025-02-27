@@ -17,4 +17,3 @@ pub mod chip;
 pub use chip::chip_lib::core::chip_error::ChipError;
 pub use chip::chip_lib::core::chip_error;
 pub use chip::chip_lib::support;
-use matter_proc_macro::TupleInit;
