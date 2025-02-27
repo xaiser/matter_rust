@@ -1,9 +1,13 @@
+[workspace]
+members = ["matter_proc_macro"]
+
 [package]
 name = "matter"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+matter_proc_macro = { path = "matter_proc_macro" }
 
 [profile.dev]
 opt-level = 0

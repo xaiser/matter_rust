@@ -1,4 +1,4 @@
-use super::base::{RawTransportDelegate,Base,MessageTransportContext};
+use super::base::{RawTransportDelegate,Base,MessageTransportContext,Init};
 use super::peer_address::{PeerAddress, Type};
 
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
@@ -147,10 +147,78 @@ where
     }
 }
 
+impl<DelegateType> Init for Test<DelegateType>
+where
+    DelegateType: RawTransportDelegate
+{
+    type InitParamType = TestListenParameter<TestEndPointManager>;
+
+    fn init(&mut self, params: Self::InitParamType) -> ChipError {
+        // exit closure
+        let exit = |err: ChipError, end_point: &mut * mut TestEndPoint| -> ChipError {
+            if err.is_success() == false {
+                chip_log_progress!(Inet, "fail to init test transport {}", err.format());
+                if end_point.is_null() == false {
+                    unsafe {
+                        (*(*end_point)).free();
+                    }
+                    *end_point = ptr::null_mut();
+                }
+            }
+            return err;
+        };
+
+        if self.m_state != State::KNotReady {
+            self.close();
+        }
+
+        unsafe {
+            // create a new end point
+            match (*(params.get_end_point_manager())).new_end_point() {
+                Ok(point) => {
+                    self.m_test_end_point = point;
+                },
+                Err(err) => {
+                    return err;
+                }
+            }
+            chip_log_detail!(Inet, "Test:: bind&listen port={}", params.get_listen_port());
+            // bind to address and port
+            let err = (*self.m_test_end_point).bind(params.get_address_type(), &IPAddress::ANY.clone(), params.get_listen_port());
+            success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
+
+            // setup listen callback
+            let err = (*self.m_test_end_point).listen(
+                // OK callback
+                Some(|ep, buffer, pkt_info| {
+                let test: * mut Self = (*ep).m_app_state as _;
+                let peer_address = PeerAddress::udp_addr_port_interface(pkt_info.src_address.clone(), pkt_info.src_port, pkt_info.interface.unwrap_or(InterfaceId::default()));
+
+                (*test).handle_message_received(peer_address, buffer, ptr::null());
+            }),
+            // Fail callback
+            Some(|_ep, err, _pkt_info| {
+                chip_log_error!(Inet, "Failed to recieve Test message {}", err.format());
+            }), self as * mut Self as _);
+            success_or_exit!(err, return exit(err, &mut self.m_test_end_point));
+
+            chip_log_detail!(Inet, "Test::Inet bound to port={}", (*self.m_test_end_point).get_bound_port());
+        }
+
+        self.m_test_end_point_type = params.get_address_type();
+
+        self.m_state = State::KInitialized;
+
+        return chip_no_error!();
+    }
+}
+
+
 impl<DelegateType> Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
+    /*
     pub fn init(&mut self, params: TestListenParameter<TestEndPointManager>) -> ChipError {
         // exit closure
         let exit = |err: ChipError, end_point: &mut * mut TestEndPoint| -> ChipError {
@@ -209,6 +277,7 @@ where
 
         return chip_no_error!();
     }
+    */
 
     fn get_gound_port(&self) -> u16 {
         verify_or_die!(self.m_test_end_point.is_null() == false);
