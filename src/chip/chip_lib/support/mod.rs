@@ -4,3 +4,4 @@ pub mod pool;
 pub mod internal;
 pub mod iterators;
 pub mod logging;
+pub mod chip_fault_injection;

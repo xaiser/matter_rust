@@ -22,6 +22,11 @@ use crate::chip_inet_error;
 use crate::ChipError;
 use core::ptr;
 
+#[cfg(test)]
+use fail::fail_point;
+
+use crate::chip_insert_faulty;
+
 pub type TestEndPointManager = EndPointManagerImplPool<TestEndPoint, {TestEndPoint::NUM_END_POINTS}>;
 
 #[repr(u8)]
@@ -93,6 +98,8 @@ impl TestEndPoint {
 
     pub fn bind(&mut self, addr_type: IPAddressType, addr: &IPAddress, port: u16) -> ChipError
     {
+        chip_insert_faulty!(fail_point!("chip/inet/test_end_point/fail_bind_incorrect_state", |_| chip_error_incorrect_state!()));
+        chip_insert_faulty!(fail_point!("chip/inet/test_end_point/fail_bind_wrong_type", |_| inet_error_wrong_address_type!()));
         self.bind_with_interface(addr_type, addr, port, None)
     }
 

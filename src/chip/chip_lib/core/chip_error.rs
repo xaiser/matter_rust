@@ -237,6 +237,13 @@ macro_rules! chip_error_incorrect_state{
 }
 
 #[macro_export]
+macro_rules! chip_error_no_message_handler{
+    () => {
+        chip_core_error!(0x0c)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_end_point_pool_full{
     () => {
         chip_core_error!(0xc1)

@@ -9,7 +9,10 @@ pub trait RawTransportDelegate {
         ctxt: * const MessageTransportContext);
 }
 
-pub trait Init {
+pub trait Init<DelegateType> 
+where
+    DelegateType: RawTransportDelegate,
+{
     type InitParamType;
 
     fn init(&mut self, param: Self::InitParamType) -> ChipError;
