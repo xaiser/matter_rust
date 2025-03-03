@@ -10,7 +10,6 @@ edition = "2021"
 matter_proc_macro = { path = "matter_proc_macro" }
 
 [dev-dependencies]
-fail = "0.5"  # Check for the latest version
 
 [profile.dev]
 opt-level = 0
