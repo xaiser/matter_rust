@@ -2,12 +2,19 @@
  * A copy of NLFaultInjection library
  */
 use core::ptr;
+use core::ptr::NonNull;
+
+use crate::verify_or_return_value;
 
 /*  The max number of arguments that can be stored in a fault */
 pub const K_MAX_FAULT_ARGS: usize = 8;
 
 pub type Identifier = u32;
-pub type FaultInjectionResult = Result<(), i32>;
+pub type FaultInjectionResult = Result<(), ErrorCode>;
+
+pub enum ErrorCode {
+    KErrInvalid = 1,
+}
 
 /**
  * A fault-injection callback function.
@@ -27,7 +34,7 @@ pub type FaultInjectionResult = Result<(), i32>;
  * @return      true if the fault is to be triggered. false if this callback does not want to
  *              force the fault to be triggered.
  */
-pub type CallbackFn = fn(Identifier, * mut Record, * mut ());
+pub type CallbackFn = fn(Identifier, * mut Record, * mut ()) -> bool;
 
 /**
  * The type of a function that returns a reference to a Manager
@@ -80,9 +87,9 @@ pub struct ManagerTable {
  * The application can store a pointer in the mContext member.
  */
 pub struct Callback {
-    m_call_back_fn: CallbackFn,
-    m_context: * mut (),
-    m_next: * mut Callback,
+    pub m_call_back_fn: CallbackFn,
+    pub m_context: * mut (),
+    pub m_next: * mut Callback,
 }
 
 /**
@@ -121,8 +128,65 @@ pub struct Record {
 mod InterManager {
     pub type LockCbFn = fn(* mut ());
 }
+
+static mut S_GLOBAL_CONTEXT: * mut GlobalContext = ptr::null_mut();
 pub const K_MUTEXT_DO_NOT_TAKE: bool = false;
 pub const K_MUTEXT_TAKE: bool = true;
+
+/**
+ * The callback function that implements the deterministic
+ * injection feature (see FailAtFault).
+ */
+fn deterministc_cb_fn(_id: Identifier, p_record: * mut Record, _context: * mut ()) -> bool {
+    let mut retval = false;
+    unsafe {
+        if let Some(record) = p_record.as_mut() {
+            if record.m_num_calls_to_skip > 0 {
+                record.m_num_calls_to_skip -= 1;
+            } else if record.m_num_calls_to_fail > 0 {
+                record.m_num_calls_to_fail -= 1;
+                retval = true;
+            }
+        }
+    }
+    return retval;
+}
+
+/**
+ * Callback list node for DeterministicCbFn.
+ * This node terminates all callback lists.
+ */
+static mut S_DETERMINSTIC_CB: Callback = Callback { 
+    m_call_back_fn: deterministc_cb_fn,
+    m_context: ptr::null_mut(),
+    m_next: ptr::null_mut(),
+};
+
+/**
+ * The callback function that implements the random
+ * injection feature (see FailRandomlyAtFault).
+ */
+fn random_cb_fn(_id: Identifier, p_record: * mut Record, _context: * mut ()) -> bool {
+    let mut retval = false;
+    unsafe {
+        if let Some(record) = p_record.as_mut() {
+            if record.m_percentage > 0 {
+                /* 
+                 * TODO: implement this
+                 */
+            }
+        }
+    }
+    return retval;
+}
+
+static mut S_RANDOM_CB: Callback = Callback {
+    m_call_back_fn: random_cb_fn,
+    m_context: ptr::null_mut(),
+    m_next: ptr::addr_of_mut!(S_DETERMINSTIC_CB),
+};
+
+static mut S_END_OF_CUSTOM_CALLBACKS: * const Callback = ptr::addr_of!(S_RANDOM_CB);
 
 /**
  * The module that provides a fault-injection API needs to provide an instance of Manager,
@@ -158,7 +222,17 @@ impl Default for Manager {
 }
 
 impl Manager {
-    pub fn init(in_num_faults: usize, in_fault_array: * mut Record, in_manager_name: &'static str, in_fault_names: &'static [&'static str]) -> FaultInjectionResult {
+    pub fn init(&mut self, in_num_faults: usize, in_fault_array: * mut Record, in_manager_name: &'static str, in_fault_names: &'static [&'static str]) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+        verify_or_return_value!(in_num_faults > 0 && in_fault_array.is_null() == false && in_manager_name.is_empty() == false && in_fault_names.is_empty() == false, err, err = Err(ErrorCode::KErrInvalid));
+
+        self.m_name = in_manager_name;
+        self.m_num_faults = in_num_faults;
+        self.m_fault_records = in_fault_array;
+        self.m_fault_names = in_fault_names;
+        self.m_lock = empty_lock;
+        self.m_unlock = empty_unlock;
+        self.m_lock_context = ptr::null_mut();
         Ok(())
     }
 }
