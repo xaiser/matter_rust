@@ -2,7 +2,6 @@
  * A copy of NLFaultInjection library
  */
 use core::ptr;
-use core::ptr::NonNull;
 
 use crate::verify_or_return_value;
 
@@ -97,24 +96,25 @@ pub struct Callback {
  * The module defining the fault-injection API needs to provide an array of Record
  * and pass it to its Manager instance via the Init method.
  */
+#[derive(Copy,Clone)]
 pub struct Record {
-    m_num_calls_to_skip: u16, /* The number of times this fault should not trigger before it starts failing */
+    pub m_num_calls_to_skip: u16, /* The number of times this fault should not trigger before it starts failing */
 
-    m_num_calls_to_fail: u16,  /*< The number of times this fault should fail, before disabling itself */
+    pub m_num_calls_to_fail: u16,  /*< The number of times this fault should fail, before disabling itself */
 
-    m_percentage: u8,        /*< A number between 0 and 100 that indicates the percentage of times the fault should be triggered */
+    pub m_percentage: u8,        /*< A number between 0 and 100 that indicates the percentage of times the fault should be triggered */
 
-    m_reboot: u8,            /* This fault should reboot the system */
+    pub m_reboot: u8,            /* This fault should reboot the system */
 
-    m_length_of_arguments: u8, /* The length of the array pointed to by mArguments */
+    pub m_length_of_arguments: u8, /* The length of the array pointed to by mArguments */
 
-    m_num_arguments: u8,      /* The number of items currently stored in the array pointed to by mArguments */
+    pub m_num_arguments: u8,      /* The number of items currently stored in the array pointed to by mArguments */
 
-    m_callback_list: * mut Callback,      /* A list of callbacks */
+    pub m_callback_list: * mut Callback,      /* A list of callbacks */
 
-    m_num_times_checked: u32,   /* The number of times the fault location was executed */
+    pub m_num_times_checked: u32,   /* The number of times the fault location was executed */
 
-    m_arguments: * mut i32,         /* A pointer to an array of integers to store extra arguments; this array is meant to
+    pub m_arguments: * mut i32,         /* A pointer to an array of integers to store extra arguments; this array is meant to
                                        be populated by either of the following:
                                        - the ParseFaultInjectionStr, so the values are available at the fault injection site
                                          and when the fault is injected.
@@ -123,6 +123,22 @@ pub struct Record {
                                          in subsequent test runs as arguments to the injected code.
                                          For example, the values can be exact arguments to be passed in, or ranges to be
                                          iterated on (like the length of a byte array to be fuzzed). */
+}
+
+impl Record {
+    pub const fn const_default() -> Self {
+        Record {
+            m_num_calls_to_skip: 0,
+            m_num_calls_to_fail: 0,
+            m_percentage: 0,
+            m_reboot: 0,
+            m_length_of_arguments: 0,
+            m_num_arguments: 0,
+            m_callback_list: ptr::null_mut(),
+            m_num_times_checked: 0,
+            m_arguments: ptr::null_mut(),
+        }
+    }
 }
 
 mod InterManager {
@@ -167,7 +183,7 @@ static mut S_DETERMINSTIC_CB: Callback = Callback {
  * injection feature (see FailRandomlyAtFault).
  */
 fn random_cb_fn(_id: Identifier, p_record: * mut Record, _context: * mut ()) -> bool {
-    let mut retval = false;
+    let retval = false;
     unsafe {
         if let Some(record) = p_record.as_mut() {
             if record.m_percentage > 0 {
@@ -194,7 +210,7 @@ static mut S_END_OF_CUSTOM_CALLBACKS: * const Callback = ptr::addr_of!(S_RANDOM_
  */
 pub struct Manager {
     m_num_faults: usize,
-    m_fault_records: * mut Record,
+    m_fault_records: &'static mut [Record],
     m_name: &'static str,
     m_fault_names: &'static [&'static str],
     m_lock: InterManager::LockCbFn,
@@ -202,29 +218,60 @@ pub struct Manager {
     m_lock_context: * mut (),
 }
 
-fn empty_lock(context: * mut ()) {}
-fn empty_unlock(context: * mut ()) {}
+fn empty_lock(_context: * mut ()) {}
+fn empty_unlock(_context: * mut ()) {}
 
 impl Default for Manager {
     fn default() -> Self {
         static EMPTY_NAME: &str = "";
-        static EMPTY_FAULT_NAMES: [&str; 1] = [""];
-        Manager {
-            m_num_faults: 0,
-            m_fault_records: ptr::null_mut(),
-            m_name: &EMPTY_NAME,
-            m_fault_names: &EMPTY_FAULT_NAMES,
-            m_lock: empty_lock,
-            m_unlock: empty_unlock,
-            m_lock_context: ptr::null_mut(),
+        static EMPTY_FAULT_NAMES: [&str; 0] = [];
+        static mut EMPTY_RECORD: [Record; 0] = [];
+        unsafe {
+            Manager {
+                m_num_faults: 0,
+                m_fault_records: &mut EMPTY_RECORD,
+                m_name: &EMPTY_NAME,
+                m_fault_names: &EMPTY_FAULT_NAMES,
+                m_lock: empty_lock,
+                m_unlock: empty_unlock,
+                m_lock_context: ptr::null_mut(),
+            }
         }
     }
 }
 
 impl Manager {
-    pub fn init(&mut self, in_num_faults: usize, in_fault_array: * mut Record, in_manager_name: &'static str, in_fault_names: &'static [&'static str]) -> FaultInjectionResult {
+    pub const fn const_default() -> Self {
+        static EMPTY_NAME: &str = "";
+        static EMPTY_FAULT_NAMES: [&str; 0] = [];
+        static mut EMPTY_RECORD: [Record; 0] = [];
+        unsafe {
+            Manager {
+                m_num_faults: 0,
+                m_fault_records: &mut EMPTY_RECORD,
+                m_name: &EMPTY_NAME,
+                m_fault_names: &EMPTY_FAULT_NAMES,
+                m_lock: empty_lock,
+                m_unlock: empty_unlock,
+                m_lock_context: ptr::null_mut(),
+            }
+        }
+    }
+    /**
+     * Initialize the Manager instance.
+     *
+     * @param[in]   inNumFaults     The size of inFaultArray, equal to the number of fault IDs.
+     * @param[in]   inFaultArray    A pointer to an array of Record, in which this object
+     *                              will store the configuration of each fault.
+     * @param[in]   inManagerName   A pointer to a C string containing the name of the Manager.
+     * @param[in]   inFaultNames    A pointer to an array of inNumFaults C strings that describe
+     *                              each fault ID.
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
+    pub fn init(&mut self, in_num_faults: usize, in_fault_array: &'static mut [Record], in_manager_name: &'static str, in_fault_names: &'static [&'static str]) -> FaultInjectionResult {
         let mut err: FaultInjectionResult = Ok(());
-        verify_or_return_value!(in_num_faults > 0 && in_fault_array.is_null() == false && in_manager_name.is_empty() == false && in_fault_names.is_empty() == false, err, err = Err(ErrorCode::KErrInvalid));
+        verify_or_return_value!(in_num_faults > 0 && in_fault_array.is_empty() == false && in_manager_name.is_empty() == false && in_fault_names.is_empty() == false, err, err = Err(ErrorCode::KErrInvalid));
 
         self.m_name = in_manager_name;
         self.m_num_faults = in_num_faults;
@@ -233,7 +280,36 @@ impl Manager {
         self.m_lock = empty_lock;
         self.m_unlock = empty_unlock;
         self.m_lock_context = ptr::null_mut();
-        Ok(())
+
+        for i in 0..self.m_num_faults {
+            unsafe{
+                self.m_fault_records[i].m_callback_list = &mut S_RANDOM_CB;
+            }
+        }
+
+        return err;
+    }
+
+    fn lock(&mut self) {
+    }
+
+    fn unlock(&mut self) {
+    }
+
+    pub fn fail_randomly_at_fault(&mut self, id: Identifier, percentage: u8) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+
+        verify_or_return_value!(((id as usize) < self.m_num_faults) && (percentage <= 100), err, err = Err(ErrorCode::KErrInvalid));
+
+        self.lock();
+
+        self.m_fault_records[id as usize].m_num_calls_to_skip = 0;
+        self.m_fault_records[id as usize].m_num_calls_to_fail = 0;
+        self.m_fault_records[id as usize].m_percentage = percentage;
+
+        self.unlock();
+
+        err
     }
 }
 
@@ -242,14 +318,104 @@ mod test {
   use super::*;
   use std::*;
 
-  fn set_up() {
+  mod init {
+      use super::super::*;
+      use std::*;
+
+      const NUM_FAULTS: usize = 3;
+      static mut FAULT_RECORDS: [Record; NUM_FAULTS] = [ Record::const_default(); NUM_FAULTS];
+      static MANAGER_NAME: &str = "test_manager";
+      static mut FAULT_NAMES: [&str; NUM_FAULTS] = [ "f1", "f2", "f3" ];
+
+
+      fn set_up() {
+      }
+
+      #[test]
+      fn init_successfully() {
+          set_up();
+          let mut m = Manager::default();
+          unsafe {
+              assert_eq!(true, m.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES).is_ok());
+          }
+      }
+
+      #[test]
+      fn init_with_0_num_fault() {
+          set_up();
+          let mut m = Manager::default();
+          unsafe {
+              assert_eq!(true, m.init(0, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES).is_err());
+          }
+      }
+
+      #[test]
+      fn init_with_0_record() {
+          set_up();
+          let mut m = Manager::default();
+          static mut EMPTY_RECORDS: [Record; 0] = [];
+          unsafe {
+              assert_eq!(true, m.init(NUM_FAULTS, &mut EMPTY_RECORDS, &MANAGER_NAME, &FAULT_NAMES).is_err());
+          }
+      }
+
+      #[test]
+      fn init_empty_manager_name() {
+          set_up();
+          let mut m = Manager::default();
+          unsafe {
+              assert_eq!(true, m.init(NUM_FAULTS, &mut FAULT_RECORDS, "", &FAULT_NAMES).is_err());
+          }
+      }
+
+      #[test]
+      fn init_empty_fault_names() {
+          set_up();
+          let mut m = Manager::default();
+          unsafe {
+              assert_eq!(true, m.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &[]).is_err());
+          }
+      }
   }
 
-  #[test]
-  fn init() {
-      set_up();
-      let m = Manager::default();
+  mod failt_at {
+      use super::super::*;
+      use std::*;
 
-      assert_eq!(0, m.m_num_faults);
+      const NUM_FAULTS: usize = 3;
+      static mut FAULT_RECORDS: [Record; NUM_FAULTS] = [Record::const_default(); NUM_FAULTS];
+      static MANAGER_NAME: &str = "test_manager";
+      static mut FAULT_NAMES: [&str; NUM_FAULTS] = [ "f1", "f2", "f3" ];
+      static mut FAULT_MANAGER: Manager = Manager::const_default();
+
+      fn set_up() {
+          unsafe {
+              let _ = FAULT_MANAGER.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES);
+          }
+      }
+
+      #[test]
+      fn fail_at_randomly_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_randomly_at_fault(0, 0).is_ok());
+          }
+      }
+
+      #[test]
+      fn fail_at_randomly_with_id_over_range() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_randomly_at_fault(NUM_FAULTS.try_into().unwrap(), 0).is_err());
+          }
+      }
+
+      #[test]
+      fn fail_at_randomly_with_101_percentage() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_randomly_at_fault(0, 101).is_err());
+          }
+      }
   }
 }
