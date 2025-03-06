@@ -104,7 +104,7 @@ pub struct Record {
 
     pub m_percentage: u8,        /*< A number between 0 and 100 that indicates the percentage of times the fault should be triggered */
 
-    pub m_reboot: u8,            /* This fault should reboot the system */
+    pub m_reboot: bool,            /* This fault should reboot the system */
 
     pub m_length_of_arguments: u8, /* The length of the array pointed to by mArguments */
 
@@ -114,7 +114,7 @@ pub struct Record {
 
     pub m_num_times_checked: u32,   /* The number of times the fault location was executed */
 
-    pub m_arguments: * mut i32,         /* A pointer to an array of integers to store extra arguments; this array is meant to
+    pub m_arguments: &'static [i32],         /* A pointer to an array of integers to store extra arguments; this array is meant to
                                        be populated by either of the following:
                                        - the ParseFaultInjectionStr, so the values are available at the fault injection site
                                          and when the fault is injected.
@@ -131,12 +131,12 @@ impl Record {
             m_num_calls_to_skip: 0,
             m_num_calls_to_fail: 0,
             m_percentage: 0,
-            m_reboot: 0,
+            m_reboot: false,
             m_length_of_arguments: 0,
             m_num_arguments: 0,
             m_callback_list: ptr::null_mut(),
             m_num_times_checked: 0,
-            m_arguments: ptr::null_mut(),
+            m_arguments: &[]
         }
     }
 }
@@ -296,6 +296,15 @@ impl Manager {
     fn unlock(&mut self) {
     }
 
+    /**
+     * Configure a fault to be triggered randomly, with a given probability defined as a percentage
+     * This is meant to be used on live systems to generate a build that will encounter random failures.
+     *
+     * @param[in]   inId            The fault ID
+     * @param[in]   inPercentage    An integer between 0 and 100. 100 means "always". 0 means "never".
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
     pub fn fail_randomly_at_fault(&mut self, id: Identifier, percentage: u8) -> FaultInjectionResult {
         let mut err: FaultInjectionResult = Ok(());
 
@@ -310,6 +319,155 @@ impl Manager {
         self.unlock();
 
         err
+    }
+
+
+    /**
+     * Configure a fault to be triggered deterministically.
+     *
+     * @param[in]   inId                The fault ID
+     * @param[in]   inNumCallsToSkip    The number of times this fault is to be skipped before it
+     *                                  starts to fail.
+     * @param[in]   inNumCallsToFail    The number of times the fault should be triggered.
+     * @param[in]   inTakeMutex         By default this method takes the Manager's mutex.
+     *                                  If inTakeMutex is set to kMutexDoNotTake, the mutex is not taken.
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
+    pub fn fail_at_fault_with_lock(&mut self, id: Identifier, num_calls_to_skip: u32, num_calls_to_fail: u32, take_mutex: bool) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+
+        verify_or_return_value!(((id as usize) < self.m_num_faults) && (num_calls_to_skip <= u16::MAX.into()) && (num_calls_to_fail <= u16::MAX.into()), err, err = Err(ErrorCode::KErrInvalid));
+
+        if take_mutex {
+            self.lock();
+        }
+
+        self.m_fault_records[id as usize].m_num_calls_to_skip = num_calls_to_skip as u16;
+        self.m_fault_records[id as usize].m_num_calls_to_fail = num_calls_to_fail as u16;
+        self.m_fault_records[id as usize].m_percentage = 0;
+
+        if take_mutex {
+            self.unlock();
+        }
+
+        err
+    }
+
+    pub fn fail_at_fault(&mut self, id: Identifier, num_calls_to_skip: u32, num_calls_to_fail: u32) -> FaultInjectionResult {
+        return self.fail_at_fault_with_lock(id, num_calls_to_skip, num_calls_to_fail, K_MUTEXT_TAKE);
+    }
+
+    /**
+     * Configure a fault to reboot the system when triggered.
+     * If the application has installed a RebootCallbackFn, it will
+     * be invoked when fault inId is triggered.
+     * If the application has not installed the callback, the system
+     * will crash.
+     *
+     * @param[in]   inId                The fault ID
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
+    pub fn reboot_at_fault(&mut self, id: Identifier) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+
+        verify_or_return_value!((id as usize) < self.m_num_faults, err, err = Err(ErrorCode::KErrInvalid));
+
+        self.lock();
+
+        self.m_fault_records[id as usize].m_reboot = true;
+
+        self.unlock();
+
+        err
+    }
+
+    /**
+     * Store a set of arguments for a given fault ID.
+     * The array of arguments is made available to the code injected with
+     * the nlFAULT_INJECT macro.
+     * For this to work for a given fault ID, the Manager must allocate memory to
+     * store the arguments and configure the Record's mLengthOfArguments and
+     * mArguments members accordingly.
+     *
+     * @param[in]   inId                The fault ID
+     * @param[in]   inArgs              The slice to the array of integers to be stored in the fault
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
+    pub fn store_args_at_fault(&mut self, id: Identifier, args: &'static [i32]) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+        verify_or_return_value!(((id as usize) < self.m_num_faults) && args.len() <= u8::MAX.into(), err, err = Err(ErrorCode::KErrInvalid));
+
+        self.lock();
+
+        self.m_fault_records[id as usize].m_arguments = args;
+
+        self.unlock();
+
+        err
+    }
+
+    /**
+     * Detaches a callback from a fault.
+     *
+     * @param[in]   inId        The fault
+     * @param[in]   inCallback  The callback node to be removed.
+     * @param[in]   inTakeMutex         By default this method takes the Manager's mutex.
+     *                                  If inTakeMutex is set to kMutexDoNotTake, the mutex is not taken.
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
+    pub fn remove_callback_at_fault_with_lock(&mut self, id: Identifier, callback: * mut Callback, take_mutex: bool) -> FaultInjectionResult {
+        let mut err: FaultInjectionResult = Ok(());
+        verify_or_return_value!(((id as usize) < self.m_num_faults) && callback.is_null() == false, err, err = Err(ErrorCode::KErrInvalid));
+
+        if take_mutex == true {
+            self.lock();
+        }
+
+        let mut cb: &mut * mut Callback = &mut self.m_fault_records[id as usize].m_callback_list;
+
+        unsafe {
+            while (*cb).is_null() == false {
+                if (*cb) == callback {
+                    (*cb) = (*(*cb)).m_next;
+                    break;
+                }
+                cb = &mut (*(*cb)).m_next;
+            }
+        }
+
+        if take_mutex == true {
+            self.unlock();
+        }
+
+        err
+    }
+
+    pub fn remove_callback_at_fault(&mut self, id: Identifier, callback: * mut Callback) -> FaultInjectionResult {
+        return self.remove_callback_at_fault_with_lock(id, callback, K_MUTEXT_TAKE);
+    }
+
+    pub fn insert_callback_at_fault(&mut self, id: Identifier, callback: * mut Callback) -> FaultInjectionResult {
+
+        self.remove_callback_at_fault(id, callback)?;
+
+        self.lock();
+
+        unsafe {
+            (*callback).m_next = self.m_fault_records[id as usize].m_callback_list;
+        }
+        self.m_fault_records[id as usize].m_callback_list = callback;
+
+        self.unlock();
+
+        Ok(())
+    }
+
+    pub fn get_fault_records(&self) -> &[Record] {
+        self.m_fault_records
     }
 }
 
@@ -417,5 +575,179 @@ mod test {
               assert_eq!(true, FAULT_MANAGER.fail_randomly_at_fault(0, 101).is_err());
           }
       }
+
+      #[test]
+      fn fail_at_fault_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_at_fault_with_lock(0, 0, 0, false).is_ok());
+          }
+      }
+
+      #[test]
+      fn fail_at_fault_with_id_over_range() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_at_fault_with_lock(NUM_FAULTS.try_into().unwrap(), 0, 0, false).is_err());
+          }
+      }
+
+      #[test]
+      fn fail_at_fault_but_num_skip_too_big() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_at_fault_with_lock(0, u16::MAX as u32 + 1, 0, false).is_err());
+          }
+      }
+
+      #[test]
+      fn fail_at_fault_but_num_check_too_big() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.fail_at_fault_with_lock(0, 0, u16::MAX as u32 + 1, false).is_err());
+          }
+      }
+
+      #[test]
+      fn reboot_at_fault_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.reboot_at_fault(0).is_ok());
+          }
+      }
+
+      #[test]
+      fn reboot_at_fault_with_id_over_range() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.reboot_at_fault(NUM_FAULTS.try_into().unwrap()).is_err());
+          }
+      }
+
+      #[test]
+      fn store_args_at_fault_successfully() {
+          set_up();
+          unsafe {
+              static DATA: [i32; 3] = [1,2,3];
+              assert_eq!(true, FAULT_MANAGER.store_args_at_fault(0, &DATA[0..2]).is_ok());
+          }
+      }
+
+      #[test]
+      fn store_args_at_fault_with_id_over_range() {
+          set_up();
+          unsafe {
+              static DATA: [i32; 3] = [1,2,3];
+              assert_eq!(true, FAULT_MANAGER.store_args_at_fault(NUM_FAULTS.try_into().unwrap(), &DATA[0..2]).is_err());
+          }
+      }
   }
+
+  mod insert_remove_callbacks {
+      use super::super::*;
+      use std::*;
+
+      const NUM_FAULTS: usize = 3;
+      static mut FAULT_RECORDS: [Record; NUM_FAULTS] = [Record::const_default(); NUM_FAULTS];
+      static MANAGER_NAME: &str = "test_manager";
+      static mut FAULT_NAMES: [&str; NUM_FAULTS] = [ "f1", "f2", "f3" ];
+      static mut FAULT_MANAGER: Manager = Manager::const_default();
+      static mut CALLBACK_STUB_1: Callback = Callback {
+          m_call_back_fn: stub_call,
+          m_context: ptr::null_mut(),
+          m_next: ptr::null_mut(),
+      };
+      static mut CALLBACK_STUB_2: Callback = Callback {
+          m_call_back_fn: stub_call,
+          m_context: ptr::null_mut(),
+          m_next: ptr::null_mut(),
+      };
+
+      fn stub_call(_id: Identifier, _record: * mut Record, _context: * mut ()) -> bool {
+          true
+      }
+
+      fn set_up() {
+          unsafe {
+              let _ = FAULT_MANAGER.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES);
+              CALLBACK_STUB_1 = Callback {
+                  m_call_back_fn: stub_call,
+                  m_context: ptr::null_mut(),
+                  m_next: ptr::null_mut(),
+              };
+              CALLBACK_STUB_2 = Callback {
+                  m_call_back_fn: stub_call,
+                  m_context: ptr::null_mut(),
+                  m_next: ptr::null_mut(),
+              };
+          }
+      }
+
+      #[test]
+      fn insert_one_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_1), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+
+      #[test]
+      fn insert_with_id_overrange() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(NUM_FAULTS.try_into().unwrap(), ptr::addr_of_mut!(CALLBACK_STUB_1)).is_err());
+          }
+      }
+
+      #[test]
+      fn insert_with_empty_callback() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::null_mut()).is_err());
+          }
+      }
+
+      #[test]
+      fn insert_two_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_2)).is_ok());
+              assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_2), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+
+      #[test]
+      fn insert_same_one_twice_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_1), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+
+      #[test]
+      fn insert_one_remove_one_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.remove_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(ptr::addr_of_mut!(S_RANDOM_CB), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+
+      #[test]
+      fn insert_one_remove_one_insert_one_successfully() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.remove_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
+              assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_1), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+  }
+
 }
