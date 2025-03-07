@@ -624,6 +624,13 @@ impl Manager {
         self.unlock();
     }
 
+    /**
+     * Reset the configuration of a fault Record
+     *
+     * @param[in] inId        The fault ID
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
     pub fn reset_configurations(&mut self, id: Identifier) -> FaultInjectionResult {
         verify_or_return_error!((id as usize) < self.m_num_faults, Err(ErrorCode::KErrInvalid));
 
@@ -651,10 +658,26 @@ impl Manager {
         Ok(())
     }
 
+    pub fn reset_configurations_all(&mut self) -> FaultInjectionResult {
+        for id in 0..self.m_fault_records.len() {
+            self.reset_configurations(id as Identifier)?;
+        }
+        return Ok(());
+    }
+
     fn die() {
         panic!();
     }
 
+}
+
+#[macro_export]
+macro_rules! fault_inject {
+    ($manager:expr, $id:expr $(, $action:stmt)*) => {
+        if ($manager.check_fault($id)) {
+            $($action)*
+        }
+    };
 }
 
 #[cfg(test)]
