@@ -4,6 +4,7 @@
 use core::ptr;
 
 use crate::verify_or_return_value;
+use crate::verify_or_return_error;
 
 /*  The max number of arguments that can be stored in a fault */
 pub const K_MAX_FAULT_ARGS: usize = 8;
@@ -59,8 +60,8 @@ pub type PostInjectionCallbackFn = fn(* mut Manager, Identifier, * mut Record);
  * A table of callbacks used by all managers.
  */
 pub struct GlobalCallbackTable {
-    m_reboot_cb: RebootCallbackFn, /* See RebootCallbackFn */
-    m_post_injection_cb: PostInjectionCallbackFn, /* See PostInjectionCallbackFn */
+    pub m_reboot_cb: Option<RebootCallbackFn>, /* See RebootCallbackFn */
+    pub m_post_injection_cb: Option<PostInjectionCallbackFn>, /* See PostInjectionCallbackFn */
 }
 
 /**
@@ -68,7 +69,7 @@ pub struct GlobalCallbackTable {
  * by all Managers.
  */
 pub struct GlobalContext {
-    m_cb_table: GlobalCallbackTable,
+    pub m_cb_table: GlobalCallbackTable,
 }
 
 /**
@@ -203,6 +204,19 @@ static mut S_RANDOM_CB: Callback = Callback {
 };
 
 static mut S_END_OF_CUSTOM_CALLBACKS: * const Callback = ptr::addr_of!(S_RANDOM_CB);
+
+/**
+ * Configure the instance of GlobalContext to use.
+ * On systems in which faults are configured and injected from different threads,
+ * this function should be called before threads are started.
+ *
+ * @param[in] inGlobalContext   Pointer to the GlobalContext provided by the application
+ */
+pub fn set_global_context(context: * mut GlobalContext) {
+    unsafe {
+        S_GLOBAL_CONTEXT = context;
+    }
+}
 
 /**
  * The module that provides a fault-injection API needs to provide an instance of Manager,
@@ -450,6 +464,17 @@ impl Manager {
         return self.remove_callback_at_fault_with_lock(id, callback, K_MUTEXT_TAKE);
     }
 
+
+    /**
+     * Attach a callback to a fault ID.
+     * Calling this twice does not attach the callback twice.
+     *
+     * @param[in]   inId        The fault ID
+     * @param[in]   inCallback  The callback node to be attached to the fault
+     *
+     *
+     * @return      KErrInvalid if the inputs are not valid.
+     */
     pub fn insert_callback_at_fault(&mut self, id: Identifier, callback: * mut Callback) -> FaultInjectionResult {
 
         self.remove_callback_at_fault(id, callback)?;
@@ -469,6 +494,167 @@ impl Manager {
     pub fn get_fault_records(&self) -> &[Record] {
         self.m_fault_records
     }
+
+    /**
+     * When the program traverses the location at which a fault should be injected, this method is invoked
+     * on the manager to query the configuration of the fault ID.
+     *
+     * A fault can be triggered randomly, deterministically or on a call-by-call basis by a callback.
+     * All three types of trigger can be installed at the same time, and they all get a chance of
+     * injecting the fault.
+     *
+     * @param[in] inId                The fault ID
+     * @param[in] inTakeMutex         By default this method takes the Manager's mutex.
+     *                                If inTakeMutex is set to kMutexDoNotTake, the mutex is not taken.
+     *
+     * @return    true if the fault should be injected; false otherwise.
+     */
+    pub fn check_fault_with_lock(&mut self, id: Identifier, take_mutex: bool) -> bool {
+
+        verify_or_return_error!((id as usize) < self.m_num_faults, false);
+
+        if true == take_mutex {
+            self.lock();
+        }
+
+        let record_index = id as usize;
+
+        let mut cb = self.m_fault_records[record_index].m_callback_list;
+        let mut next: * mut Callback;
+        let mut ret_val = false;
+
+        while cb.is_null() == false {
+            unsafe {
+                next = (*cb).m_next;
+                if true == ((*cb).m_call_back_fn)(id, ptr::addr_of_mut!(self.m_fault_records[record_index]), (*cb).m_context) {
+                    ret_val = true;
+                }
+                cb = next;
+            }
+        }
+        let reboot = self.m_fault_records[record_index].m_reboot;
+
+        unsafe {
+            if ret_val == true && S_GLOBAL_CONTEXT.is_null() == false {
+                if let Some(post_injection_cb) = (*S_GLOBAL_CONTEXT).m_cb_table.m_post_injection_cb {
+                    post_injection_cb(self as * const Self as _, id, ptr::addr_of_mut!(self.m_fault_records[record_index]));
+                }
+            }
+
+            if ret_val == true && reboot == true {
+                if S_GLOBAL_CONTEXT.is_null() == false {
+                    if let Some(reboot_cb) = (*S_GLOBAL_CONTEXT).m_cb_table.m_reboot_cb {
+                        reboot_cb();
+                    } else {
+                        Self::die();
+                    }
+                }
+                else {
+                    Self::die();
+                }
+            }
+        }
+
+        self.m_fault_records[record_index].m_num_times_checked += 1;
+
+        if take_mutex == true {
+            self.unlock();
+        }
+
+        return ret_val;
+    }
+
+    pub fn check_fault(&mut self, id: Identifier) -> bool {
+        return self.check_fault_with_lock(id, K_MUTEXT_TAKE);
+    }
+
+    /**
+     * When the program traverses the location at which a fault should be injected, this method is invoked
+     * on the manager to query the configuration of the fault ID.
+     *
+     * This version of the method retrieves the arguments stored in the Record.
+     *
+     * A fault can be triggered randomly, deterministically or on a call-by-call basis by a callback.
+     * All three types of trigger can be installed at the same time, and they all get a chance of
+     * injecting the fault.
+     *
+     * @param[in] inId            The fault ID
+     * @param[in] inTakeMutex     By default this method takes the Manager's mutex.
+     *                            If inTakeMutex is set to kMutexDoNotTake, the mutex is not taken.
+     *
+     * @return    true if the fault should be injected; false otherwise. With the arguments
+     *            configured for the faultId.
+     */
+    pub fn check_fault_with_out_args_with_lock(&mut self, id: Identifier, take_mutex: bool) -> (&[i32], bool) {
+        if true == take_mutex {
+            self.lock();
+        }
+
+        let ret_val = self.check_fault(id);
+        let mut out_args: &[i32] = &[];
+        if true == ret_val {
+            out_args = self.m_fault_records[id as usize].m_arguments;
+        }
+
+        if true == take_mutex {
+            self.unlock();
+        }
+
+        return (out_args, ret_val);
+    }
+
+    pub fn check_fault_with_out_args(&mut self, id: Identifier) -> (&[i32], bool) {
+        return self.check_fault_with_out_args_with_lock(id, K_MUTEXT_TAKE);
+    }
+
+    /**
+     * Reset the counters in the fault Records
+     * Note that calling this method does not impact the current configuration
+     * in any way (including the number of times a fault is to be skipped
+     * before it should fail).
+     */
+    pub fn reset_fault_counters(&mut self) {
+        self.lock();
+
+        self.m_fault_records.iter_mut().for_each(|record| {
+            record.m_num_times_checked = 0;
+        }
+        );
+        
+        self.unlock();
+    }
+
+    pub fn reset_configurations(&mut self, id: Identifier) -> FaultInjectionResult {
+        verify_or_return_error!((id as usize) < self.m_num_faults, Err(ErrorCode::KErrInvalid));
+
+        self.lock();
+
+        let record_index = id as usize;
+
+        let mut cb = self.m_fault_records[record_index].m_callback_list;
+        unsafe {
+            while cb.is_null() == false && (cb as * const Callback) != S_END_OF_CUSTOM_CALLBACKS {
+                let _ = self.remove_callback_at_fault_with_lock(id, cb, K_MUTEXT_DO_NOT_TAKE);
+                cb = self.m_fault_records[record_index].m_callback_list;
+            }
+        }
+
+        let record: &mut Record = &mut self.m_fault_records[record_index];
+        record.m_num_calls_to_skip = 0;
+        record.m_num_calls_to_fail = 0;
+        record.m_percentage = 0;
+        record.m_reboot = false;
+        record.m_arguments = &[];
+
+        self.unlock();
+
+        Ok(())
+    }
+
+    fn die() {
+        panic!();
+    }
+
 }
 
 #[cfg(test)]
@@ -548,6 +734,9 @@ mod test {
 
       fn set_up() {
           unsafe {
+              for i in 0.. NUM_FAULTS {
+                  FAULT_RECORDS[i] = Record::const_default();
+              }
               let _ = FAULT_MANAGER.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES);
           }
       }
@@ -669,6 +858,9 @@ mod test {
 
       fn set_up() {
           unsafe {
+              for i in 0.. NUM_FAULTS {
+                  FAULT_RECORDS[i] = Record::const_default();
+              }
               let _ = FAULT_MANAGER.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES);
               CALLBACK_STUB_1 = Callback {
                   m_call_back_fn: stub_call,
@@ -746,6 +938,274 @@ mod test {
               assert_eq!(true, FAULT_MANAGER.remove_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
               assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_1)).is_ok());
               assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_1), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+  }
+
+  mod check_fault {
+      use super::super::*;
+      use std::*;
+
+      const NUM_FAULTS: usize = 3;
+      static mut FAULT_RECORDS: [Record; NUM_FAULTS] = [Record::const_default(); NUM_FAULTS];
+      static MANAGER_NAME: &str = "test_manager";
+      static mut FAULT_NAMES: [&str; NUM_FAULTS] = [ "f1", "f2", "f3" ];
+      static mut FAULT_MANAGER: Manager = Manager::const_default();
+      static mut CALLBACK_STUB_TRUE: Callback = Callback {
+          m_call_back_fn: stub_call_true,
+          m_context: ptr::null_mut(),
+          m_next: ptr::null_mut(),
+      };
+      static mut CALLBACK_STUB_FALSE: Callback = Callback {
+          m_call_back_fn: stub_call_false,
+          m_context: ptr::null_mut(),
+          m_next: ptr::null_mut(),
+      };
+      static mut GLOBAL_CONTEXT_CHECK: GlobalContext = GlobalContext {
+          m_cb_table: GlobalCallbackTable {
+              m_reboot_cb: Some(reboot_check),
+              m_post_injection_cb: Some(post_injection_check),
+          }
+      };
+      static mut POST_INJECT_CHECK: bool = false;
+      static mut IS_REBOOT: bool = false;
+
+      fn stub_call_true(_id: Identifier, _record: * mut Record, _context: * mut ()) -> bool {
+          true
+      }
+
+      fn stub_call_false(_id: Identifier, _record: * mut Record, _context: * mut ()) -> bool {
+          false
+      }
+
+      fn reboot_check() {
+          unsafe {
+              IS_REBOOT = true;
+          }
+      }
+
+      fn post_injection_check(_manager: * mut Manager, _id: Identifier, _record: * mut Record ) {
+          unsafe {
+              POST_INJECT_CHECK = true;
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              for i in 0.. NUM_FAULTS {
+                  FAULT_RECORDS[i] = Record::const_default();
+              }
+              let _ = FAULT_MANAGER.init(NUM_FAULTS, &mut FAULT_RECORDS, &MANAGER_NAME, &FAULT_NAMES);
+              CALLBACK_STUB_TRUE = Callback {
+                  m_call_back_fn: stub_call_true,
+                  m_context: ptr::null_mut(),
+                  m_next: ptr::null_mut(),
+              };
+              CALLBACK_STUB_FALSE = Callback {
+                  m_call_back_fn: stub_call_false,
+                  m_context: ptr::null_mut(),
+                  m_next: ptr::null_mut(),
+              };
+              POST_INJECT_CHECK = false;
+              IS_REBOOT = false;
+              set_global_context(ptr::addr_of_mut!(GLOBAL_CONTEXT_CHECK));
+          }
+      }
+
+      #[test]
+      fn check_true() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+              assert_eq!(true, POST_INJECT_CHECK);
+          }
+      }
+
+      #[test]
+      fn check_with_id_overrange() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(false, FAULT_MANAGER.check_fault(NUM_FAULTS.try_into().unwrap()));
+          }
+      }
+
+      #[test]
+      fn check_no_callback() {
+          set_up();
+          unsafe {
+              assert_eq!(false, FAULT_MANAGER.check_fault(0));
+          }
+      }
+
+      #[test]
+      fn check_with_false_callback() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_FALSE)).is_ok());
+              assert_eq!(false, FAULT_MANAGER.check_fault(0));
+              assert_eq!(false, POST_INJECT_CHECK);
+          }
+      }
+
+      #[test]
+      fn check_with_2_callbacks() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_FALSE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+          }
+      }
+
+      #[test]
+      fn check_true_without_global_context() {
+          set_up();
+          set_global_context(ptr::null_mut());
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+              assert_eq!(false, POST_INJECT_CHECK);
+          }
+      }
+
+      #[test]
+      fn check_true_without_post_injection_cb() {
+          set_up();
+          static mut GLOBAL_CONTEXT_EMPTY: GlobalContext = GlobalContext {
+              m_cb_table: GlobalCallbackTable {
+                  m_reboot_cb: Some(reboot_check),
+                  m_post_injection_cb: None,
+              }
+          };
+          unsafe {
+              set_global_context(ptr::addr_of_mut!(GLOBAL_CONTEXT_EMPTY));
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+              assert_eq!(false, POST_INJECT_CHECK);
+          }
+      }
+
+      #[test]
+      fn check_true_with_reboot() {
+          set_up();
+          unsafe {
+              let _ = FAULT_MANAGER.reboot_at_fault(0);
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+              assert_eq!(true, IS_REBOOT);
+          }
+      }
+
+      #[test]
+      fn check_false_with_reboot() {
+          set_up();
+          unsafe {
+              let _ = FAULT_MANAGER.reboot_at_fault(0);
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_FALSE)).is_ok());
+              assert_eq!(false, FAULT_MANAGER.check_fault(0));
+              assert_eq!(false, IS_REBOOT);
+          }
+      }
+
+      #[test]
+      #[should_panic]
+      fn check_true_with_reboot_no_global_context() {
+          set_up();
+          unsafe {
+              let _ = FAULT_MANAGER.reboot_at_fault(0);
+              set_global_context(ptr::null_mut());
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+          }
+      }
+
+      #[test]
+      #[should_panic]
+      fn check_true_with_reboot_no_reboot_cb() {
+          set_up();
+          static mut GLOBAL_CONTEXT_EMPTY: GlobalContext = GlobalContext {
+              m_cb_table: GlobalCallbackTable {
+                  m_reboot_cb: None,
+                  m_post_injection_cb: Some(post_injection_check),
+              }
+          };
+          unsafe {
+              let _ = FAULT_MANAGER.reboot_at_fault(0);
+              set_global_context(ptr::addr_of_mut!(GLOBAL_CONTEXT_EMPTY));
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+          }
+      }
+
+      #[test]
+      fn check_true_with_empty_out_args() {
+          set_up();
+          unsafe {
+              let out_args: &[i32];
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
+              assert_eq!(true, ret);
+              assert_eq!(0, out_args.len());
+          }
+      }
+
+      #[test]
+      fn check_true_with_out_args() {
+          set_up();
+          unsafe {
+              let out_args: &[i32];
+              let _ = FAULT_MANAGER.store_args_at_fault(0, &[1,2,3]);
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
+              assert_eq!(true, ret);
+              assert_eq!(3, out_args.len());
+          }
+      }
+
+      #[test]
+      fn check_false_with_out_args() {
+          set_up();
+          unsafe {
+              let out_args: &[i32];
+              let _ = FAULT_MANAGER.store_args_at_fault(0, &[1,2,3]);
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_FALSE)).is_ok());
+              let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
+              assert_eq!(false, ret);
+              assert_eq!(0, out_args.len());
+          }
+      }
+
+      #[test]
+      fn reset_counter() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.check_fault(0));
+              assert_eq!(1, FAULT_MANAGER.get_fault_records()[0].m_num_times_checked);
+              FAULT_MANAGER.reset_fault_counters();
+              assert_eq!(0, FAULT_MANAGER.get_fault_records()[0].m_num_times_checked);
+          }
+      }
+
+      #[test]
+      fn reset_configurations() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.reset_configurations(0).is_ok());
+              assert_eq!(ptr::addr_of_mut!(S_RANDOM_CB), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
+          }
+      }
+
+      #[test]
+      fn reset_configurations_with_id_overrange() {
+          set_up();
+          unsafe {
+              assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
+              assert_eq!(true, FAULT_MANAGER.reset_configurations(NUM_FAULTS.try_into().unwrap()).is_err());
+              assert_eq!(ptr::addr_of_mut!(CALLBACK_STUB_TRUE), FAULT_MANAGER.get_fault_records()[0].m_callback_list);
           }
       }
   }
