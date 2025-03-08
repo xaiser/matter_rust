@@ -6,10 +6,6 @@ use crate::ChipError;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_no_message_handler;
-use crate::chip_error_incorrect_state;
-
-use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
-use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
 
 struct Tuple<DelegateType, T>
 where
@@ -24,6 +20,7 @@ impl<Type0, DelegateType> Tuple<DelegateType, (Type0,)>
         Type0: Init<DelegateType> + Base<DelegateType>,
         DelegateType: RawTransportDelegate,
 {
+    #[allow(dead_code)]
     pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType) -> ChipError
     {
         let err = self.m_transports.0.init(p0);
@@ -41,6 +38,7 @@ impl<Type0, Type1, DelegateType> Tuple<DelegateType, (Type0,Type1)>
         Type1: Init<DelegateType> + Base<DelegateType>,
         DelegateType: RawTransportDelegate,
 {
+    #[allow(dead_code)]
     pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType, p1: <Type1 as Init<DelegateType>>::InitParamType) -> ChipError
     {
         let err = self.m_transports.0.init(p0);
@@ -64,6 +62,7 @@ impl<Type0, Type1, Type2, DelegateType> Tuple<DelegateType, (Type0,Type1,Type2)>
         Type2: Init<DelegateType> + Base<DelegateType>,
         DelegateType: RawTransportDelegate,
 {
+    #[allow(dead_code)]
     pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType, p1: <Type1 as Init<DelegateType>>::InitParamType, p2: <Type2 as Init<DelegateType>>::InitParamType) -> ChipError
     {
         let err = self.m_transports.0.init(p0);
@@ -93,6 +92,7 @@ impl<Type0, Type1, Type2, Type3, DelegateType> Tuple<DelegateType, (Type0,Type1,
         Type3: Init<DelegateType> + Base<DelegateType>,
         DelegateType: RawTransportDelegate,
 {
+    #[allow(dead_code)]
     pub fn init(&mut self, delegate: * mut DelegateType,
         p0: <Type0 as Init<DelegateType>>::InitParamType,
         p1: <Type1 as Init<DelegateType>>::InitParamType,
@@ -130,12 +130,15 @@ macro_rules! impl_base_for_tuple {
                 $($type: Init<$delegate> + Base<$delegate>,)+
                 $delegate: RawTransportDelegate,
                 {
+                    #[allow(dead_code)]
                     fn set_delegate(&mut self, _delegate: * mut $delegate) { }
 
+                    #[allow(dead_code)]
                     fn close(&mut self) {
                         $(self.m_transports.$index.close();)+
                     }
 
+                    #[allow(dead_code)]
                     fn send_message(&mut self, peer_address: PeerAddress, msg_buf: PacketBufferHandle) -> ChipError {
                         $(if self.m_transports.$index.can_send_to_peer(&peer_address) {
                             return self.m_transports.$index.send_message(peer_address, msg_buf);
@@ -143,6 +146,7 @@ macro_rules! impl_base_for_tuple {
                         chip_error_no_message_handler!()
                     }
 
+                    #[allow(dead_code)]
                     fn can_send_to_peer(&self, peer_address: &PeerAddress) -> bool {
                         $(if self.m_transports.$index.can_send_to_peer(&peer_address) {
                             return true;
@@ -150,6 +154,7 @@ macro_rules! impl_base_for_tuple {
                         false
                     }
 
+                    #[allow(dead_code)]
                     fn handle_message_received(&mut self, _peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {}
                 }
     };
@@ -180,6 +185,10 @@ mod test {
       use crate::chip::inet::ip_packet_info::IPPacketInfo;
       use std::cell::Cell;
       use crate::chip_no_error;
+      use crate::chip_error_incorrect_state;
+
+      use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
+      use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
       static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
 
       static mut TEST_TUPLE: Tuple<TestDelegate, (Test<TestDelegate>,)> = Tuple {
@@ -187,11 +196,13 @@ mod test {
           phantom: PhantomData,
       };
 
+      /*
       const EXPECTED_SEND_PORT: u16 = 87;
       const EXPECTED_SEND_ADDR: IPAddress = IPAddress {
           addr: (1, 2, 3, 4)
       };
       const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
+      */
 
       #[derive(Default)]
       struct TestDelegate {

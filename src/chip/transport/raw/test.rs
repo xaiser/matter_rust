@@ -8,8 +8,6 @@ use crate::chip::inet::inet_interface::InterfaceId;
 use crate::chip::inet::inet_layer::EndPointManager;
 use crate::chip::inet::end_point_basis::DefaultWithMgr;
 use crate::chip::inet::ip_packet_info::IPPacketInfo;
-use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
-use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
 use crate::ChipError;
 
 use crate::chip_no_error;
@@ -26,7 +24,6 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 
 use crate::success_or_exit;
-use crate::verify_or_die;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
@@ -234,12 +231,14 @@ impl<DelegateType> Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
+    /*
     fn get_gound_port(&self) -> u16 {
         verify_or_die!(self.m_test_end_point.is_null() == false);
         unsafe {
             return (*self.m_test_end_point).get_bound_port();
         }
     }
+    */
 }
 
 impl<DelegateType> Base<DelegateType> for Test<DelegateType>
@@ -343,6 +342,8 @@ mod test {
       use crate::chip::system::system_layer::Layer;
       use crate::chip::inet::test_end_point::TestEndPointManager;
       use std::cell::Cell;
+      use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
+      use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
       static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
 
       #[derive(Default)]
@@ -372,9 +373,6 @@ mod test {
 
               let _ = get_manager().reset_configurations_all();
           }
-      }
-
-      fn tear_down() {
       }
 
       #[test]
@@ -702,10 +700,8 @@ mod test {
               assert_eq!(d.check.get(), true);
               assert_eq!(d.addr.get().get_address(), EXPECTED_SEND_ADDR.clone());
               assert_eq!(d.addr.get().get_port(), EXPECTED_SEND_PORT);
-              unsafe {
-                  for i in 0..4 {
-                      assert_eq!((*d.data.get())[i], EXPECTED_SEND_MSG[i].into());
-                  }
+              for i in 0..4 {
+                  assert_eq!((*d.data.get())[i], EXPECTED_SEND_MSG[i].into());
               }
           }
       }

@@ -77,10 +77,12 @@ pub struct GlobalContext {
  * The main purpose of this is to pass a collection of static tables owned of GetManagerFn owned
  * by separate modules to ParseFaultInjectionStr.
  */
+/*
 pub struct ManagerTable {
     m_array: * const GetManagerFn, /* A pointer to an array of GetManagerFn */
     m_num_items: usize, /* The length of mArray */
 }
+*/
 
 /**
  * A linked-list node to hold a callback function to be attached to a fault ID.
@@ -142,7 +144,7 @@ impl Record {
     }
 }
 
-mod InterManager {
+mod inter_manager {
     pub type LockCbFn = fn(* mut ());
 }
 
@@ -227,8 +229,8 @@ pub struct Manager {
     m_fault_records: &'static mut [Record],
     m_name: &'static str,
     m_fault_names: &'static [&'static str],
-    m_lock: InterManager::LockCbFn,
-    m_unlock: InterManager::LockCbFn,
+    m_lock: inter_manager::LockCbFn,
+    m_unlock: inter_manager::LockCbFn,
     m_lock_context: * mut (),
 }
 
@@ -1170,7 +1172,6 @@ mod test {
       fn check_true_with_empty_out_args() {
           set_up();
           unsafe {
-              let out_args: &[i32];
               assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
               let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
               assert_eq!(true, ret);
@@ -1182,7 +1183,6 @@ mod test {
       fn check_true_with_out_args() {
           set_up();
           unsafe {
-              let out_args: &[i32];
               let _ = FAULT_MANAGER.store_args_at_fault(0, &[1,2,3]);
               assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_TRUE)).is_ok());
               let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
@@ -1195,7 +1195,6 @@ mod test {
       fn check_false_with_out_args() {
           set_up();
           unsafe {
-              let out_args: &[i32];
               let _ = FAULT_MANAGER.store_args_at_fault(0, &[1,2,3]);
               assert_eq!(true, FAULT_MANAGER.insert_callback_at_fault(0, ptr::addr_of_mut!(CALLBACK_STUB_FALSE)).is_ok());
               let (out_args, ret) = FAULT_MANAGER.check_fault_with_out_args(0);
