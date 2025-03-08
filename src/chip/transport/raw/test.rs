@@ -8,6 +8,8 @@ use crate::chip::inet::inet_interface::InterfaceId;
 use crate::chip::inet::inet_layer::EndPointManager;
 use crate::chip::inet::end_point_basis::DefaultWithMgr;
 use crate::chip::inet::ip_packet_info::IPPacketInfo;
+use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
+use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
 use crate::ChipError;
 
 use crate::chip_no_error;
@@ -367,7 +369,12 @@ mod test {
               END_POINT_MANAGER.init(system_layer());
 
               TEST_PARAMS.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
+
+              let _ = get_manager().reset_configurations_all();
           }
+      }
+
+      fn tear_down() {
       }
 
       #[test]
@@ -387,6 +394,28 @@ mod test {
           let mut the_test: Test<TestDelegate> = Test::default();
           unsafe {
               assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_no_error!());
+          }
+      }
+
+      #[test]
+      fn init_fail_at_bind() {
+          set_up();
+          let mut the_test: Test<TestDelegate> = Test::default();
+          // fail at checked = 1
+          let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultBind as Identifier, 0, 1);
+          unsafe {
+              assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_error_incorrect_state!());
+          }
+      }
+
+      #[test]
+      fn init_fail_at_listen() {
+          set_up();
+          let mut the_test: Test<TestDelegate> = Test::default();
+          // fail at checked = 1
+          let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultListen as Identifier, 0, 1);
+          unsafe {
+              assert_eq!(the_test.init(TEST_PARAMS.assume_init_mut().clone()), chip_error_incorrect_state!());
           }
       }
   }

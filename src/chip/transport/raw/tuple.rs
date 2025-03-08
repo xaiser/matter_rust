@@ -6,6 +6,10 @@ use crate::ChipError;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_no_message_handler;
+use crate::chip_error_incorrect_state;
+
+use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
+use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
 
 struct Tuple<DelegateType, T>
 where
@@ -215,6 +219,8 @@ mod test {
               /* reinit the test transport */
               TEST_PARAMS.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
               TEST_TUPLE.m_transports.0 = Test::default();
+
+              let _ = get_manager().reset_configurations_all();
           }
       }
 
@@ -224,6 +230,17 @@ mod test {
           let mut delegate = TestDelegate::default();
           unsafe {
               assert_eq!(chip_no_error!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS.assume_init_mut().clone()));
+          }
+      }
+
+      #[test]
+      fn init_fail() {
+          set_up();
+          let mut delegate = TestDelegate::default();
+          // fail at checked = 1
+          let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultBind as Identifier, 0, 1);
+          unsafe {
+              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS.assume_init_mut().clone()));
           }
       }
   }

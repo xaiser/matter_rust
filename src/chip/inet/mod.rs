@@ -6,3 +6,4 @@ pub mod ip_address;
 pub mod ip_packet_info;
 pub mod inet_interface;
 pub mod inet_error;
+pub mod inet_fault_injection;

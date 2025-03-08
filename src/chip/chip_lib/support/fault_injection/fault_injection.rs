@@ -665,6 +665,10 @@ impl Manager {
         return Ok(());
     }
 
+    pub fn get_num_faults(&self) -> usize {
+        self.m_num_faults
+    }
+
     fn die() {
         panic!();
     }
@@ -674,7 +678,7 @@ impl Manager {
 #[macro_export]
 macro_rules! fault_inject {
     ($manager:expr, $id:expr $(, $action:stmt)*) => {
-        if ($manager.check_fault($id)) {
+        if ($manager.check_fault($id as u32)) {
             $($action)*
         }
     };

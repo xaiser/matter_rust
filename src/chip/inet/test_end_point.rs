@@ -9,6 +9,7 @@ use super::end_point_basis::DefaultWithMgr;
 //use super::end_point_basis::EndPointDeletor;
 use super::inet_interface::InterfaceId;
 use super::inet_config::*;
+use super::inet_fault_injection::InetFaultInjectionID;
 use crate::chip::chip_lib::core::reference_counted::{RCDeleteDeletor, ReferenceCountered};
 use crate::chip::system::LayerImpl as SystemLayer;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
@@ -18,8 +19,11 @@ use crate::chip_sdk_error;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_inbound_message_too_big;
 use crate::inet_error_wrong_address_type;
+use crate::inet_error_unknown_interface;
 use crate::chip_inet_error;
 use crate::ChipError;
+use crate::inet_fault_inject;
+use crate::fault_inject;
 use core::ptr;
 
 pub type TestEndPointManager = EndPointManagerImplPool<TestEndPoint, {TestEndPoint::NUM_END_POINTS}>;
@@ -74,6 +78,8 @@ impl DefaultWithMgr for TestEndPoint {
 impl TestEndPoint {
     pub fn bind_with_interface(&mut self, addr_type: IPAddressType, addr: &IPAddress, port: u16, intf_id: Option<InterfaceId>) -> ChipError
     {
+        inet_fault_inject!(InetFaultInjectionID::KFaultBind, return chip_error_incorrect_state!());
+
         if self.m_state != State::KReady && self.m_state != State::KBound {
             return chip_error_incorrect_state!();
         }
@@ -93,8 +99,6 @@ impl TestEndPoint {
 
     pub fn bind(&mut self, addr_type: IPAddressType, addr: &IPAddress, port: u16) -> ChipError
     {
-        //chip_insert_faulty!(fail_point!("chip/inet/test_end_point/fail_bind_incorrect_state", |_| chip_error_incorrect_state!()));
-        //chip_insert_faulty!(fail_point!("chip/inet/test_end_point/fail_bind_wrong_type", |_| inet_error_wrong_address_type!()));
         self.bind_with_interface(addr_type, addr, port, None)
     }
 
@@ -105,6 +109,8 @@ impl TestEndPoint {
 
     pub fn listen(&mut self, on_message_received: Option<OnMessageReceivedFunct>, on_receive_error: Option<OnMessageErrorFunct>, app_state: * mut u8) -> ChipError
     {
+        inet_fault_inject!(InetFaultInjectionID::KFaultListen, return chip_error_incorrect_state!());
+
         if self.m_state == State::KListening {
             return chip_no_error!();
         }
@@ -136,6 +142,8 @@ impl TestEndPoint {
 
     pub fn send_msg(&self, pkt_info: IPPacketInfo, msg: PacketBufferHandle) -> ChipError
     {
+        inet_fault_inject!(InetFaultInjectionID::KFaultSend, return inet_error_unknown_interface!());
+
         if let Some(send_impl) = self.m_on_send {
             return send_impl(pkt_info, msg);
         }

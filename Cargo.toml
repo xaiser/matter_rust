@@ -18,7 +18,7 @@ lto = false
 panic = "abort"
 
 [features]
-default = ["chip_error_logging", "chip_progress_logging", "chip_detail_logging", "chip_automation_logging"]
+default = ["chip_error_logging", "chip_progress_logging", "chip_detail_logging", "chip_automation_logging", "chip_with_fault_injection"]
 panic_handler = []
 chip_config_error_source = []
 chip_log_filtering = []
@@ -26,3 +26,5 @@ chip_error_logging = []
 chip_progress_logging = []
 chip_detail_logging = []
 chip_automation_logging = []
+chip_with_fault_injection = ["chip_with_inet_fault_injection"]
+chip_with_inet_fault_injection = []
