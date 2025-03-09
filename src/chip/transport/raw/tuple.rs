@@ -348,4 +348,108 @@ mod test {
           }
       }
   }
+
+  mod test_base_functions {
+      use super::*;
+      use super::super::*;
+      use std::*;
+      use crate::chip::platform::global::system_layer;
+      use crate::chip::system::system_layer::Layer;
+      use crate::chip::inet::test_end_point::TestEndPointManager;
+      use crate::chip::inet::inet_layer::EndPointManager;
+      use crate::chip::inet::end_point_basis::DefaultWithMgr;
+      use crate::chip::transport::raw::test::{Test, TestListenParameter};
+      use crate::chip::inet::ip_address::{IPAddressType,IPAddress};
+      use crate::chip::inet::ip_packet_info::IPPacketInfo;
+      use crate::chip::inet::inet_interface::InterfaceId;
+      use std::cell::Cell;
+      use crate::chip_no_error;
+      use crate::chip_error_incorrect_state;
+
+      use crate::chip::inet::inet_fault_injection::{InetFaultInjectionID, get_manager};
+      use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
+      static mut TEST_PARAMS_IPV4: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+      static mut TEST_PARAMS_IPV6: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+
+      static mut TEST_TUPLE: Tuple<TestDelegate, (Test<TestDelegate>,Test<TestDelegate>)> = Tuple {
+          m_transports: (Test::default_const(), Test::default_const()),
+          phantom: PhantomData,
+      };
+
+      const EXPECTED_SEND_PORT: u16 = 87;
+      /*
+      const EXPECTED_SEND_ADDR_IPV4: IPAddress = IPAddress::ANY_IPV4.clone();
+      const EXPECTED_SEND_ADDR_IPV6: IPAddress = IPAddress {
+          addr: (1, 2, 3, 4)
+      };
+      */
+      const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
+
+      #[derive(Default)]
+      struct TestDelegate {
+          pub check: Cell<bool>,
+          pub addr: Cell<PeerAddress>,
+      }
+
+      impl RawTransportDelegate for TestDelegate {
+          fn handle_message_received(&self, peer_address: PeerAddress, _buffer: PacketBufferHandle, _ctxt: * const MessageTransportContext) {
+              self.check.set(true);
+              self.addr.set(peer_address);
+          }
+      }
+
+      fn set_up() {
+          unsafe {
+              /* reinit system layer */
+              let sl = system_layer();
+              (*sl).init();
+
+              /* reinit end point manager */
+              END_POINT_MANAGER = TestEndPointManager::default();
+              END_POINT_MANAGER.init(system_layer());
+
+              /* reinit the test transport */
+              TEST_PARAMS_IPV4.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_address_type(IPAddressType::KIPv4));
+              TEST_PARAMS_IPV6.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_address_type(IPAddressType::KIPv6));
+              TEST_TUPLE.m_transports.0 = Test::default();
+              TEST_TUPLE.m_transports.1 = Test::default();
+
+              let _ = get_manager().reset_configurations_all();
+          }
+      }
+
+      #[test]
+      fn send_by_first() {
+          set_up();
+          let mut delegate = TestDelegate::default();
+          unsafe {
+              TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone());
+
+              let pa = PeerAddress::udp_addr_port_interface(IPAddress::ANY_IPV4.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              assert_eq!(TEST_TUPLE.send_message(pa, msg), chip_no_error!());
+          }
+      }
+
+      #[test]
+      fn send_by_second() {
+          set_up();
+          let mut delegate = TestDelegate::default();
+          unsafe {
+              TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone());
+
+              let pa = PeerAddress::udp_addr_port_interface(IPAddress::ANY.clone(),
+              EXPECTED_SEND_PORT,
+              InterfaceId::default());
+
+              let msg = PacketBufferHandle::new_with_data(&EXPECTED_SEND_MSG[0..4],0,8).unwrap();
+
+              assert_eq!(TEST_TUPLE.send_message(pa, msg), chip_no_error!());
+          }
+      }
+  }
 }
