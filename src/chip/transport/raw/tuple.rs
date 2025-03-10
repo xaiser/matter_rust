@@ -411,6 +411,8 @@ mod test {
               /* reinit the test transport */
               TEST_PARAMS_IPV4.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_address_type(IPAddressType::KIPv4));
               TEST_PARAMS_IPV6.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)).set_address_type(IPAddressType::KIPv6));
+
+              /* since we reset end point manager, we have to manually reset these as well */
               TEST_TUPLE.m_transports.0 = Test::default();
               TEST_TUPLE.m_transports.1 = Test::default();
 
@@ -442,7 +444,7 @@ mod test {
           unsafe {
               TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone());
 
-              let pa = PeerAddress::udp_addr_port_interface(IPAddress::ANY.clone(),
+              let pa = PeerAddress::udp_addr_port_interface(IPAddress { addr: (1,2,3,4) },
               EXPECTED_SEND_PORT,
               InterfaceId::default());
 
