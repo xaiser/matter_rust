@@ -36,6 +36,9 @@ impl PacketBuffer
     pub const KBLOCK_SIZE: u16 = PacketBuffer::KSTRUCTURESIZE + PacketBuffer::KMAX_SIZE_WITHOUT_RESERVE as u16;
     pub const KDEFAULT_HEADER_RESERVE: u16 = CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE as u16;
     pub const KMAX_ALLOC_SIZE: u32 = PacketBuffer::KMAX_SIZE_WITHOUT_RESERVE;
+    pub const KMAX_SIZE: u32 = Self::KMAX_SIZE_WITHOUT_RESERVE - Self::KDEFAULT_HEADER_RESERVE as u32;
+    pub const KLARGE_BUFFER_MAX_SIZE_WITHOUT_RESERVE: u32 = CHIP_SYSTEM_CONFIG_MAX_LARGE_BUFFER_SIZE_BYTES;
+    pub const KLARGE_BUF_MAX_SIZE: u32 = Self::KLARGE_BUFFER_MAX_SIZE_WITHOUT_RESERVE - Self::KDEFAULT_HEADER_RESERVE as u32;
 
     pub fn chained_buffer(&self) -> * mut PacketBuffer {
         return self.next;
