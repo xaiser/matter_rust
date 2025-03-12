@@ -96,7 +96,7 @@ macro_rules! chip_core_error{
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ChipError 
 {
     m_error: StorageType,

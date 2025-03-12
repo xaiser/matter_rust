@@ -6,3 +6,4 @@ pub mod iterators;
 pub mod logging;
 pub mod chip_fault_injection;
 pub mod fault_injection;
+pub mod buffer_reader;
