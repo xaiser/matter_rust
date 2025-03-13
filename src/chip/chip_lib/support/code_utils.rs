@@ -16,6 +16,15 @@ macro_rules! verify_or_return_error {
 }
 
 #[macro_export]
+macro_rules! verify_or_return {
+    ($expr:expr) => {
+        if !$expr {
+            return;
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! verify_or_die {
     ($expr:expr) => {
         if !$expr {
