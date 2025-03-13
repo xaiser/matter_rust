@@ -2,6 +2,7 @@ use crate::ChipError;
 use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
+use crate::chip::encoding;
 
 
 pub trait BufferReader<'a> {
@@ -75,6 +76,7 @@ pub mod little_endian {
     use core::slice::from_raw_parts;
     use core::cmp::min;
     use core::mem::size_of;
+    use core::fmt;
 
     #[derive(Copy,Clone)]
     pub struct Reader<'a> {
@@ -198,25 +200,68 @@ pub mod little_endian {
             let result: T;
         }
 
-        fn raw_read_low_level_be_careful<T: Default>(&mut self, ret_val: &mut T) {
+        fn raw_read_low_level_be_careful<T>(&mut self, ret_val: &mut T)
+            where
+                T: Default + crate::chip::encoding::little_endian::HostSwap<ValueType=T> + fmt::Debug
+        {
             chip_static_assert!((-1 & 3) == 3, "LittleEndian::BufferReader only works with 2's complement architectures.");
             verify_or_return!(self.is_success());
-            /*
-
-            let data_size: usize = size_of::<T>();
-            let mut result: [u8; 64] = [0; 64];
-            let _ = self.read_bytes(&mut result[0..data_size]);
-            *ret_val = T::from_le_byte(&result[0..data_size]);
-            */
             let mut result: T = T::default();
             let _ = self.read_bytes_with_raw(ptr::addr_of_mut!(result) as * mut u8, size_of::<T>());
-
-            let _a: u16 = u16::from_le_bytes([0x01, 0x01]);
+            if self.status_code() == chip_no_error!() {
+                *ret_val = T::host_swap(result);
+            }
         }
 
         pub fn read_bool(&mut self, dest: &mut bool) -> &mut Self {
             chip_static_assert!(size_of::<bool>() == 1, "Expect single-byte bool");
+            let mut result: u8 = 0;
+            self.raw_read_low_level_be_careful(&mut result);
+            if self.is_success() {
+                *dest = if 0 == result { false } else { true };
+            }
+
             return self;
+        }
+
+        pub fn read_u8(&mut self, dest: &mut u8) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            return self;
+        }
+
+        pub fn read_i8(&mut self, dest: &mut i8) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_u16(&mut self, dest: &mut u16) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_i16(&mut self, dest: &mut i16) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_u32(&mut self, dest: &mut u32) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_i32(&mut self, dest: &mut i32) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_u64(&mut self, dest: &mut u64) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
+        }
+
+        pub fn read_i64(&mut self, dest: &mut i64) -> &mut Self {
+            self.raw_read_low_level_be_careful(dest);
+            self
         }
     }
 }
@@ -235,12 +280,17 @@ mod test {
       use crate::chip_sdk_error;
       use crate::chip_error_buffer_too_small;
 
+      use core::str::FromStr;
+      use crate::chip_log_detail;
+      use crate::chip_internal_log;
+      use crate::chip_internal_log_impl;
+
      static mut LITTLE_READER: super::super::little_endian::Reader = little_endian::Reader::const_default(); 
-     static THE_DATA: [u8; 7] = [1,2,3,4,5,6,7];
+     static THE_DATA: [u8; 9] = [1,2,3,4,5,6,7,8,9];
 
      fn set_up() {
          unsafe {
-             LITTLE_READER = little_endian::Reader::default(&THE_DATA[0..3]); 
+             LITTLE_READER = little_endian::Reader::default(&THE_DATA[0..9]); 
          }
      }
 
@@ -249,7 +299,7 @@ mod test {
       fn init() {
           set_up();
           unsafe {
-              assert_eq!(3, LITTLE_READER.remaining());
+              assert_eq!(9, LITTLE_READER.remaining());
           }
       }
       
@@ -257,7 +307,6 @@ mod test {
       fn read_bytes() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
               let mut dest: [u8; 2] = [0; 2];
               let _ = LITTLE_READER.read_bytes(&mut dest[0..2]);
               assert_eq!(chip_no_error!(), LITTLE_READER.status_code());
@@ -270,9 +319,8 @@ mod test {
       fn read_bytes_too_much() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
-              let mut dest: [u8; 4] = [0; 4];
-              let _ = LITTLE_READER.read_bytes(&mut dest[0..4]);
+              let mut dest: [u8; 10] = [0; 10];
+              let _ = LITTLE_READER.read_bytes(&mut dest[0..10]);
               assert_eq!(chip_error_buffer_too_small!(), LITTLE_READER.status_code());
           }
       }
@@ -281,8 +329,6 @@ mod test {
       fn zero_copy() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
-              //let dest: [u8; 2] = [0; 2];
               let mut r_dest: &[u8] = &[];
               let _ = LITTLE_READER.zero_copy_process_bytes(2, &mut r_dest);
               assert_eq!(1, r_dest[0]);
@@ -295,11 +341,10 @@ mod test {
       fn zero_copy_size_0() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
               let mut r_dest: &[u8] = &[];
               let _ = LITTLE_READER.zero_copy_process_bytes(0, &mut r_dest);
               assert_eq!(chip_no_error!(), LITTLE_READER.status_code());
-              assert_eq!(3, LITTLE_READER.remaining());
+              assert_eq!(9, LITTLE_READER.remaining());
           }
       }
       
@@ -307,9 +352,8 @@ mod test {
       fn zero_copy_too_much() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
               let mut r_dest: &[u8] = &[];
-              let _ = LITTLE_READER.zero_copy_process_bytes(4, &mut r_dest);
+              let _ = LITTLE_READER.zero_copy_process_bytes(10, &mut r_dest);
               assert_eq!(chip_error_buffer_too_small!(), LITTLE_READER.status_code());
               assert_eq!(0, LITTLE_READER.remaining());
           }
@@ -319,12 +363,11 @@ mod test {
       fn zero_copy_too_much_on_second_read() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
               let mut r_dest: &[u8] = &[];
               let _ = LITTLE_READER.zero_copy_process_bytes(1, &mut r_dest);
               assert_eq!(1, r_dest[0]);
               assert_eq!(chip_no_error!(), LITTLE_READER.status_code());
-              let _ = LITTLE_READER.zero_copy_process_bytes(3, &mut r_dest);
+              let _ = LITTLE_READER.zero_copy_process_bytes(9, &mut r_dest);
               assert_eq!(chip_error_buffer_too_small!(), LITTLE_READER.status_code());
               assert_eq!(0, LITTLE_READER.remaining());
           }
@@ -334,10 +377,42 @@ mod test {
       fn skip() {
           set_up();
           unsafe {
-              //LITTLE_READER.init(&THE_DATA[0..3]);
-              assert_eq!(3, LITTLE_READER.remaining());
+              assert_eq!(9, LITTLE_READER.remaining());
               let _ = LITTLE_READER.skip(2);
-              assert_eq!(1, LITTLE_READER.remaining());
+              assert_eq!(7, LITTLE_READER.remaining());
+          }
+      }
+      
+      #[test]
+      fn read_bool() {
+          set_up();
+          unsafe {
+              let mut b: bool = false;
+              LITTLE_READER.read_bool(&mut b);
+              assert_eq!(true, LITTLE_READER.is_success());
+              assert_eq!(true, b);
+          }
+      }
+      
+      #[test]
+      fn read_u16() {
+          set_up();
+          unsafe {
+              let mut result: u16 = 0;
+              LITTLE_READER.read_u16(&mut result);
+              assert_eq!(true, LITTLE_READER.is_success());
+              assert_eq!(0x0201, result);
+          }
+      }
+      
+      #[test]
+      fn read_i32() {
+          set_up();
+          unsafe {
+              let mut result: i32 = 0;
+              LITTLE_READER.read_i32(&mut result);
+              assert_eq!(true, LITTLE_READER.is_success());
+              assert_eq!(0x04030201, result);
           }
       }
   }

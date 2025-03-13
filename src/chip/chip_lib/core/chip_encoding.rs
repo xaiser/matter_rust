@@ -174,3 +174,143 @@ pub fn swap_big_to_host_i64(in_value: i64) -> i64 {
     return i64::from_be_bytes(bytes);
 }
 
+pub mod little_endian {
+    pub trait HostSwap {
+        type ValueType;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType;
+    }
+
+    impl HostSwap for bool {
+        type ValueType = bool;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            v
+        }
+    }
+
+    impl HostSwap for u8 {
+        type ValueType = u8;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_u8(v)
+        }
+    }
+
+    impl HostSwap for i8 {
+        type ValueType = i8;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_i8(v)
+        }
+    }
+
+    impl HostSwap for u16 {
+        type ValueType = u16;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_u16(v)
+        }
+    }
+
+    impl HostSwap for i16 {
+        type ValueType = i16;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_i16(v)
+        }
+    }
+
+    impl HostSwap for u32 {
+        type ValueType = u32;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_u32(v)
+        }
+    }
+
+    impl HostSwap for i32 {
+        type ValueType = i32;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_i32(v)
+        }
+    }
+
+    impl HostSwap for u64 {
+        type ValueType = u64;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_u64(v)
+        }
+    }
+
+    impl HostSwap for i64 {
+        type ValueType = i64;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_little_to_host_i64(v)
+        }
+    }
+
+}
+
+pub mod big_endian {
+    pub trait HostSwap {
+        type ValueType;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType;
+    }
+
+    impl HostSwap for bool {
+        type ValueType = bool;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            v
+        }
+    }
+
+    impl HostSwap for u8 {
+        type ValueType = u8;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_u8(v)
+        }
+    }
+
+    impl HostSwap for i8 {
+        type ValueType = i8;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_i8(v)
+        }
+    }
+
+    impl HostSwap for u16 {
+        type ValueType = u16;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_u16(v)
+        }
+    }
+
+    impl HostSwap for i16 {
+        type ValueType = i16;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_i16(v)
+        }
+    }
+
+    impl HostSwap for u32 {
+        type ValueType = u32;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_u32(v)
+        }
+    }
+
+    impl HostSwap for i32 {
+        type ValueType = i32;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_i32(v)
+        }
+    }
+
+    impl HostSwap for u64 {
+        type ValueType = u64;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_u64(v)
+        }
+    }
+
+    impl HostSwap for i64 {
+        type ValueType = i64;
+        fn host_swap(v: Self::ValueType) -> Self::ValueType {
+            super::swap_big_to_host_i64(v)
+        }
+    }
+}
