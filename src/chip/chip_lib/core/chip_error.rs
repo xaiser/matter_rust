@@ -3,6 +3,7 @@
 pub type StorageType = u32;
 pub type ValueType = StorageType;
 pub type FormatType = StorageType;
+pub type ChipErrorResult = Result<(), ChipError>;
 
 #[repr(u8)]
 pub enum Range
@@ -37,6 +38,12 @@ macro_rules! chip_initialize_error_source {
             m_file: $f,
             m_line: $l,
         }
+    };
+}
+#[macro_export]
+macro_rules! chip_ok {
+    () => {
+        Ok(())
     };
 }
 
@@ -247,6 +254,13 @@ macro_rules! chip_error_no_message_handler{
 macro_rules! chip_error_buffer_too_small{
     () => {
         chip_core_error!(0x19)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_version_mismatch{
+    () => {
+        chip_core_error!(0xa7)
     };
 }
 

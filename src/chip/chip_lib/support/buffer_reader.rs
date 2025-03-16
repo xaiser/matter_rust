@@ -1,4 +1,5 @@
 use crate::ChipError;
+use crate::ChipErrorResult;
 use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
@@ -20,11 +21,13 @@ pub trait BufferReader<'a> {
 
     fn status_code(&self) -> ChipError;
 
+    fn status(&self) -> ChipErrorResult;
+
     fn is_success(&self) -> bool {
         self.status_code() == chip_no_error!()
     }
 
-    /**
+    /*
      * Read a byte string from the BufferReader
      *
      * @param [out] dest Where the bytes read
@@ -38,7 +41,7 @@ pub trait BufferReader<'a> {
     fn read_bytes(&mut self, dest: &mut [u8]) -> &mut Self;
     fn read_bytes_with_raw(&mut self, dest: * mut u8, size: usize) -> &mut Self;
 
-    /**
+    /*
      * Access bytes of size length, useful for in-place processing of strings
      *
      * data_ptr MUST NOT be null and will contain the data pointer with `len` bytes available
@@ -48,7 +51,7 @@ pub trait BufferReader<'a> {
      */
     fn zero_copy_process_bytes(&mut self, len: usize, data: &mut &'a [u8]) -> &mut Self;
 
-    /**
+    /*
      * Advance the Reader forward by the specified number of octets.
      *
      * @param len The number of octets to skip.
@@ -64,6 +67,7 @@ pub trait BufferReader<'a> {
 
 pub mod little_endian {
     use crate::ChipError;
+    use crate::ChipErrorResult;
     use crate::chip_no_error;
     use crate::chip_core_error;
     use crate::chip_sdk_error;
@@ -128,6 +132,15 @@ pub mod little_endian {
 
         fn status_code(&self) -> ChipError {
             self.m_status.clone()
+        }
+
+        fn status(&self) -> ChipErrorResult {
+            let err = self.status_code();
+            if err.is_success() {
+                return Ok(());
+            }
+
+            return Err(err);
         }
 
         fn read_bytes(&mut self, dest: &mut [u8]) -> &mut Self {
@@ -268,6 +281,7 @@ pub mod little_endian {
 
 pub mod big_endian {
     use crate::ChipError;
+    use crate::ChipErrorResult;
     use crate::chip_no_error;
     use crate::chip_core_error;
     use crate::chip_sdk_error;
@@ -332,6 +346,15 @@ pub mod big_endian {
 
         fn status_code(&self) -> ChipError {
             self.m_status.clone()
+        }
+
+        fn status(&self) -> ChipErrorResult {
+            let err = self.status_code();
+            if err.is_success() {
+                return Ok(());
+            }
+
+            return Err(err);
         }
 
         fn read_bytes(&mut self, dest: &mut [u8]) -> &mut Self {

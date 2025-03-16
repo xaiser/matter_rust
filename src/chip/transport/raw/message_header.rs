@@ -5,13 +5,21 @@ use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip::crypto::crypto_pal::CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES;
 use crate::chip::{NodeId,GroupId};
 use crate::chip::chip_lib::support::buffer_reader::little_endian::Reader;
+use crate::chip::chip_lib::support::buffer_reader::BufferReader;
 use crate::chip::protocols::protocols;
 use crate::chip::VendorId;
 
 use crate::ChipError;
+use crate::ChipErrorResult;
 use crate::chip_no_error;
+use crate::chip_ok;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
+use crate::chip_error_version_mismatch;
+
+use crate::chip_static_assert;
+use crate::verify_or_return_value;
+use crate::verify_or_return_error;
 
 use core::mem::size_of;
 use core::slice;
@@ -120,6 +128,7 @@ pub struct PacketHeader {
     m_message_counter: u32,
     m_source_node_id: Option<NodeId>,
     m_destination_node_id: Option<NodeId>,
+    m_group_node_id: Option<NodeId>,
     m_sessino_id: u16,
     m_session_type: header::SessionType,
     m_msg_flags: header::MsgFlags,
@@ -135,6 +144,18 @@ impl Default for PacketHeader {
     }
 }
 
+pub mod internal {
+    pub const KFIXED_UNENCRYPTED_HEADER_SIZE_BYTES: usize = 8;
+    pub const KENCRYPTED_HEADER_SIZE_BYTES: usize = 6;
+    pub const KNODE_ID_SIZE_BYTES: usize = 8;
+    pub const KGROUP_ID_SIZE_BYTES: usize = 2;
+    pub const KVENDOR_ID_SIZE_BYTES: usize = 2;
+    pub const KACK_MESSGE_COUNTER_SIZE_BYTES: usize = 4;
+    pub const KVERSION_MASK: u8 = 0xF0;
+    pub const KMSG_FLAGS_MASK: u8 = 0x07;
+    pub const KVERSION_SHIFT: i32 = 4;
+}
+
 impl PacketHeader {
     pub const KPRIVACY_HEADER_OFFSET: usize = 4;
     pub const KPRIVACY_HEADER_MIN_LENGTH: usize = 4;
@@ -146,6 +167,7 @@ impl PacketHeader {
             m_message_counter: 0,
             m_source_node_id: None,
             m_destination_node_id: None,
+            m_group_node_id: None,
             m_sessino_id: 0,
             m_session_type: header::SessionType::KUnicastSession,
             m_msg_flags: header::MsgFlags::KSourceNodeIdPresent,
@@ -345,7 +367,23 @@ impl PacketHeader {
      * @return the number of bytes needed in a buffer to be able to Encode.
      */
     pub fn encode_size_bytes(&self) -> u16 {
-        0
+        let mut size: usize = internal::KFIXED_UNENCRYPTED_HEADER_SIZE_BYTES;
+
+        if self.m_source_node_id.is_some() {
+            size += internal::KNODE_ID_SIZE_BYTES;
+        }
+
+        if self.m_destination_node_id.is_some() {
+            size += internal::KNODE_ID_SIZE_BYTES;
+        }
+
+        if self.m_group_node_id.is_some() {
+            size += internal::KGROUP_ID_SIZE_BYTES;
+        }
+
+        chip_static_assert!(internal::KFIXED_UNENCRYPTED_HEADER_SIZE_BYTES + internal::KNODE_ID_SIZE_BYTES + internal::KNODE_ID_SIZE_BYTES <= (u16::MAX as usize));
+
+        return size as u16;
     }
 
     /*
@@ -358,8 +396,8 @@ impl PacketHeader {
      *    CHIP_ERROR_INVALID_ARGUMENT on insufficient buffer size
      *    CHIP_ERROR_VERSION_MISMATCH if header version is not supported.
      */
-    pub fn decode_fixed(&mut self, buf: &PacketBufferHandle) -> ChipError {
-        chip_no_error!()
+    pub fn decode_fixed(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
     }
 
     /*
@@ -376,16 +414,16 @@ impl PacketHeader {
      *    CHIP_ERROR_INVALID_ARGUMENT on insufficient buffer size
      *    CHIP_ERROR_VERSION_MISMATCH if header version is not supported.
      */
-    pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
     /*
      * A version of Decode that decodes from the start of a PacketBuffer and
      * consumes the bytes we decoded from.
      */
-    pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipError {
-        chip_no_error!()
+    pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
     }
 
     /*
@@ -400,24 +438,37 @@ impl PacketHeader {
      * Possible failures:
      *    CHIP_ERROR_INVALID_ARGUMENT on insufficient buffer size
      */
-    pub fn encode(&self, data: &[u8], encode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn encode(&self, data: &[u8], encode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipError {
-        chip_no_error!()
+    pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipError {
+    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.encode(slice::from_raw_parts((*(buf.get_raw())).start(), (*(buf.get_raw())).data_len() as usize), encode_size);
         }
     }
 
-    fn decode_fixed_common(reader: &Reader) -> ChipError {
-        chip_no_error!()
-    }
+    fn decode_fixed_common(&mut self, reader: &mut Reader) -> ChipErrorResult {
+        let mut err = chip_ok!();
+        let mut msg_flags: u8 = 0;
 
+        reader.read_u8(&mut msg_flags).status()?;
+        let version: usize = ((msg_flags as usize) & (internal::KVERSION_MASK as usize)) >> internal::KVERSION_SHIFT;
+        verify_or_return_error!(version == Self::KMSG_HEADER_VERSION, err, err = Err(chip_error_version_mismatch!()));
+        self.set_message_flags_raw(msg_flags);
+
+        reader.read_u16(&mut self.m_sessino_id).status()?;
+
+        let mut security_flags: u8 = 0;
+        reader.read_u8(&mut security_flags).status()?;
+        self.set_security_flags_raw(security_flags);
+
+        err
+    }
 }
 
 pub struct PayloadHeader {
@@ -517,40 +568,52 @@ impl PayloadHeader {
         self.m_exchange_flags.contains(header::ExFlags::KExchangeFlagNeedsAck)
     }
 
-    pub fn encodeSizeBytes(&self) -> u16 {
-        0
+    pub fn encode_size_bytes(&self) -> u16 {
+        let mut size: usize = internal::KENCRYPTED_HEADER_SIZE_BYTES;
+
+        if self.have_vendor_id() {
+            size += internal::KVENDOR_ID_SIZE_BYTES;
+        }
+
+        if self.m_ack_message_counter.is_some() {
+            size += internal::KACK_MESSGE_COUNTER_SIZE_BYTES;
+        }
+
+        chip_static_assert!(internal::KENCRYPTED_HEADER_SIZE_BYTES + internal::KVENDOR_ID_SIZE_BYTES + internal::KACK_MESSGE_COUNTER_SIZE_BYTES <= (u16::MAX as usize));
+
+        return size as u16;
     }
 
-    pub fn decode_with_raw(&mut self, data: * const u8, size: usize, decode_size: &mut u16) -> ChipError {
+    pub fn decode_with_raw(&mut self, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.decode(slice::from_raw_parts(data, size), decode_size);
         }
     }
 
-    pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipError {
-        chip_no_error!()
+    pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_with_raw(&mut self, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipError {
+    pub fn encode_with_raw(&mut self, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.encode(slice::from_raw_parts_mut(data, size), encode_size);
         }
     }
 
-    pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipError {
-        chip_no_error!()
+    pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: PacketBufferHandle, encode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn encode_at_start(&self, buf: PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
     fn set_protocol(&mut self, protocol: protocols::Id) {
@@ -587,21 +650,21 @@ impl MessageAuthenticationCode {
         }
     }
 
-    pub fn decode(&mut self, packet_header: &PacketHeader, data: &[u8], decode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn decode(&mut self, packet_header: &PacketHeader, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn decode_with_raw(&mut self, packet_header: &PacketHeader, data: * const u8, size: usize, decode_size: &mut u16) -> ChipError {
+    pub fn decode_with_raw(&mut self, packet_header: &PacketHeader, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.decode(packet_header, slice::from_raw_parts(data, size), decode_size);
         }
     }
 
-    pub fn encode(&self, packet_header: &PacketHeader, data: &mut [u8], encode_size: &mut u16) -> ChipError {
-        chip_no_error!()
+    pub fn encode(&self, packet_header: &PacketHeader, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+        chip_ok!()
     }
 
-    pub fn encode_with_raw(&self, packet_header: &PacketHeader, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipError {
+    pub fn encode_with_raw(&self, packet_header: &PacketHeader, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.encode(packet_header, slice::from_raw_parts_mut(data, size), encode_size);
         }
