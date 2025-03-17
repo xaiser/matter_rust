@@ -265,6 +265,13 @@ macro_rules! chip_error_version_mismatch{
 }
 
 #[macro_export]
+macro_rules! chip_error_internal{
+    () => {
+        chip_core_error!(0xac)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_end_point_pool_full{
     () => {
         chip_core_error!(0xc1)

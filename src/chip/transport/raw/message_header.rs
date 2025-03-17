@@ -1,7 +1,7 @@
 // allow for never used before we implement all features
 #![allow(dead_code)]
 use crate::chip::system::system_config::CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE;
-use crate::chip::system::system_packet_buffer::PacketBufferHandle;
+use crate::chip::system::system_packet_buffer::{PacketBufferHandle, PacketBuffer};
 use crate::chip::crypto::crypto_pal::CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES;
 use crate::chip::{NodeId,GroupId};
 use crate::chip::chip_lib::support::buffer_reader::little_endian::Reader;
@@ -16,6 +16,7 @@ use crate::chip_ok;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_version_mismatch;
+use crate::chip_error_internal;
 
 use crate::chip_static_assert;
 use crate::verify_or_return_value;
@@ -128,7 +129,7 @@ pub struct PacketHeader {
     m_message_counter: u32,
     m_source_node_id: Option<NodeId>,
     m_destination_node_id: Option<NodeId>,
-    m_group_node_id: Option<NodeId>,
+    m_destination_group_node_id: Option<NodeId>,
     m_sessino_id: u16,
     m_session_type: header::SessionType,
     m_msg_flags: header::MsgFlags,
@@ -167,7 +168,7 @@ impl PacketHeader {
             m_message_counter: 0,
             m_source_node_id: None,
             m_destination_node_id: None,
-            m_group_node_id: None,
+            m_destination_group_node_id: None,
             m_sessino_id: 0,
             m_session_type: header::SessionType::KUnicastSession,
             m_msg_flags: header::MsgFlags::KSourceNodeIdPresent,
@@ -377,7 +378,7 @@ impl PacketHeader {
             size += internal::KNODE_ID_SIZE_BYTES;
         }
 
-        if self.m_group_node_id.is_some() {
+        if self.m_destination_group_node_id.is_some() {
             size += internal::KGROUP_ID_SIZE_BYTES;
         }
 
@@ -397,7 +398,11 @@ impl PacketHeader {
      *    CHIP_ERROR_VERSION_MISMATCH if header version is not supported.
      */
     pub fn decode_fixed(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
-        chip_ok!()
+        let pb: * mut PacketBuffer = buf.get_raw();
+        unsafe {
+            let mut reader = Reader::default_with_raw((*pb).start(), (*pb).data_len() as usize);
+            return self.decode_fixed_common(&mut reader);
+        }
     }
 
     /*
@@ -415,7 +420,56 @@ impl PacketHeader {
      *    CHIP_ERROR_VERSION_MISMATCH if header version is not supported.
      */
     pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
-        chip_ok!()
+        let mut reader = Reader::default(data);
+
+        self.decode_fixed_common(&mut reader)?;
+
+        reader.read_u32(&mut self.m_message_counter).status()?;
+
+        if self.m_msg_flags.contains(header::MsgFlagValues::KSourceNodeIdPresent) {
+            let mut source_node_id: u64 = 0;
+            reader.read_u64(&mut source_node_id).status()?;
+            self.m_source_node_id = Some(source_node_id);
+        } else {
+            self.m_source_node_id = None;
+        }
+
+        if self.is_session_type_valid() == false {
+            return Err(chip_error_internal!());
+        }
+
+        if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent | header::MsgFlagValues::KDestinationGroupIdPresent) {
+            return Err(chip_error_internal!());
+        } else if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent) {
+            let mut destination_node_id: u64 = 0;
+            reader.read_u64(&mut destination_node_id).status()?;
+            self.m_destination_node_id = Some(destination_node_id);
+            self.m_destination_group_node_id = None;
+        } else if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationGroupIdPresent) {
+            if self.m_session_type != header::SessionType::KGroupSession {
+                return Err(chip_error_internal!());
+            }
+            let mut destination_group_id: u64 = 0;
+            reader.read_u64(&mut destination_group_id).status()?;
+            self.m_destination_group_node_id = Some(destination_group_id);
+            self.m_destination_node_id = None;
+        } else {
+            self.m_destination_group_node_id = None;
+            self.m_destination_node_id = None;
+        }
+        let mut err = chip_ok!();
+
+        if self.m_sec_flags.contains(header::SecFlagValues::KMsgExtensionFlag) {
+            let mut mx_length: u16 = 0;
+            reader.read_u16(&mut mx_length).status()?;
+            verify_or_return_error!(usize::from(mx_length) <= reader.remaining(), err, err = Err(chip_error_internal!()));
+            reader.skip(mx_length.into());
+        }
+
+        let octets_read: u16 = reader.octets_read().try_into().unwrap();
+        *decode_size = octets_read;
+
+        err
     }
 
     /*
@@ -686,6 +740,12 @@ mod test {
       #[test]
       fn set_source_id() {
           let ph: PacketHeader = PacketHeader::default().set_source_node_id(0x11);
+          assert_eq!(true, ph.get_source_node_id().is_some());
+          assert_eq!(0x11, ph.get_source_node_id().clone().unwrap());
+      }
+
+      #[test]
+      fn decode_successfully() {
           assert_eq!(true, ph.get_source_node_id().is_some());
           assert_eq!(0x11, ph.get_source_node_id().clone().unwrap());
       }
