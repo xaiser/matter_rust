@@ -18,6 +18,11 @@ use crate::chip_sdk_error;
 use crate::chip_error_version_mismatch;
 use crate::chip_error_internal;
 
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+
 use crate::chip_static_assert;
 use crate::verify_or_return_value;
 use crate::verify_or_return_error;
@@ -129,7 +134,7 @@ pub struct PacketHeader {
     m_message_counter: u32,
     m_source_node_id: Option<NodeId>,
     m_destination_node_id: Option<NodeId>,
-    m_destination_group_node_id: Option<NodeId>,
+    m_destination_group_id: Option<GroupId>,
     m_sessino_id: u16,
     m_session_type: header::SessionType,
     m_msg_flags: header::MsgFlags,
@@ -168,7 +173,7 @@ impl PacketHeader {
             m_message_counter: 0,
             m_source_node_id: None,
             m_destination_node_id: None,
-            m_destination_group_node_id: None,
+            m_destination_group_id: None,
             m_sessino_id: 0,
             m_session_type: header::SessionType::KUnicastSession,
             m_msg_flags: header::MsgFlags::KSourceNodeIdPresent,
@@ -186,6 +191,10 @@ impl PacketHeader {
 
     pub fn get_destination_node_id(&self) -> &Option<NodeId> {
         &self.m_destination_node_id
+    }
+
+    pub fn get_destination_group_id(&self) -> &Option<GroupId> {
+        &self.m_destination_group_id
     }
 
     pub fn get_session_id(&self) -> u16 {
@@ -378,7 +387,7 @@ impl PacketHeader {
             size += internal::KNODE_ID_SIZE_BYTES;
         }
 
-        if self.m_destination_group_node_id.is_some() {
+        if self.m_destination_group_id.is_some() {
             size += internal::KGROUP_ID_SIZE_BYTES;
         }
 
@@ -444,17 +453,17 @@ impl PacketHeader {
             let mut destination_node_id: u64 = 0;
             reader.read_u64(&mut destination_node_id).status()?;
             self.m_destination_node_id = Some(destination_node_id);
-            self.m_destination_group_node_id = None;
+            self.m_destination_group_id = None;
         } else if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationGroupIdPresent) {
             if self.m_session_type != header::SessionType::KGroupSession {
                 return Err(chip_error_internal!());
             }
-            let mut destination_group_id: u64 = 0;
-            reader.read_u64(&mut destination_group_id).status()?;
-            self.m_destination_group_node_id = Some(destination_group_id);
+            let mut destination_group_id: GroupId = 0;
+            reader.read_u16(&mut destination_group_id).status()?;
+            self.m_destination_group_id = Some(destination_group_id);
             self.m_destination_node_id = None;
         } else {
-            self.m_destination_group_node_id = None;
+            self.m_destination_group_id = None;
             self.m_destination_node_id = None;
         }
         let mut err = chip_ok!();
@@ -472,11 +481,23 @@ impl PacketHeader {
         err
     }
 
+    pub fn decode_with_raw(&mut self, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
+        unsafe {
+            return self.decode(slice::from_raw_parts(data, size), decode_size);
+        }
+    }
+
     /*
      * A version of Decode that decodes from the start of a PacketBuffer and
      * consumes the bytes we decoded from.
      */
     pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        let packet_buffer: * mut PacketBuffer = buf.get_raw();
+        let mut header_size: u16 = 0;
+        unsafe {
+            self.decode_with_raw((*packet_buffer).start(), (*packet_buffer).data_len().try_into().unwrap(), &mut header_size)?;
+            (*packet_buffer).consume_head(header_size.try_into().unwrap());
+        }
         chip_ok!()
     }
 
@@ -745,9 +766,84 @@ mod test {
       }
 
       #[test]
-      fn decode_successfully() {
-          assert_eq!(true, ph.get_source_node_id().is_some());
-          assert_eq!(0x11, ph.get_source_node_id().clone().unwrap());
+      fn decode_with_source_and_destination_id_successfully() {
+          let mut ph: PacketHeader = PacketHeader::default();
+          let raw: [u8; 28] = 
+              [
+              0x05,   // with sourid and destination id
+              0x12, 0x34,  
+              0x20,  // with MX(flag for extension) set and session type = 0
+              0x56, 0x34, 0x12, 0x00,
+              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
+              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
+              0x02, 0x00,  
+              0xDE, 0xAD  
+              ];
+          let mut decode_size: u16 = 0;
+
+          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+          assert_eq!(28, decode_size);
+          assert_eq!(0x3412, ph.get_session_id());
+          assert_eq!(0x00123456, ph.m_message_counter);
+          assert_eq!(0x1122334455667788, ph.get_source_node_id().unwrap());
+          assert_eq!(0x2233445566778899, ph.get_destination_node_id().unwrap());
+      }
+
+      #[test]
+      fn decode_with_source_and_destination_group_id_successfully() {
+          let mut ph: PacketHeader = PacketHeader::default();
+          let raw: [u8; 22] = 
+              [
+              0x06,   // with sourid and destination group id
+              0x12, 0x34,  
+              0x21,  // with MX(flag for extension) set and session type = 1(group)
+              0x56, 0x34, 0x12, 0x00,
+              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
+              0x99, 0x88,
+              0x02, 0x00,  
+              0xDE, 0xAD  
+              ];
+          let mut decode_size: u16 = 0;
+
+          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+          assert_eq!(22, decode_size);
+      }
+
+      #[test]
+      fn decode_with_source_and_no_destination_successfully() {
+          let mut ph: PacketHeader = PacketHeader::default();
+          let raw: [u8; 20] = 
+              [
+              0x04,   // with sourid and destination group id
+              0x12, 0x34,  
+              0x20,  // with MX(flag for extension) set and session type = 1(group)
+              0x56, 0x34, 0x12, 0x00,
+              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
+              0x02, 0x00,  
+              0xDE, 0xAD  
+              ];
+          let mut decode_size: u16 = 0;
+
+          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+          assert_eq!(20, decode_size);
+      }
+
+      #[test]
+      fn decode_with_no_source_and_no_destination_id_successfully() {
+          let mut ph: PacketHeader = PacketHeader::default();
+          let raw: [u8; 12] = 
+              [
+              0x00,   // with no sourid and no destination id
+              0x12, 0x34,  
+              0x20,  // with MX(flag for extension) set and session type = 0
+              0x56, 0x34, 0x12, 0x00,
+              0x02, 0x00,  
+              0xDE, 0xAD  
+              ];
+          let mut decode_size: u16 = 0;
+
+          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+          assert_eq!(12, decode_size);
       }
   }
 

@@ -105,6 +105,17 @@ impl PacketBuffer
         }
         return next;
     }
+    
+    pub fn consume_head(&mut self, mut consume_length: usize) {
+        if (consume_length as u32) > self.len {
+            consume_length = self.len as usize;
+        }
+        unsafe {
+            self.payload = self.payload.add(consume_length);
+        }
+        self.len = self.len - (consume_length as u32);
+        self.tot_len = self.tot_len - (consume_length as u32);
+    }
 
     pub fn has_chained_buffer(&self) -> bool {
         return self.chained_buffer().is_null() != true;
@@ -125,15 +136,23 @@ impl PacketBuffer
         }
     }
 
-    pub fn consume(&mut self, mut consume_length: u32) {
-        if consume_length > self.len {
-            consume_length = self.len;
+    pub fn consume(&mut self, mut consume_length: usize) -> * mut Self {
+        /*
+        */
+        let mut l_packet: * mut Self = self;
+        while l_packet.is_null() == false && consume_length > 0 {
+            unsafe {
+                let length: usize = (*l_packet).data_len() as usize;
+                if consume_length >= length {
+                    l_packet = Self::free_head(l_packet);
+                    consume_length = consume_length - length;
+                } else {
+                    (*l_packet).consume_head(consume_length);
+                    break;
+                }
+            }
         }
-        unsafe {
-            self.payload = self.payload.add(consume_length as usize);
-        }
-        self.len = self.len - consume_length;
-        self.tot_len = self.tot_len - consume_length;
+        return l_packet;
     }
 
     pub fn start(&mut self) -> * mut u8 {
@@ -262,7 +281,7 @@ impl PacketBufferHandle
         return buffer;
     }
 
-    pub fn consume(&mut self, consume_length: u32) {
+    pub fn consume(&mut self, consume_length: usize) {
         unsafe {
             (*self.m_buffer).consume(consume_length);
         }
