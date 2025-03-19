@@ -666,10 +666,57 @@ impl PayloadHeader {
     }
 
     pub fn decode(&mut self, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
-        chip_ok!()
+        let mut reader = Reader::default(data);
+        let mut header: u8 = 0;
+
+        reader.read_u8(&mut header).read_u8(&mut self.m_message_type).read_u16(&mut self.m_exchange_id).status()?;
+
+        self.m_exchange_flags = header::ExFlags::from_bits_retain(header);
+
+        let mut vendor_id: VendorId = VendorId::NotSpecified;
+
+        if self.have_vendor_id() {
+            let mut vendor_id_raw: u16 = 0;
+            reader.read_u16(&mut vendor_id_raw).status()?;
+            vendor_id = VendorId::from(vendor_id_raw);
+        } else {
+            vendor_id = VendorId::Common;
+        }
+
+        let mut protocol_id: u16 = 0;
+        reader.read_u16(&mut protocol_id).status()?;
+
+        self.m_protocol_id = protocols::Id::default(vendor_id, protocol_id);
+
+        if self.m_exchange_flags.contains(header::ExFlagValues::KExchangeFlagAckMsg) {
+            let mut ack_message_counter: u32 = 0;
+            reader.read_u32(&mut ack_message_counter).status()?;
+            self.m_ack_message_counter = Some(ack_message_counter);
+        } else {
+            self.m_ack_message_counter = None;
+        }
+
+        let mut err = chip_ok!();
+        if self.m_exchange_flags.contains(header::ExFlagValues::KExchangeFlagSecuredExtension) {
+            let mut sx_length: u16 = 0;
+            reader.read_u16(&mut sx_length).status()?;
+            verify_or_return_error!(usize::from(sx_length) <= reader.remaining(), err, err = Err(chip_error_internal!()));
+            reader.skip(sx_length.into());
+        }
+
+        let octets_read: u16 = reader.octets_read().try_into().unwrap();
+        *decode_size = octets_read;
+
+        err
     }
 
     pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        let packet_buffer: * mut PacketBuffer = buf.get_raw();
+        let mut header_size: u16 = 0;
+        unsafe {
+            self.decode_with_raw((*packet_buffer).start(), (*packet_buffer).data_len().try_into().unwrap(), &mut header_size)?;
+            (*packet_buffer).consume_head(header_size.try_into().unwrap());
+        }
         chip_ok!()
     }
 
@@ -861,6 +908,29 @@ mod test {
       fn set_exchange_id() {
           let ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0x11);
           assert_eq!(0x11, ph.get_exchange_id());
+      }
+
+      #[test]
+      fn decode_with_vendor_id_and_ack_message_counter_successfully() {
+          let mut ph: PayloadHeader = PayloadHeader::default();
+          let raw: [u8; 16] = 
+              [
+              0x1A, // with security extenstion and vendor id and a ack message
+              0x12, // message type(op code)
+              0xAA, 0xBB,  // Exchange ID
+              0xF1, 0xFF, // Vendor Test 1
+              0x11, 0x22, // protocol ID
+              0x99, 0x88, 0x77, 0x66, // Ack Message Counter
+              0x02, 0x00,  
+              0xDE, 0xAD  
+              ];
+          let mut decode_size: u16 = 0;
+
+          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+          assert_eq!(16, decode_size);
+          assert_eq!(0xBBAA, ph.get_exchange_id());
+          assert_eq!(protocols::Id::const_default(0xFFF1.into(), 0x2211), ph.get_protocol_id());
+          assert_eq!(0x66778899, ph.get_ack_message_counter().unwrap());
       }
   }
 }

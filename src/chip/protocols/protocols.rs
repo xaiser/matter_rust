@@ -1,6 +1,6 @@
 use crate::chip::VendorId;
 
-#[derive(PartialEq,Copy,Clone)]
+#[derive(Debug,PartialEq,Copy,Clone)]
 pub struct Id {
     m_vendor_id: VendorId,
     m_protocol_id: u16,
@@ -9,6 +9,12 @@ pub struct Id {
 impl Id {
     pub const KVENDOR_ID_SHIFT: u32 = 16;
     pub const fn const_default(vendor_id: VendorId, protocol_id: u16) -> Self {
+        Id {
+            m_vendor_id: vendor_id,
+            m_protocol_id: protocol_id,
+        }
+    }
+    pub fn default(vendor_id: VendorId, protocol_id: u16) -> Self {
         Id {
             m_vendor_id: vendor_id,
             m_protocol_id: protocol_id,
