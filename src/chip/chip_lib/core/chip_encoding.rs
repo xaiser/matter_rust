@@ -175,6 +175,8 @@ pub fn swap_big_to_host_i64(in_value: i64) -> i64 {
 }
 
 pub mod little_endian {
+    use core::ptr;
+
     pub trait HostSwap {
         type ValueType;
         fn host_swap(v: Self::ValueType) -> Self::ValueType;
@@ -243,9 +245,72 @@ pub mod little_endian {
         }
     }
 
+    #[inline]
+    pub fn write_u8(p: &mut [u8], v: u8) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_u16(p: &mut [u8], v: u16) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_u32(p: &mut [u8], v: u32) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_u64(p: &mut [u8], v: u64) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_i8(p: &mut [u8], v: i8) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_i16(p: &mut [u8], v: i16) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_i32(p: &mut [u8], v: i32) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[inline]
+    pub fn write_i64(p: &mut [u8], v: i64) {
+            p.copy_from_slice(&v.to_le_bytes());
+    }
+
+    macro_rules! define_write_raw {
+        ($name:ident, $ty:ty) => {
+            #[inline]
+            pub fn $name(p: &mut *mut u8, v: $ty) {
+                unsafe {
+                    let bytes = v.to_le_bytes();
+                    ptr::copy_nonoverlapping(bytes.as_ptr(), *p, bytes.len());
+                    *p = (*p).add(bytes.len());
+                }
+            }
+        };
+    }
+
+    define_write_raw!(write_u8_raw, u8);
+    define_write_raw!(write_u16_raw, u16);
+    define_write_raw!(write_u32_raw, u32);
+    define_write_raw!(write_u64_raw, u64);
+    define_write_raw!(write_i8_raw, i8);
+    define_write_raw!(write_i16_raw, i16);
+    define_write_raw!(write_i32_raw, i32);
+    define_write_raw!(write_i64_raw, i64);
 }
 
 pub mod big_endian {
+    use core::ptr;
+
     pub trait HostSwap {
         type ValueType;
         fn host_swap(v: Self::ValueType) -> Self::ValueType;
@@ -313,4 +378,66 @@ pub mod big_endian {
             super::swap_big_to_host_i64(v)
         }
     }
+
+    #[inline]
+    pub fn write_u8(p: &mut [u8], v: u8) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_u16(p: &mut [u8], v: u16) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_u32(p: &mut [u8], v: u32) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_u64(p: &mut [u8], v: u64) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_i8(p: &mut [u8], v: i8) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_i16(p: &mut [u8], v: i16) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_i32(p: &mut [u8], v: i32) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    #[inline]
+    pub fn write_i64(p: &mut [u8], v: i64) {
+            p.copy_from_slice(&v.to_be_bytes());
+    }
+
+    macro_rules! define_write_raw {
+        ($name:ident, $ty:ty) => {
+            #[inline]
+            pub fn $name(p: &mut *mut u8, v: $ty) {
+                unsafe {
+                    let bytes = v.to_be_bytes();
+                    ptr::copy_nonoverlapping(bytes.as_ptr(), *p, bytes.len());
+                    *p = (*p).add(bytes.len());
+                }
+            }
+        };
+    }
+
+    define_write_raw!(write_u8_raw, u8);
+    define_write_raw!(write_u16_raw, u16);
+    define_write_raw!(write_u32_raw, u32);
+    define_write_raw!(write_u64_raw, u64);
+    define_write_raw!(write_i8_raw, i8);
+    define_write_raw!(write_i16_raw, i16);
+    define_write_raw!(write_i32_raw, i32);
+    define_write_raw!(write_i64_raw, i64);
 }

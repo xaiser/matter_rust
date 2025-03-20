@@ -8,6 +8,7 @@ use crate::chip::chip_lib::support::buffer_reader::little_endian::Reader;
 use crate::chip::chip_lib::support::buffer_reader::BufferReader;
 use crate::chip::protocols::protocols;
 use crate::chip::VendorId;
+use crate::chip::chip_lib::core::chip_encoding::little_endian;
 
 use crate::ChipError;
 use crate::ChipErrorResult;
@@ -17,6 +18,7 @@ use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_version_mismatch;
 use crate::chip_error_internal;
+use crate::chip_error_invalid_argument;
 
 use core::str::FromStr;
 use crate::chip_log_detail;
@@ -106,6 +108,7 @@ pub mod header {
     }
 
     bitflags! {
+        #[derive(Copy,Clone)]
         pub struct MsgFlagValues: u8 {
             // Header flag specifying that a source node id is included in the header.
             const KSourceNodeIdPresent       = 0b00000100;
@@ -513,7 +516,37 @@ impl PacketHeader {
      * Possible failures:
      *    CHIP_ERROR_INVALID_ARGUMENT on insufficient buffer size
      */
-    pub fn encode(&self, data: &[u8], encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+        verify_or_return_error!(data.len() >= self.encode_size_bytes().into(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(!(self.m_destination_node_id.is_some() && self.m_destination_group_id.is_some()), Err(chip_error_internal!()));
+        verify_or_return_error!(self.is_session_type_valid(), Err(chip_error_internal!()));
+        let mut message_flags: header::MsgFlags = self.m_msg_flags.clone();
+        message_flags.set(header::MsgFlagValues::KSourceNodeIdPresent, self.m_source_node_id.is_some());
+        message_flags.set(header::MsgFlagValues::KDestinationNodeIdPresent, self.m_destination_node_id.is_some());
+        message_flags.set(header::MsgFlagValues::KDestinationGroupIdPresent, self.m_destination_group_id.is_some());
+
+        let msg_flags: u8 = ((Self::KMSG_HEADER_VERSION << internal::KVERSION_SHIFT) as u8) | (message_flags.bits() & internal::KMSG_FLAGS_MASK);
+        let mut p: * mut u8 = data.as_mut_ptr();
+        little_endian::write_u8_raw(&mut p, msg_flags);
+        little_endian::write_u16_raw(&mut p, self.m_sessino_id);
+        little_endian::write_u8_raw(&mut p, self.m_sec_flags.bits());
+        little_endian::write_u32_raw(&mut p, self.m_message_counter);
+
+        if self.m_source_node_id.is_some() {
+            little_endian::write_u64_raw(&mut p, self.m_source_node_id.clone().unwrap());
+        }
+        if self.m_destination_node_id.is_some() {
+            little_endian::write_u64_raw(&mut p, self.m_destination_node_id.clone().unwrap());
+        }
+        if self.m_destination_group_id.is_some() {
+            little_endian::write_u16_raw(&mut p, self.m_destination_group_id.clone().unwrap());
+        }
+
+        unsafe {
+            verify_or_return_error!(p.offset_from(data.as_ptr()) == (self.encode_size_bytes().try_into().unwrap()), Err(chip_error_internal!()));
+            *encode_size = p.offset_from(data.as_ptr()).try_into().unwrap();
+        }
+
         chip_ok!()
     }
 
@@ -521,9 +554,9 @@ impl PacketHeader {
         chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode_at_start(&self, buf: &mut PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
         unsafe {
-            return self.encode(slice::from_raw_parts((*(buf.get_raw())).start(), (*(buf.get_raw())).data_len() as usize), encode_size);
+            return self.encode(slice::from_raw_parts_mut((*(buf.get_raw())).start(), (*(buf.get_raw())).data_len() as usize), encode_size);
         }
     }
 
@@ -892,6 +925,33 @@ mod test {
           assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
           assert_eq!(12, decode_size);
       }
+
+      #[test]
+      fn encode_with_source_and_destination_id_successfully() {
+          let mut ph: PacketHeader = PacketHeader::default().set_session_id(0x3412).set_message_counter(0x00123456).set_source_node_id(0x1122334455667788).set_destination_node_id(0x2233445566778899);
+          const PACKET_LEN: usize = 24;
+          let expected_packet: [u8; PACKET_LEN] = 
+              [
+              0x05,   // with sourid and destination id
+              0x12, 0x34,  
+              0x00,  // with session type = 0
+              0x56, 0x34, 0x12, 0x00,
+              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
+              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
+              ];
+          let mut output: [u8; PACKET_LEN] = [0; PACKET_LEN];
+          let mut encode_size: u16 = 0;
+
+          ph.set_message_flags_raw(0x05);
+          ph.set_security_flags_raw(0x00);
+
+          assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
+          assert_eq!(PACKET_LEN, encode_size.into());
+          for i in 0..PACKET_LEN {
+              assert_eq!(expected_packet[i], output[i]);
+          }
+      }
+
   }
 
   mod test_payload_header {
