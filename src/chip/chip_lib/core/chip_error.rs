@@ -244,6 +244,13 @@ macro_rules! chip_error_incorrect_state{
 }
 
 #[macro_export]
+macro_rules! chip_error_no_memory{
+    () => {
+        chip_core_error!(0x0b)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_no_message_handler{
     () => {
         chip_core_error!(0x0c)
@@ -254,6 +261,13 @@ macro_rules! chip_error_no_message_handler{
 macro_rules! chip_error_buffer_too_small{
     () => {
         chip_core_error!(0x19)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_wrong_encryption_type_from_peer{
+    () => {
+        chip_core_error!(0x80)
     };
 }
 

@@ -19,6 +19,8 @@ use crate::chip_sdk_error;
 use crate::chip_error_version_mismatch;
 use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
+use crate::chip_error_no_memory;
+use crate::chip_error_wrong_encryption_type_from_peer;
 
 use core::str::FromStr;
 use crate::chip_log_detail;
@@ -554,7 +556,7 @@ impl PacketHeader {
         let header_size: u16 = self.encode_size_bytes();
         let pb: * mut PacketBuffer = buf.get_raw();
         unsafe {
-            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_internal!()));
+            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_no_memory!()));
             (*pb).set_start((*pb).start().sub(header_size as usize));
         }
         let mut actual_encoded_header_size: u16 = 0;
@@ -794,11 +796,23 @@ impl PayloadHeader {
     }
 
     pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        let header_size: u16 = self.encode_size_bytes();
+        let pb: * mut PacketBuffer = buf.get_raw();
+        unsafe {
+            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_no_memory!()));
+            (*pb).set_start((*pb).start().sub(header_size as usize));
+        }
+        let mut actual_encoded_header_size: u16 = 0;
+        self.encode_at_start(buf, &mut actual_encoded_header_size)?;
+        verify_or_return_error!(actual_encoded_header_size == header_size, Err(chip_error_internal!()));
         chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
-        chip_ok!()
+    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
+        let pb: * mut PacketBuffer = buf.get_raw();
+        unsafe {
+            return self.encode(slice::from_raw_parts_mut((*pb).start(), (*pb).data_len() as usize), encode_size);
+        }
     }
 
     fn set_protocol(&mut self, protocol: protocols::Id) {
@@ -811,12 +825,17 @@ impl PayloadHeader {
     }
 }
 
+#[derive(Default)]
 pub struct MessageAuthenticationCode {
     m_tag: [u8; KMAX_TAG_LEN],
 }
 
 impl MessageAuthenticationCode {
-    pub fn get_tag(&self) -> * const u8 {
+    pub fn get_tag(&self) -> &[u8] {
+        return &self.m_tag[..];
+    }
+
+    pub fn get_tag_raw(&self) -> * const u8 {
         self.m_tag.as_ptr()
     }
 
@@ -836,6 +855,15 @@ impl MessageAuthenticationCode {
     }
 
     pub fn decode(&mut self, packet_header: &PacketHeader, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
+        let tag_len: u16 = packet_header.mic_tag_length();
+
+        verify_or_return_error!(tag_len != 0, Err(chip_error_wrong_encryption_type_from_peer!()));
+        verify_or_return_error!(data.len() >= (tag_len as usize), Err(chip_error_invalid_argument!()));
+
+        self.m_tag.copy_from_slice(&data[..(tag_len as usize)]);
+
+        *decode_size = tag_len;
+
         chip_ok!()
     }
 
@@ -846,6 +874,15 @@ impl MessageAuthenticationCode {
     }
 
     pub fn encode(&self, packet_header: &PacketHeader, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+        let tag_len: u16 = packet_header.mic_tag_length();
+
+        verify_or_return_error!(tag_len != 0, Err(chip_error_wrong_encryption_type_from_peer!()));
+        verify_or_return_error!(data.len() >= (tag_len as usize), Err(chip_error_invalid_argument!()));
+
+        data.copy_from_slice(&self.m_tag[..(tag_len as usize)]);
+
+        *encode_size = tag_len;
+
         chip_ok!()
     }
 
@@ -1077,6 +1114,49 @@ mod test {
           assert_eq!(PAYLOAD_LENGTH, encode_size.into());
           for i in 0..PAYLOAD_LENGTH {
               assert_eq!(expected_output[i], output[i]);
+          }
+      }
+  }
+
+  mod test_authentication_code {
+      use super::super::*;
+      use std::*;
+
+      #[test]
+      fn create_default() {
+          let mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
+          assert_eq!(KMAX_TAG_LEN, mac.get_tag().len());
+      }
+
+      #[test]
+      fn decode() {
+          // create an encrypted header by giving a session id other than UNSECURED id
+          let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
+          let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = std::array::from_fn(|i| i as u8);
+          let mut mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
+          let mut decode_size: u16 = 0;
+          assert_eq!(true, mac.decode(&ph, &expected[..], &mut decode_size).is_ok());
+          assert_eq!(ph.mic_tag_length(), decode_size);
+
+          let output: &[u8] = mac.get_tag();
+          for i in 0..ph.mic_tag_length() as usize {
+              assert_eq!(expected[i], output[i]);
+          }
+      }
+
+      #[test]
+      fn encode() {
+          // create an encrypted header by giving a session id other than UNSECURED id
+          let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
+          let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = std::array::from_fn(|i| i as u8);
+          let mut output: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = [0; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES];
+          let mut mac: MessageAuthenticationCode = MessageAuthenticationCode::default().set_tag(&expected[..]);
+          let mut encode_size: u16 = 0;
+          assert_eq!(true, mac.encode(&ph, &mut output[..], &mut encode_size).is_ok());
+          assert_eq!(ph.mic_tag_length(), encode_size);
+
+          for i in 0..ph.mic_tag_length() as usize {
+              assert_eq!(expected[i], output[i]);
           }
       }
   }
