@@ -160,7 +160,7 @@ where
     }
 }
 
-impl<DelegateType> Init<DelegateType> for Test<DelegateType>
+impl<DelegateType> Init for Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
@@ -241,10 +241,12 @@ where
     */
 }
 
-impl<DelegateType> Base<DelegateType> for Test<DelegateType>
+impl<DelegateType> Base for Test<DelegateType>
 where
     DelegateType: RawTransportDelegate
 {
+    type DelegateType = DelegateType;
+
     fn set_delegate(&mut self, delegate: * mut DelegateType)
     {
         self.m_delegate = delegate;

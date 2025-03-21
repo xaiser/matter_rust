@@ -7,7 +7,7 @@ use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_no_message_handler;
 
-struct Tuple<DelegateType, T>
+pub struct Tuple<DelegateType, T>
 where
     DelegateType: RawTransportDelegate,
 {
