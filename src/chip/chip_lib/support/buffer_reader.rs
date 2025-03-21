@@ -1,9 +1,6 @@
 use crate::ChipError;
 use crate::ChipErrorResult;
 use crate::chip_no_error;
-use crate::chip_core_error;
-use crate::chip_sdk_error;
-use crate::chip::encoding;
 
 
 pub trait BufferReader<'a> {
@@ -209,10 +206,6 @@ pub mod little_endian {
     }
 
     impl<'a> Reader<'a> {
-        fn read_helper<T>(p: * const u8, dest: &mut T) {
-            let result: T;
-        }
-
         fn raw_read_low_level_be_careful<T>(&mut self, ret_val: &mut T)
             where
                 T: Default + crate::chip::encoding::little_endian::HostSwap<ValueType=T> + fmt::Debug
@@ -423,10 +416,6 @@ pub mod big_endian {
     }
 
     impl<'a> Reader<'a> {
-        fn read_helper<T>(p: * const u8, dest: &mut T) {
-            let result: T;
-        }
-
         fn raw_read_low_level_be_careful<T>(&mut self, ret_val: &mut T)
             where
                 T: Default + crate::chip::encoding::big_endian::HostSwap<ValueType=T> + fmt::Debug

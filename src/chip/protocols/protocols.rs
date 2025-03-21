@@ -36,9 +36,11 @@ impl Id {
         self.m_protocol_id
     }
 
+    /*
     fn to_uint32(&self) -> u32 {
         return (self.m_vendor_id as u32) << Self::KVENDOR_ID_SHIFT | (self.m_protocol_id as u32);
     }
+    */
 }
 
 macro_rules! chip_standard_protocol {
@@ -57,3 +59,17 @@ chip_standard_protocol!(user_directed_commissioning, 0x0003);
 chip_standard_protocol!(echo, 0x0004);
 
 pub const NOT_SPECIFIED: Id = Id::const_not_specified();
+
+#[cfg(test)]
+mod test {
+  use super::*;
+  use std::*;
+
+  /*
+  #[test]
+  fn to_uint32() {
+      let pid = Id::default(VendorId::Common, 0);
+      assert_eq!(0, pid.to_uint32());
+  }
+  */
+}

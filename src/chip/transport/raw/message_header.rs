@@ -10,9 +10,7 @@ use crate::chip::protocols::protocols;
 use crate::chip::VendorId;
 use crate::chip::chip_lib::core::chip_encoding::little_endian;
 
-use crate::ChipError;
 use crate::ChipErrorResult;
-use crate::chip_no_error;
 use crate::chip_ok;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
@@ -21,11 +19,6 @@ use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_no_memory;
 use crate::chip_error_wrong_encryption_type_from_peer;
-
-use core::str::FromStr;
-use crate::chip_log_detail;
-use crate::chip_internal_log;
-use crate::chip_internal_log_impl;
 
 use crate::chip_static_assert;
 use crate::verify_or_return_value;
@@ -717,7 +710,7 @@ impl PayloadHeader {
 
         self.m_exchange_flags = header::ExFlags::from_bits_retain(header);
 
-        let mut vendor_id: VendorId = VendorId::NotSpecified;
+        let vendor_id: VendorId;
 
         if self.have_vendor_id() {
             let mut vendor_id_raw: u16 = 0;
@@ -848,7 +841,7 @@ impl MessageAuthenticationCode {
         self
     }
 
-    pub fn set_tag_with_raw(mut self, tag: * const u8, len: usize) -> Self {
+    pub fn set_tag_with_raw(self, tag: * const u8, len: usize) -> Self {
         unsafe {
             return self.set_tag(slice::from_raw_parts(tag, len));
         }
@@ -1032,8 +1025,7 @@ mod test {
               0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
               0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
               ];
-          let mut output: [u8; PACKET_LEN] = [0; PACKET_LEN];
-          let mut encode_size: u16 = 0;
+          let output: [u8; PACKET_LEN] = [0; PACKET_LEN];
 
           ph.set_message_flags_raw(0x05);
           ph.set_security_flags_raw(0x00);
@@ -1092,7 +1084,7 @@ mod test {
 
       #[test]
       fn encode_with_vendor_id_and_ack_message_counter_successfully() {
-          let mut ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0xBBAA).set_ack_message_counter(0x66778899).set_message_type(protocols::Id::default(VendorId::TestVendor1, 0x2211), 0x12);
+          let ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0xBBAA).set_ack_message_counter(0x66778899).set_message_type(protocols::Id::default(VendorId::TestVendor1, 0x2211), 0x12);
           const PAYLOAD_LENGTH: usize = 12;
           let expected_output: [u8; PAYLOAD_LENGTH] = 
               [
@@ -1150,7 +1142,7 @@ mod test {
           let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
           let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = std::array::from_fn(|i| i as u8);
           let mut output: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = [0; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES];
-          let mut mac: MessageAuthenticationCode = MessageAuthenticationCode::default().set_tag(&expected[..]);
+          let mac: MessageAuthenticationCode = MessageAuthenticationCode::default().set_tag(&expected[..]);
           let mut encode_size: u16 = 0;
           assert_eq!(true, mac.encode(&ph, &mut output[..], &mut encode_size).is_ok());
           assert_eq!(ph.mic_tag_length(), encode_size);

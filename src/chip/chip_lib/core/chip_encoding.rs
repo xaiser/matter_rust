@@ -1,7 +1,3 @@
-#![no_std]
-
-use core::convert::{TryFrom, TryInto};
-
 #[cfg(target_endian = "little")]
 pub fn swap_little_to_host_u8(in_value: u8) -> u8 {
     in_value

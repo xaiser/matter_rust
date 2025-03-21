@@ -5,10 +5,6 @@ extern crate std;
 #[cfg(not(test))]
 use std::*;
 
-use core::str::FromStr;
-use crate::chip_log_detail;
-use crate::chip_internal_log;
-use crate::chip_internal_log_impl;
 
 use super::system_config::*;
 use crate::chip_system_align_size;
