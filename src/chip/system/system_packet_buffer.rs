@@ -5,6 +5,11 @@ extern crate std;
 #[cfg(not(test))]
 use std::*;
 
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+
 use super::system_config::*;
 use crate::chip_system_align_size;
 
@@ -42,6 +47,14 @@ impl PacketBuffer
 
     pub fn chained_buffer(&self) -> * mut PacketBuffer {
         return self.next;
+    }
+
+    pub fn alloc_size(&self) -> usize{
+        Self::KMAX_SIZE_WITHOUT_RESERVE.try_into().unwrap()
+    }
+
+    pub fn max_data_length(&self) -> usize {
+        return self.alloc_size() - (self.reserved_size() as usize);
     }
 
     pub fn build_free_list() -> * mut PacketBuffer {
@@ -155,12 +168,59 @@ impl PacketBuffer
         return l_packet;
     }
 
-    pub fn start(&mut self) -> * mut u8 {
+    pub fn start(&self) -> * mut u8 {
         return self.payload;
+    }
+
+    pub fn set_start(&mut self, mut new_start: * mut u8) {
+        let start: * mut u8 = self.reserve_start();
+        unsafe {
+            let end: * mut u8 = self.start().add(self.max_data_length());
+
+            if new_start < start {
+                new_start = start;
+            } else if new_start > end {
+                new_start = end;
+            }
+
+            let mut l_delta = new_start.offset_from(self.payload);
+            if l_delta > 0 && self.len < (l_delta as u32) {
+                l_delta = self.len as isize;
+            }
+
+            self.len = (self.len as isize - l_delta) as u32;
+            self.tot_len = (self.tot_len as isize - l_delta) as u32;
+            self.payload = new_start;
+        }
     }
 
     pub fn data_len(&mut self) -> u32 {
         return self.len;
+    }
+
+    pub fn reserved_size(&self) -> u16 {
+        unsafe {
+            return self.start().offset_from(self.reserve_start_const()) as u16;
+        }
+    }
+
+    pub fn ensure_reserved_size(&mut self, reserved_size: u16) -> bool {
+        let current_reserved_size: u16 = self.reserved_size();
+        if reserved_size <= current_reserved_size {
+            return true;
+        }
+
+        if (((reserved_size as u32) + self.len) as usize) > self.alloc_size() {
+            return false;
+        }
+
+        let move_length: usize = (reserved_size - current_reserved_size).into();
+        unsafe {
+            ptr::copy(self.payload, self.payload.add(move_length), self.len.try_into().unwrap());
+            self.payload  = self.payload.add(move_length);
+        }
+
+        true
     }
 }
 
@@ -556,5 +616,42 @@ mod test {
               assert_eq!(12, *((*b1.get_raw()).payload));
           }
       }
+
+      #[test]
+      fn ensure_reserved_size_successfully() {
+          set_up();
+          let data1: [u8; 4] = [11, 12, 13, 14];
+          let b1 = PacketBufferHandle::new_with_data(&data1[0..4],0,8).unwrap();
+          let pb: * mut PacketBuffer = b1.get_raw();
+          unsafe {
+              assert_eq!(true, (*pb).ensure_reserved_size(7));
+          }
+      }
+
+      #[test]
+      fn ensure_reserved_size_too_big() {
+          set_up();
+          let data1: [u8; 4] = [11, 12, 13, 14];
+          let b1 = PacketBufferHandle::new_with_data(&data1[0..4],0,8).unwrap();
+          let pb: * mut PacketBuffer = b1.get_raw();
+          unsafe {
+              assert_eq!(false, (*pb).ensure_reserved_size(PacketBuffer::KMAX_SIZE_WITHOUT_RESERVE as u16));
+          }
+      }
+
+      #[test]
+      fn ensure_reserved_with_data_moving() {
+          set_up();
+          let data1: [u8; 4] = [11, 12, 13, 14];
+          let b1 = PacketBufferHandle::new_with_data(&data1[0..4],0,8).unwrap();
+          let pb: * mut PacketBuffer = b1.get_raw();
+          unsafe {
+              let before_move: * mut u8 = (*pb).start();
+              assert_eq!(true, (*pb).ensure_reserved_size(10));
+              let after_move: * mut u8 = (*pb).start();
+              assert_ne!(before_move, after_move);
+          }
+      }
   }
+
 }

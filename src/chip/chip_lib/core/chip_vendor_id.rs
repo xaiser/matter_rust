@@ -14,3 +14,9 @@ impl From<u16> for VendorId {
         }
     }
 }
+
+impl Into<u16> for VendorId {
+    fn into(self) -> u16 {
+        self as u16
+    }
+}

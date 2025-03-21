@@ -551,10 +551,19 @@ impl PacketHeader {
     }
 
     pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        let header_size: u16 = self.encode_size_bytes();
+        let pb: * mut PacketBuffer = buf.get_raw();
+        unsafe {
+            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_internal!()));
+            (*pb).set_start((*pb).start().sub(header_size as usize));
+        }
+        let mut actual_encoded_header_size: u16 = 0;
+        self.encode_at_start(buf, &mut actual_encoded_header_size)?;
+        verify_or_return_error!(actual_encoded_header_size == header_size, Err(chip_error_internal!()));
         chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: &mut PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
         unsafe {
             return self.encode(slice::from_raw_parts_mut((*(buf.get_raw())).start(), (*(buf.get_raw())).data_len() as usize), encode_size);
         }
@@ -760,6 +769,27 @@ impl PayloadHeader {
     }
 
     pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+        verify_or_return_error!(data.len() >= self.encode_size_bytes().into(), Err(chip_error_invalid_argument!()));
+        let mut p: * mut u8 = data.as_mut_ptr();
+        let header: u8 = self.m_exchange_flags.bits();
+
+        little_endian::write_u8_raw(&mut p, header);
+        little_endian::write_u8_raw(&mut p, self.m_message_type);
+        little_endian::write_u16_raw(&mut p, self.m_exchange_id);
+
+        if self.have_vendor_id() {
+            little_endian::write_u16_raw(&mut p, self.m_protocol_id.get_vendor_id().into());
+        }
+
+        little_endian::write_u16_raw(&mut p, self.m_protocol_id.get_protocol_id());
+        if self.m_ack_message_counter.is_some() {
+            little_endian::write_u32_raw(&mut p, self.m_ack_message_counter.clone().unwrap());
+        }
+        unsafe {
+            verify_or_return_error!(p.offset_from(data.as_ptr()) == (self.encode_size_bytes() as isize), Err(chip_error_internal!()));
+            *encode_size = p.offset_from(data.as_ptr()) as u16;
+        }
+
         chip_ok!()
     }
 
@@ -952,6 +982,36 @@ mod test {
           }
       }
 
+      #[test]
+      fn encode_before_data() {
+          let mut ph: PacketHeader = PacketHeader::default().set_session_id(0x3412).set_message_counter(0x00123456).set_source_node_id(0x1122334455667788).set_destination_node_id(0x2233445566778899);
+          const PACKET_LEN: usize = 24;
+          let expected_packet: [u8; PACKET_LEN] = 
+              [
+              0x05,   // with sourid and destination id
+              0x12, 0x34,  
+              0x00,  // with session type = 0
+              0x56, 0x34, 0x12, 0x00,
+              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
+              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
+              ];
+          let mut output: [u8; PACKET_LEN] = [0; PACKET_LEN];
+          let mut encode_size: u16 = 0;
+
+          ph.set_message_flags_raw(0x05);
+          ph.set_security_flags_raw(0x00);
+
+          let pbh = PacketBufferHandle::new_with_data(&output[..],0,0).unwrap();
+
+          assert_eq!(true, ph.encode_before_data(&pbh).is_ok());
+          unsafe {
+              let buf = pbh.get_raw();
+              for i in 0..PACKET_LEN {
+                  assert_eq!(expected_packet[i], *(*buf).start().add(i));
+              }
+          }
+      }
+
   }
 
   mod test_payload_header {
@@ -991,6 +1051,33 @@ mod test {
           assert_eq!(0xBBAA, ph.get_exchange_id());
           assert_eq!(protocols::Id::const_default(0xFFF1.into(), 0x2211), ph.get_protocol_id());
           assert_eq!(0x66778899, ph.get_ack_message_counter().unwrap());
+      }
+
+      #[test]
+      fn encode_with_vendor_id_and_ack_message_counter_successfully() {
+          let mut ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0xBBAA).set_ack_message_counter(0x66778899).set_message_type(protocols::Id::default(VendorId::TestVendor1, 0x2211), 0x12);
+          const PAYLOAD_LENGTH: usize = 12;
+          let expected_output: [u8; PAYLOAD_LENGTH] = 
+              [
+              0x12, // with vendor id and a ack message
+              0x12, // message type(op code)
+              0xAA, 0xBB,  // Exchange ID
+              0xF1, 0xFF, // Vendor Test 1
+              0x11, 0x22, // protocol ID
+              0x99, 0x88, 0x77, 0x66, // Ack Message Counter
+              ];
+          let mut output: [u8; PAYLOAD_LENGTH] = [0; PAYLOAD_LENGTH];
+          let mut encode_size: u16 = 0;
+
+          //ph.set_message_type(protocols::Id{ m_vendor_id: VendorId::TestVendor1, m_protocol_id: 0x2211}, 0x12);
+          //ph.set_exchange_id(0xBBAA);
+          //ph.set_ack_message_counter(0x66778899);
+
+          assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
+          assert_eq!(PAYLOAD_LENGTH, encode_size.into());
+          for i in 0..PAYLOAD_LENGTH {
+              assert_eq!(expected_output[i], output[i]);
+          }
       }
   }
 }
