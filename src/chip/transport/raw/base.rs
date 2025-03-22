@@ -32,7 +32,8 @@ pub trait Base<T: RawTransportDelegate> {
 pub trait Base {
     type DelegateType: RawTransportDelegate;
 
-    fn set_delegate(&mut self, delegate: * mut Self::DelegateType);
+    fn set_delegate(&mut self, _delegate: * mut Self::DelegateType)
+    {}
 
     fn send_message(&mut self, peer_address: PeerAddress, msg_buf: PacketBufferHandle) -> ChipError;
 
