@@ -1,137 +1,57 @@
 use super::base::{Init,RawTransportDelegate,Base,MessageTransportContext};
 use super::peer_address::PeerAddress;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
-use core::marker::PhantomData;
+
 use crate::ChipError;
+use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_no_message_handler;
 
-pub struct Tuple<DelegateType, T>
-where
-    DelegateType: RawTransportDelegate,
+pub struct Tuple<T>
 {
     m_transports: T,
-    phantom: PhantomData<DelegateType>,
 }
 
-impl<Type0, DelegateType> Tuple<DelegateType, (Type0,)>
-    where
-        Type0: Init<DelegateType> + Base<DelegateType>,
-        DelegateType: RawTransportDelegate,
-{
-    #[allow(dead_code)]
-    pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType) -> ChipError
-    {
-        let err = self.m_transports.0.init(p0);
-        if err.is_success() == false {
-            return err;
+macro_rules! impl_init_for_tuple {
+    ($($index:tt; $type:ident),+) => {
+        impl<$($type,)+> Tuple<($($type,)+)>
+            where
+                $($type: Init + Base,)+
+        {
+            #[allow(dead_code)]
+            pub fn init(&mut self, delegates: ($(* mut <$type as Base>::DelegateType,)+), ps: ($(<$type as Init>::InitParamType,)+)) -> ChipError {
+                let mut err: ChipError;
+                $(err = self.m_transports.$index.init(ps.$index);
+                  if err.is_success() == false { return err; }
+                  self.m_transports.$index.set_delegate(delegates.$index);)+
+                return err;
+            }
         }
-        self.m_transports.0.set_delegate(delegate);
-        return err;
-    }
+    };
 }
 
-impl<Type0, Type1, DelegateType> Tuple<DelegateType, (Type0,Type1)>
-    where
-        Type0: Init<DelegateType> + Base<DelegateType>,
-        Type1: Init<DelegateType> + Base<DelegateType>,
-        DelegateType: RawTransportDelegate,
-{
-    #[allow(dead_code)]
-    pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType, p1: <Type1 as Init<DelegateType>>::InitParamType) -> ChipError
-    {
-        let err = self.m_transports.0.init(p0);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.0.set_delegate(delegate);
-        let err = self.m_transports.1.init(p1);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.1.set_delegate(delegate);
-        return err;
-    }
-}
+impl_init_for_tuple!(0; Type0);
+impl_init_for_tuple!(0; Type0,1; Type1);
+impl_init_for_tuple!(0; Type0,1; Type1,2; Type2);
+impl_init_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3);
+impl_init_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3,4; Type4);
 
-impl<Type0, Type1, Type2, DelegateType> Tuple<DelegateType, (Type0,Type1,Type2)>
-    where
-        Type0: Init<DelegateType> + Base<DelegateType>,
-        Type1: Init<DelegateType> + Base<DelegateType>,
-        Type2: Init<DelegateType> + Base<DelegateType>,
-        DelegateType: RawTransportDelegate,
-{
-    #[allow(dead_code)]
-    pub fn init(&mut self, delegate: * mut DelegateType, p0: <Type0 as Init<DelegateType>>::InitParamType, p1: <Type1 as Init<DelegateType>>::InitParamType, p2: <Type2 as Init<DelegateType>>::InitParamType) -> ChipError
-    {
-        let err = self.m_transports.0.init(p0);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.0.set_delegate(delegate);
-        let err = self.m_transports.1.init(p1);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.1.set_delegate(delegate);
-        let err = self.m_transports.2.init(p2);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.2.set_delegate(delegate);
-        return err;
-    }
-}
+pub struct DummyDelegate;
 
-impl<Type0, Type1, Type2, Type3, DelegateType> Tuple<DelegateType, (Type0,Type1,Type2,Type3)>
-    where
-        Type0: Init<DelegateType> + Base<DelegateType>,
-        Type1: Init<DelegateType> + Base<DelegateType>,
-        Type2: Init<DelegateType> + Base<DelegateType>,
-        Type3: Init<DelegateType> + Base<DelegateType>,
-        DelegateType: RawTransportDelegate,
-{
-    #[allow(dead_code)]
-    pub fn init(&mut self, delegate: * mut DelegateType,
-        p0: <Type0 as Init<DelegateType>>::InitParamType,
-        p1: <Type1 as Init<DelegateType>>::InitParamType,
-        p2: <Type2 as Init<DelegateType>>::InitParamType,
-        p3: <Type3 as Init<DelegateType>>::InitParamType) -> ChipError
-    {
-        let err = self.m_transports.0.init(p0);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.0.set_delegate(delegate);
-        let err = self.m_transports.1.init(p1);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.1.set_delegate(delegate);
-        let err = self.m_transports.2.init(p2);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.2.set_delegate(delegate);
-        let err = self.m_transports.3.init(p3);
-        if err.is_success() == false {
-            return err;
-        }
-        self.m_transports.3.set_delegate(delegate);
-        return err;
-    }
+impl RawTransportDelegate for DummyDelegate {
+    fn handle_message_received(&self, _peer_address: PeerAddress, _msg: PacketBufferHandle,
+        _ctxt: * const MessageTransportContext)
+    {}
 }
 
 macro_rules! impl_base_for_tuple {
-    ($delegate:ident; $($index:tt: $type:ident),+) => {
-        impl<$($type,)+ $delegate> Base<$delegate> for Tuple<$delegate, ($($type,)+)>
+    ($($index:tt; $type:ident),+) => {
+        impl<$($type,)+> Base for Tuple<($($type,)+)>
             where
-                $($type: Init<$delegate> + Base<$delegate>,)+
-                $delegate: RawTransportDelegate,
+                $($type: Init + Base,)+
                 {
-                    #[allow(dead_code)]
-                    fn set_delegate(&mut self, _delegate: * mut $delegate) { }
+                    type DelegateType = DummyDelegate;
 
                     #[allow(dead_code)]
                     fn close(&mut self) {
@@ -160,10 +80,11 @@ macro_rules! impl_base_for_tuple {
     };
 }
 
-impl_base_for_tuple!(DelegateType; 0: Type0);
-impl_base_for_tuple!(DelegateType; 0: Type0, 1: Type1);
-impl_base_for_tuple!(DelegateType; 0: Type0, 1: Type1, 2: Type2);
-impl_base_for_tuple!(DelegateType; 0: Type0, 1: Type1, 2: Type2, 3: Type3);
+impl_base_for_tuple!(0; Type0);
+impl_base_for_tuple!(0; Type0,1; Type1);
+impl_base_for_tuple!(0; Type0,1; Type1,2; Type2);
+impl_base_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3);
+impl_base_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3,4; Type4);
 
 #[cfg(test)]
 mod test {
@@ -191,18 +112,9 @@ mod test {
       use crate::chip::chip_lib::support::fault_injection::fault_injection::{Manager, Identifier};
       static mut TEST_PARAMS: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
 
-      static mut TEST_TUPLE: Tuple<TestDelegate, (Test<TestDelegate>,)> = Tuple {
+      static mut TEST_TUPLE: Tuple<(Test<TestDelegate>,)> = Tuple {
           m_transports: (Test::default_const(),),
-          phantom: PhantomData,
       };
-
-      /*
-      const EXPECTED_SEND_PORT: u16 = 87;
-      const EXPECTED_SEND_ADDR: IPAddress = IPAddress {
-          addr: (1, 2, 3, 4)
-      };
-      const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
-      */
 
       #[derive(Default)]
       struct TestDelegate {
@@ -240,7 +152,7 @@ mod test {
           set_up();
           let mut delegate = TestDelegate::default();
           unsafe {
-              assert_eq!(chip_no_error!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS.assume_init_mut().clone()));
+              assert_eq!(chip_no_error!(), TEST_TUPLE.init((ptr::addr_of_mut!(delegate),), (TEST_PARAMS.assume_init_mut().clone(),)));
           }
       }
 
@@ -251,7 +163,7 @@ mod test {
           // fail at checked = 1
           let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultBind as Identifier, 0, 1);
           unsafe {
-              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS.assume_init_mut().clone()));
+              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init((ptr::addr_of_mut!(delegate),), (TEST_PARAMS.assume_init_mut().clone(),)));
           }
       }
   }
@@ -277,9 +189,8 @@ mod test {
       static mut TEST_PARAMS_1: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
       static mut TEST_PARAMS_2: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
 
-      static mut TEST_TUPLE: Tuple<TestDelegate, (Test<TestDelegate>,Test<TestDelegate>)> = Tuple {
+      static mut TEST_TUPLE: Tuple<(Test<TestDelegate>,Test<TestDelegate>)> = Tuple {
           m_transports: (Test::default_const(), Test::default_const()),
-          phantom: PhantomData,
       };
 
       #[derive(Default)]
@@ -322,7 +233,7 @@ mod test {
           set_up();
           let mut delegate = TestDelegate::default();
           unsafe {
-              assert_eq!(chip_no_error!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone()));
+              assert_eq!(chip_no_error!(), TEST_TUPLE.init((ptr::addr_of_mut!(delegate), ptr::addr_of_mut!(delegate)),(TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone())));
           }
       }
 
@@ -333,7 +244,7 @@ mod test {
           // fail at checked = 1
           let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultBind as Identifier, 0, 1);
           unsafe {
-              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone()));
+              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init((ptr::addr_of_mut!(delegate), ptr::addr_of_mut!(delegate)),(TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone())));
           }
       }
 
@@ -344,7 +255,7 @@ mod test {
           // fail at checked = 2
           let _ = get_manager().fail_at_fault(InetFaultInjectionID::KFaultBind as Identifier, 0, 2);
           unsafe {
-              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone()));
+              assert_eq!(chip_error_incorrect_state!(), TEST_TUPLE.init((ptr::addr_of_mut!(delegate), ptr::addr_of_mut!(delegate)),(TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone())));
           }
       }
   }
@@ -371,18 +282,11 @@ mod test {
       static mut TEST_PARAMS_IPV4: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
       static mut TEST_PARAMS_IPV6: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
 
-      static mut TEST_TUPLE: Tuple<TestDelegate, (Test<TestDelegate>,Test<TestDelegate>)> = Tuple {
+      static mut TEST_TUPLE: Tuple<(Test<TestDelegate>,Test<TestDelegate>)> = Tuple {
           m_transports: (Test::default_const(), Test::default_const()),
-          phantom: PhantomData,
       };
 
       const EXPECTED_SEND_PORT: u16 = 87;
-      /*
-      const EXPECTED_SEND_ADDR_IPV4: IPAddress = IPAddress::ANY_IPV4.clone();
-      const EXPECTED_SEND_ADDR_IPV6: IPAddress = IPAddress {
-          addr: (1, 2, 3, 4)
-      };
-      */
       const EXPECTED_SEND_MSG: [u8; 4] = [11, 12, 13, 14];
 
       #[derive(Default)]
@@ -425,7 +329,7 @@ mod test {
           set_up();
           let mut delegate = TestDelegate::default();
           unsafe {
-              TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone());
+              TEST_TUPLE.init((ptr::addr_of_mut!(delegate),ptr::addr_of_mut!(delegate)), (TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone()));
 
               let pa = PeerAddress::udp_addr_port_interface(IPAddress::ANY_IPV4.clone(),
               EXPECTED_SEND_PORT,
@@ -442,7 +346,7 @@ mod test {
           set_up();
           let mut delegate = TestDelegate::default();
           unsafe {
-              TEST_TUPLE.init(ptr::addr_of_mut!(delegate), TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone());
+              TEST_TUPLE.init((ptr::addr_of_mut!(delegate),ptr::addr_of_mut!(delegate)), (TEST_PARAMS_IPV4.assume_init_mut().clone(), TEST_PARAMS_IPV6.assume_init_mut().clone()));
 
               let pa = PeerAddress::udp_addr_port_interface(IPAddress { addr: (1,2,3,4) },
               EXPECTED_SEND_PORT,
