@@ -1,7 +1,7 @@
 use crate::chip::transport::PeerAddress;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use super::raw::base::{Base,Init,MessageTransportContext,RawTransportDelegate};
-//use super::raw::tuple::Tuple;
+use super::raw::tuple::Tuple;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -12,10 +12,9 @@ pub trait TransportMgrDelegate {
     fn on_message_received(&mut self, source: &PeerAddress, msg_buf: PacketBufferHandle, ctext: &MessageTransportContext);
 }
 
-/*
 pub struct TransportMgr<T>
 {
-    m_transports: Tuple<TransportMgr<T>, T>,
+    m_transports: Tuple<T>,
 }
 
 impl<T> RawTransportDelegate for TransportMgr<T> {
@@ -26,11 +25,11 @@ impl<T> RawTransportDelegate for TransportMgr<T> {
 
 impl<Type0> TransportMgr<(Type0,)> 
 where
-    Type0: Init<TransportMgr<Type0>> + Base<TransportMgr<Type0>>,
+    Type0: Init + Base,
 {
-    pub fn init(&mut self, p0: <Type0 as Init<TransportMgr<Type0>>>::InitParamType) -> ChipErrorResult {
+    pub fn init(&mut self, p0: <Type0 as Init>::InitParamType) -> ChipErrorResult {
         unsafe {
-            let err = self.m_transports.init(ptr::addr_of!(self) as * mut Self, p0);
+            let err = self.m_transports.init((ptr::addr_of!(self) as * mut <Type0 as Base>::DelegateType,), (p0,));
             if err.is_success() == false {
                 return Err(err);
             }
@@ -39,7 +38,6 @@ where
         chip_ok!()
     }
 }
-*/
 
 #[cfg(test)]
 mod test {
