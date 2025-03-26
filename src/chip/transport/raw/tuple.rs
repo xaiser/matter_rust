@@ -31,11 +31,34 @@ macro_rules! impl_init_for_tuple {
     };
 }
 
+macro_rules! impl_default_for_tuple {
+    ($($type:ident),+) => {
+        impl<$($type,)+> Default for Tuple<($($type,)+)>
+            where
+                //$($type: Default + Init + Base,)+
+                $($type: Default,)+
+        {
+            #[allow(dead_code)]
+            fn default() -> Self {
+                Self {
+                    m_transports: ($($type::default(),)+),
+                }
+            }
+        }
+    };
+}
+
 impl_init_for_tuple!(0; Type0);
 impl_init_for_tuple!(0; Type0,1; Type1);
 impl_init_for_tuple!(0; Type0,1; Type1,2; Type2);
 impl_init_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3);
 impl_init_for_tuple!(0; Type0,1; Type1,2; Type2,3; Type3,4; Type4);
+
+impl_default_for_tuple!(Type0);
+impl_default_for_tuple!(Type0,Type1);
+impl_default_for_tuple!(Type0,Type1,Type2);
+impl_default_for_tuple!(Type0,Type1,Type2,Type3);
+impl_default_for_tuple!(Type0,Type1,Type2,Type3,Type4);
 
 pub struct DummyDelegate;
 
