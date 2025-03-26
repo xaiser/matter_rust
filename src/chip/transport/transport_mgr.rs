@@ -25,7 +25,7 @@ where
 {
     fn default() -> Self {
         Self {
-            m_session_mgr: ptr::null_ptr_mut(),
+            m_session_mgr: ptr::null_mut(),
         }
     }
 }
@@ -46,37 +46,6 @@ where
     m_transports: Tuple<T>,
     m_receiver: TransportMgrReceiver<SessionMgrType>,
 }
-
-impl<T, SessionMgrType> Default for TransportMgr<T, SessionMgrType>
-where
-    SessionMgrType: TransportMgrDelegate,
-{
-    fn default() -> Self {
-        Self {
-            m_transports: Tuple::<T>::default(),
-            m_receiver: TransportMgrReceiver::<SessionMgrType>::default(),
-        }
-    }
-}
-
-/*
-impl<SessionMgrType, Type0> TransportMgr<(Type0,), SessionMgrType> 
-where
-    Type0: Init + Base,
-    SessionMgrType: TransportMgrDelegate,
-{
-    pub fn init(&mut self, p0: <Type0 as Init>::InitParamType) -> ChipErrorResult {
-        unsafe {
-            let err = self.m_transports.init((ptr::addr_of!(self.m_receiver) as * mut <Type0 as Base>::DelegateType,), (p0,));
-            if err.is_success() == false {
-                return Err(err);
-            }
-        }
-
-        chip_ok!()
-    }
-}
-*/
 
 macro_rules! impl_for_transport_mgr {
     ($($type:ident),+) => {
@@ -102,8 +71,29 @@ macro_rules! impl_for_transport_mgr {
     };
 }
 
+macro_rules! impl_default_for_transport_mgr {
+    ($($type:ident),+) => {
+        impl<SessionMgrType, $($type,)+> Default for TransportMgr<($($type,)+), SessionMgrType>
+            where
+                SessionMgrType: TransportMgrDelegate,
+                $($type: Default,)+
+        {
+            #[allow(dead_code)]
+            fn default() -> Self {
+                Self {
+                    m_transports: Tuple::<($($type,)+)>::default(),
+                    m_receiver: TransportMgrReceiver::<SessionMgrType>::default(),
+                }
+            }
+        }
+    };
+}
+
 impl_for_transport_mgr!(Type0);
 impl_for_transport_mgr!(Type0, Type1);
+
+impl_default_for_transport_mgr!(Type0);
+impl_default_for_transport_mgr!(Type0,Type1);
 
 #[cfg(test)]
 mod test {
@@ -135,8 +125,10 @@ mod test {
     {}
   }
 
-  type MgrType = TransportMgr<(Test<TransportMgrReceiver<SessionMgrStub>>,), SessionMgrStub>;
+  type TransType = Test<TransportMgrReceiver<SessionMgrStub>>;
+  type MgrType = TransportMgr<(Test<TransportMgrReceiver<SessionMgrStub>>,Test<TransportMgrReceiver<SessionMgrStub>>), SessionMgrStub>;
   static mut TRANS_MGR: mem::MaybeUninit<MgrType> = mem::MaybeUninit::uninit();
+  static mut SESSION_MGR: SessionMgrStub = SessionMgrStub::const_default();
 
   fn set_up() {
       unsafe {
@@ -153,15 +145,18 @@ mod test {
           TEST_PARAMS_2.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
 
           /* reinit the transport manager */
+          TRANS_MGR.write(MgrType::default());
+          SESSION_MGR = SessionMgrStub::const_default();
       }
   }
 
   #[test]
   fn init() {
-      /*
-      let tm: MgrType;
-      let tp: TestListenParameter<MgrType> = TestListenParameter<MgrType>::default();
-      assert_eq!(true, tm.init(tp).is_ok());
-      */
+      unsafe {
+          set_up();
+          let tm = TRANS_MGR.assume_init_mut();
+          tm.m_receiver.m_session_mgr = ptr::addr_of_mut!(SESSION_MGR);
+          assert_eq!(true, tm.init((TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone())).is_ok());
+      }
   }
 }
