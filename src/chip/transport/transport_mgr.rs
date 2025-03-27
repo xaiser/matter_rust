@@ -1,7 +1,15 @@
 use crate::chip::transport::PeerAddress;
-use crate::chip::system::system_packet_buffer::PacketBufferHandle;
+use crate::chip::system::system_packet_buffer::{PacketBufferHandle, PacketBuffer};
 use super::raw::base::{Base,Init,MessageTransportContext,RawTransportDelegate};
 use super::raw::tuple::Tuple;
+use super::transport_mgr_base::TransportMgrBase;
+
+use core::str::FromStr;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use crate::chip_log_progress;
+use crate::chip_log_error;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -9,14 +17,14 @@ use crate::chip_ok;
 use core::ptr;
 
 pub trait TransportMgrDelegate {
-    fn on_message_received(&mut self, source: &PeerAddress, msg_buf: PacketBufferHandle, ctext: &MessageTransportContext);
+    fn on_message_received(&mut self, source: PeerAddress, msg_buf: PacketBufferHandle, ctext: * const MessageTransportContext);
 }
 
-pub struct TransportMgrReceiver<SessionMgrType>
+struct TransportMgrReceiver<SessionMgrType>
 where
     SessionMgrType: TransportMgrDelegate,
 {
-    m_session_mgr: * mut SessionMgrType,
+    pub m_session_mgr: * mut SessionMgrType,
 }
 
 impl<SessionMgrType> Default for TransportMgrReceiver<SessionMgrType>
@@ -36,7 +44,21 @@ where
 {
     fn handle_message_received(&self, peer_address: PeerAddress, msg: PacketBufferHandle,
         ctxt: * const MessageTransportContext)
-    {}
+    {
+        unsafe {
+            let pb: * mut PacketBuffer = msg.get_raw();
+            if (*pb).has_chained_buffer() {
+                chip_log_error!(Inet, "message from {} dropped due to lower layers not ensuring a single packet buffer", peer_address);
+                return;
+            }
+
+            if self.m_session_mgr.is_null() == false {
+                (*self.m_session_mgr).on_message_received(peer_address, msg, ctxt);
+            } else {
+                chip_log_error!(Inet, "message from {} is drooped since no handler set", peer_address);
+            }
+        }
+    }
 }
 
 pub struct TransportMgr<T, SessionMgrType>
@@ -64,6 +86,9 @@ macro_rules! impl_for_transport_mgr {
                         return Err(err);
                     }
                 }
+                // we don't do anything in the base init method, just give it a null as work around
+                // to the second borrow error
+                let _ = <Self as TransportMgrBase>::init(self, ptr::null_mut());
 
                 chip_ok!()
             }
@@ -89,11 +114,61 @@ macro_rules! impl_default_for_transport_mgr {
     };
 }
 
+macro_rules! impl_transport_mgr_base_for_transport_mgr {
+    ($($type:ident),+) => {
+        impl<'a, SessionMgrType, $($type,)+> TransportMgrBase<'a> for TransportMgr<($($type,)+), SessionMgrType>
+            where
+                SessionMgrType: TransportMgrDelegate,
+                $($type: Init + Base,)+
+        {
+            type TransportType = Tuple<($($type,)+)>;
+            type TransportMgrDelegateType = SessionMgrType;
+
+            #[allow(dead_code)]
+            fn init(&mut self, _t: * mut Self::TransportType) -> ChipErrorResult {
+                chip_log_detail!(Inet, "transport mgr initialized");
+                chip_ok!()
+            }
+
+            #[allow(dead_code)]
+            fn send_message(&mut self, address: PeerAddress, msg_buf: PacketBufferHandle) -> ChipErrorResult {
+                let err = self.m_transports.send_message(address, msg_buf);
+                if err.is_success() == false {
+                    return Err(err);
+                }
+                chip_ok!()
+            }
+
+            #[allow(dead_code)]
+            fn close(&mut self) {
+                self.m_transports.close();
+            }
+
+            #[allow(dead_code)]
+            fn set_session_manager(&mut self, session_manager: * mut Self::TransportMgrDelegateType) {
+                self.m_receiver.m_session_mgr = session_manager;
+            }
+
+            #[allow(dead_code)]
+            fn get_session_manager(&mut self) -> * mut Self::TransportMgrDelegateType {
+                return ptr::addr_of_mut!(self.m_receiver.m_session_mgr) as * mut Self::TransportMgrDelegateType;
+            }
+        }
+    };
+}
+
+
 impl_for_transport_mgr!(Type0);
-impl_for_transport_mgr!(Type0, Type1);
+impl_for_transport_mgr!(Type0,Type1);
+impl_for_transport_mgr!(Type0,Type1,Type2);
 
 impl_default_for_transport_mgr!(Type0);
 impl_default_for_transport_mgr!(Type0,Type1);
+impl_default_for_transport_mgr!(Type0,Type1,Type2);
+
+impl_transport_mgr_base_for_transport_mgr!(Type0);
+impl_transport_mgr_base_for_transport_mgr!(Type0,Type1);
+impl_transport_mgr_base_for_transport_mgr!(Type0,Type1,Type2);
 
 #[cfg(test)]
 mod test {
@@ -121,7 +196,7 @@ mod test {
   }
 
   impl TransportMgrDelegate for SessionMgrStub {
-    fn on_message_received(&mut self, _source: &PeerAddress, _msg_buf: PacketBufferHandle, _ctext: &MessageTransportContext)
+    fn on_message_received(&mut self, _source: PeerAddress, _msg_buf: PacketBufferHandle, _ctext: * const MessageTransportContext)
     {}
   }
 

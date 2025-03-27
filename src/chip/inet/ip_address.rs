@@ -1,3 +1,5 @@
+use core::fmt;
+
 #[repr(u8)]
 #[derive(PartialEq,Clone,Copy,Debug)]
 pub enum IPAddressType
@@ -45,6 +47,12 @@ impl IPAddress
         }
 
         return IPAddressType::KIPv6;
+    }
+}
+
+impl fmt::Display for IPAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "IPAddress ( {}.{}.{}.{} )", self.addr.0, self.addr.1, self.addr.2, self.addr.3)
     }
 }
 

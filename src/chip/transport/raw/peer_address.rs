@@ -3,12 +3,14 @@ use crate::chip::NodeId;
 use crate::chip::inet::ip_address::IPAddress;
 use crate::chip::inet::inet_interface::InterfaceId;
 
+use core::fmt;
+
 pub trait LastTransportType {
     fn last_type(&self) -> Self;
 }
 
 #[repr(u8)]
-#[derive(Clone,Copy,PartialEq)]
+#[derive(Clone,Copy,PartialEq,Debug)]
 pub enum Type {
     KUndefined,
     KUdp,
@@ -17,13 +19,25 @@ pub enum Type {
     KWiFiPAF,
 }
 
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::KUndefined => write!(f, "Undefine"),
+            Self::KUdp => write!(f, "Udp"),
+            Self::KBle => write!(f, "Ble"),
+            Self::KTcp => write!(f, "Tcp"),
+            Self::KWiFiPAF => write!(f, "Wifi"),
+        }
+    }
+}
+
 impl LastTransportType for Type {
     fn last_type(&self) -> Self {
         return Type::KWiFiPAF;
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PeerAddress {
     m_transport_type: Type,
     m_remote_id: NodeId,
@@ -41,6 +55,17 @@ impl Default for PeerAddress {
             m_interface: InterfaceId::default(),
             m_port: 0,
         }
+    }
+}
+
+impl fmt::Display for PeerAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PeerAddress 
+            m_transport_type: {},
+            m_remote_id: {},
+            m_ip_address: {},
+            m_interface: {},
+            m_port: {}", self.m_transport_type, self.m_remote_id, self.m_ip_address, self.m_interface, self.m_port)
     }
 }
 
