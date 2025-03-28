@@ -5,3 +5,5 @@ pub mod chip_static_assert;
 pub mod reference_counted;
 pub mod chip_encoding;
 pub mod chip_vendor_id;
+pub mod data_model_types;
+pub mod chip_config;

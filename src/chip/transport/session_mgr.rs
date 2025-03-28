@@ -1,5 +1,6 @@
 use crate::chip::system::system_packet_buffer::{PacketBufferHandle};
 use crate::chip::transport::raw::message_header::PacketHeader;
+use crate::chip::system::LayerImpl;
 
 use crate::ChipError;
 use crate::chip_no_error;
@@ -59,4 +60,18 @@ impl EncryptedPacketBufferHandle {
 
         0
     }
+
+    pub fn mark_encrypted(buffer: PacketBufferHandle) -> Self {
+        Self {
+            m_packet_buffer_handle: buffer,
+        }
+    }
+
+    pub fn cast_to_writable(&mut self) -> PacketBufferHandle {
+        return self.m_packet_buffer_handle.retain().unwrap();
+    }
+}
+
+pub struct SessionManager {
+    m_system_layer: * mut LayerImpl,
 }
