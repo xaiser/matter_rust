@@ -17,11 +17,11 @@ static mut S_IS_POOL_INIT: bool = false;
 
 pub struct PacketBuffer
 {
-    next: * mut PacketBuffer,
-    payload: * mut u8,
-    tot_len: u32,
-    len: u32,
-    ref_count: u16,
+    pub next: * mut PacketBuffer,
+    pub payload: * mut u8,
+    pub tot_len: u32,
+    pub len: u32,
+    pub ref_count: u16,
 }
 
 union BufferPoolElement
@@ -225,8 +225,59 @@ pub struct PacketBufferHandle
     m_buffer: * mut PacketBuffer,
 }
 
+impl Default for PacketBufferHandle {
+    fn default() -> Self {
+        PacketBufferHandle::const_default()
+    }
+}
+
+impl Clone for PacketBufferHandle {
+    fn clone(&self) -> Self {
+        let mut clone_head = Self::default();
+        let mut original: * mut PacketBuffer = self.m_buffer;
+        unsafe {
+            while original.is_null() == false {
+                let mut original_data_size: usize = (*original).max_data_length();
+                let original_reserved_size: u16 = (*original).reserved_size();
+
+                if original_data_size + usize::from(original_reserved_size) > (PacketBuffer::KMAX_ALLOC_SIZE as usize) {
+                    // The original memory allocation may have provided a larger block than requested (e.g. when using a shared pool),
+                    // and in particular may have provided a larger block than we are able to request from PacketBufferHandle::New().
+                    // It is a genuine error if that extra space has been used.
+                    if usize::from(original_reserved_size) + ((*original).data_len() as usize)> (PacketBuffer::KMAX_ALLOC_SIZE as usize) {
+                        return PacketBufferHandle::default();
+                    }
+
+                    // Otherwise, reduce the requested data size. This subtraction can not underflow because the above test
+                    // guarantees originalReservedSize <= PacketBuffer::kMaxAllocSize.
+                    original_data_size = (PacketBuffer::KMAX_ALLOC_SIZE as usize) - (original_reserved_size as usize);
+                }
+
+                if let Some(clone) = PacketBufferHandle::new(original_data_size.try_into().unwrap(), original_reserved_size) {
+                    (*clone.m_buffer).tot_len = (*original).len;
+                    (*clone.m_buffer).len = (*original).len;
+                    ptr::copy_nonoverlapping((*original).reserve_start(), (*clone.get_raw()).reserve_start(), original_data_size + (original_reserved_size as usize));
+
+                    clone_head.add_to_end(clone);
+                } else {
+                    return PacketBufferHandle::default();
+                }
+                    
+                original = (*original).chained_buffer();
+            }
+        }
+
+        return clone_head;
+    }
+}
+
 impl PacketBufferHandle
 {
+    pub const fn const_default() -> Self {
+        Self {
+            m_buffer: ptr::null_mut(),
+        }
+    }
     pub fn new(a_available_size: u32, a_reserved_size: u16) -> Option<Self> {
         let sum_of_sizes: u64 = a_available_size as u64 + a_reserved_size as u64 + PacketBuffer::KSTRUCTURESIZE as u64;
         let sum_of_available_and_reserved: u64 = a_available_size as u64 + a_reserved_size as u64;
@@ -349,6 +400,12 @@ impl PacketBufferHandle
         }
     }
 
+    pub fn has_chained_buffer(&self) -> bool {
+        unsafe {
+            (*self.m_buffer).has_chained_buffer()
+        }
+    }
+
     fn hold(buffer: * mut PacketBuffer) -> Self {
         if false == buffer.is_null() {
             unsafe {
@@ -437,6 +494,22 @@ mod test {
       }
 
       #[test]
+      fn clone_data() {
+          set_up();
+          let data: [u8; 4] = [1,2,3,4];
+          let buffer = PacketBufferHandle::new_with_data(&data[0..4], 0, 8);
+          let clone = buffer.clone();
+          assert_eq!(clone.is_none(), false);
+          unsafe {
+              let buffer_ptr = (*(buffer.unwrap().get_raw())).payload;
+              let clone_ptr = (*(clone.unwrap().get_raw())).payload;
+              for i in 0..data.len() {
+                  assert_eq!(ptr::read(buffer_ptr.add(i)), ptr::read(clone_ptr.add(i)));
+              }
+          }
+      }
+
+      #[test]
       fn drop() {
           set_up();
           let before_alloc: u64;
@@ -477,6 +550,30 @@ mod test {
               }
               let len = (*(b1.get_raw())).tot_len;
               assert_eq!(data1.len() + data2.len(), len as usize);
+          }
+      }
+
+      #[test]
+      fn push_one_and_clone() {
+          set_up();
+          let data1: [u8; 4] = [11, 12, 13, 14];
+          let data2: [u8; 4] = [21, 22, 23, 24];
+          let mut b1 = PacketBufferHandle::new_with_data(&data1[0..4],0,8).unwrap();
+          let b2 = PacketBufferHandle::new_with_data(&data2[0..4],0,8).unwrap();
+          b1.add_to_end(b2);
+          let clone = b1.clone();
+          unsafe {
+              let buffer_ptr = (*(b1.get_raw())).payload;
+              let clone_ptr = (*(clone.get_raw())).payload;
+              for i in 0..data1.len() {
+                  assert_eq!(ptr::read(buffer_ptr.add(i)), ptr::read(clone_ptr.add(i)));
+              }
+
+              let next_buffer_ptr = (*(*(b1.get_raw())).chained_buffer()).payload;
+              let next_clone_ptr = (*(*(clone.get_raw())).chained_buffer()).payload;
+              for i in 0..data2.len() {
+                  assert_eq!(ptr::read(next_buffer_ptr.add(i)), ptr::read(next_clone_ptr.add(i)));
+              }
           }
       }
 

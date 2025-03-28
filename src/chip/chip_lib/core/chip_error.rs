@@ -1,3 +1,5 @@
+use core::fmt;
+
 #[cfg(not(feature = "chip_config_error_source"))]
 
 pub type StorageType = u32;
@@ -111,6 +113,18 @@ pub struct ChipError
     m_file: &'static str,
 #[cfg(feature = "chip_config_error_source")]
     m_line: u32,
+}
+
+impl fmt::Display for ChipError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ChipError ( error: {}", self.m_error)?;
+#[cfg(feature = "chip_config_error_source")]
+        {
+            write!(f, ", file: {}", self.m_file)?;
+            write!(f, ", line: {}", self.m_line)?;
+        }
+        write!(f, " )")
+    }
 }
 
 impl PartialEq for ChipError {
