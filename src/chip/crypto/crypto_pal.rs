@@ -1,5 +1,6 @@
 use crate::chip_static_assert;
-use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE};
+use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE, CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE};
+use crate::chip::chip_lib::support::buffer_reader as encoding;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -9,6 +10,7 @@ use crate::chip_sdk_error;
 use crate::chip_error_invalid_argument;
 
 use core::slice;
+use core::cell::UnsafeCell;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -413,6 +415,204 @@ impl ECPKey for P256PublicKey {
             return self.ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
         }
     }
+}
+
+pub trait ECPKeypair<PK, Secret, Sig> {
+
+    fn new_certificate_signing_request(&self, csr: &mut [u8]) -> ChipErrorResult;
+
+    fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut Sig) ->  ChipErrorResult;
+
+    fn ecdh_derive_secret(&self, remote_public_key: &PK, out_secret: &mut Secret) ->  ChipErrorResult;
+
+    fn pubkey(&self) -> &PK;
+}
+
+#[repr(align(8))]
+pub struct P256KeypairContext {
+    m_bytes: [u8; K_MAX_P256_KEYPAIR_CONTEXT_SIZE],
+}
+
+impl P256KeypairContext {
+    pub const fn const_default() -> Self {
+        Self {
+            m_bytes: [0; K_MAX_P256_KEYPAIR_CONTEXT_SIZE],
+        }
+    }
+}
+
+impl Default for P256KeypairContext {
+    fn default() -> Self {
+        P256KeypairContext::const_default()
+    }
+}
+
+
+
+pub type P256SerializedKeypair = SensitiveDataBuffer<{K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH}>;
+
+pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
+{
+    fn initialize(key_target: ECPKeyTaget) -> ChipErrorResult;
+
+    fn Serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult;
+
+    fn deserialize(input: &mut P256SerializedKeypair) -> ChipErrorResult;
+}
+
+#[derive(Default)]
+pub struct P256Keypair
+{
+    m_public_key: P256PublicKey,
+    m_keypair: UnsafeCell<P256KeypairContext>,
+    m_initialized: bool,
+}
+
+impl P256Keypair {
+    pub const fn const_default() -> Self {
+        Self {
+            m_public_key: P256PublicKey::const_default(),
+            m_keypair: UnsafeCell::new(P256KeypairContext::const_default()),
+            m_initialized: false,
+        }
+    }
+
+    pub fn clear() {
+    }
+}
+
+impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P256Keypair {
+    fn new_certificate_signing_request(&self, csr: &mut [u8]) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut P256EcdsaSignature) ->  ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn ecdh_derive_secret(&self, remote_public_key: &P256PublicKey, out_secret: &mut P256EcdhDeriveSecret) ->  ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn pubkey(&self) -> &P256PublicKey {
+        return &self.m_public_key;
+    }
+}
+
+impl P256KeypairBase for P256Keypair {
+    fn initialize(key_target: ECPKeyTaget) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn Serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn deserialize(input: &mut P256SerializedKeypair) -> ChipErrorResult {
+        chip_ok!()
+    }
+}
+
+#[derive(Default)]
+struct SymmetricKeyHandle<const CONTEXT_SIZE: usize> {
+    m_context: OpaqueContext<CONTEXT_SIZE>,
+}
+
+impl<const CONTEXT_SIZE: usize> SymmetricKeyHandle<CONTEXT_SIZE> {
+    pub fn as_ref<T>(&self) -> &T {
+        unsafe { &*(self.m_context.m_opaque.as_ptr() as *const T) }
+    }
+
+    pub fn as_mut<T>(&mut self) -> &mut T {
+        unsafe { &mut *(self.m_context.m_opaque.as_mut_ptr() as *mut T) }
+    }
+}
+
+impl<const CONTEXT_SIZE: usize> Drop for SymmetricKeyHandle<CONTEXT_SIZE> {
+    fn drop(&mut self) {
+        clear_secret_data(&mut self.m_context.m_opaque[..]);
+    }
+}
+
+#[repr(align(8))]
+struct OpaqueContext<const CONTEXT_SIZE: usize> {
+    pub m_opaque: [u8; CONTEXT_SIZE],
+}
+
+impl<const CONTEXT_SIZE: usize>  Default for OpaqueContext<CONTEXT_SIZE> {
+    fn default() -> Self {
+        Self {
+            m_opaque: [0; CONTEXT_SIZE],
+        }
+    }
+}
+
+pub type Symmetric128BitsKeyByteArray = [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+
+pub type Symmetric128BitsKeyHandle = SymmetricKeyHandle<CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES>;
+
+pub type Aes128KeyHandle = Symmetric128BitsKeyHandle;
+
+pub type Hmac128KeyHandle = Symmetric128BitsKeyHandle;
+
+pub type HkdfKeyHandle = SymmetricKeyHandle<CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE>;
+
+pub fn ecdsa_raw_signature_to_asn1(fe_legnth_bytes: usize, raw_sig: &[u8], out_asn1_sig: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn ecdsa_asn1_signature_to_raw(fe_length_bytes: usize, asn1_sig: &[u8], out_raw_sig: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn read_der_length(reader: &encoding::little_endian::Reader, length: &mut usize) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn convert_integer_raw_to_der(raw_integer: &[u8], out_der_integer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn convert_integer_raw_to_der_without_tag(raw_integer: &[u8], out_der_integer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn aes_ccm_encrypt(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], ciphertext: &mut [u8], tag: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn aes_ccm_decrypt(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn aes_ctr_crypt(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn generate_certificate_signing_request(keypair: &P256Keypair, csr: &mut [u8]) -> ChipErrorResult{
+    chip_ok!()
+}
+
+pub fn verify_certificate_signing_request_format(csr: &[u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn verify_certificate_signing_request(csr: &[u8], pubkey: &mut P256PublicKey) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn hash_sha256(data: &[u8], out_buffer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn hash_sha1(data: &[u8], out_buffer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+#[cfg(chip_config_sha256_context_align_8)]
+#[repr(align(8))]
+struct HashSHA256OpaqueContext {
+    pub m_opaque: [u8; K_MAX_HASH_SHA256_CONTEXT_SIZE],
 }
 
 #[cfg(test)]
