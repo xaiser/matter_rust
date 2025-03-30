@@ -1,6 +1,7 @@
 use crate::chip_static_assert;
 use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE, CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE};
 use crate::chip::chip_lib::support::buffer_reader as encoding;
+use crate::chip::VendorId;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -609,10 +610,291 @@ pub fn hash_sha1(data: &[u8], out_buffer: &mut [u8]) -> ChipErrorResult {
     chip_ok!()
 }
 
-#[cfg(chip_config_sha256_context_align_8)]
+#[cfg(feature="chip_config_sha256_context_align_8")]
 #[repr(align(8))]
-struct HashSHA256OpaqueContext {
+pub struct HashSHA256OpaqueContext {
     pub m_opaque: [u8; K_MAX_HASH_SHA256_CONTEXT_SIZE],
+}
+
+impl HashSHA256OpaqueContext {
+    pub const fn const_default() -> Self {
+        Self {
+            m_opaque: [0; K_MAX_HASH_SHA256_CONTEXT_SIZE],
+        }
+    }
+}
+
+impl Default for HashSHA256OpaqueContext {
+    fn default() -> Self {
+        HashSHA256OpaqueContext::const_default()
+    }
+}
+
+#[derive(Default)]
+pub struct HashSHA256Stream {
+    m_context: HashSHA256OpaqueContext,
+}
+
+impl HashSHA256Stream {
+    pub const fn const_default() -> Self {
+        Self {
+            m_context: HashSHA256OpaqueContext::const_default(),
+        }
+    }
+
+    pub fn begin(&mut self) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    pub fn add_data(&mut self, data: &[u8]) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    pub fn get_digest(&mut self, out_buffer: &mut [u8]) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    pub fn finish(&mut self, out_buffer: &mut [u8]) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    pub fn clear(&mut self) {}
+
+    fn is_initialized(&self) -> bool {
+        false
+    }
+}
+
+pub fn drbg_get_bytes(out_buffer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub type EntropySource = fn(data: * mut u8, output: &mut [u8], olen: &mut usize) -> i32;
+
+pub fn add_entropy_source(fn_source: EntropySource, p_source: * mut u8, threashold: usize) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub struct SessionKeystore;
+
+pub trait Spake2p {
+    fn init(&mut self, context: &[u8]) -> ChipErrorResult;
+
+    fn clear(&mut self);
+
+    fn begin_verifier(&mut self, my_identity: &[u8], peer_identity: &[u8], w0in: &[u8], lin: &[u8]) -> ChipErrorResult;
+
+    fn begin_prover(&mut self, my_identity: &[u8], peer_identity: &[u8], w0sin: &[u8], s1sin: &[u8]) -> ChipErrorResult;
+
+    fn compute_round_one(&mut self, pab: &[u8], out: &mut [u8]) -> ChipErrorResult;
+
+    fn compute_round_two(&mut self, input: &[u8], out: &mut[u8]) -> ChipErrorResult;
+
+    fn key_cofirm(&mut self, input: &[u8]) -> ChipErrorResult;
+
+    fn get_keys(&self, keystore: &mut SessionKeystore, key: &mut HkdfKeyHandle) -> ChipErrorResult;
+
+    fn internal_hash(&mut self, input: &[u8]) -> ChipErrorResult;
+
+    fn write_mn(&mut self) -> ChipErrorResult;
+
+    fn generate_keys(&mut self) -> ChipErrorResult;
+
+    fn fe_load(&mut self, input: &[u8], fe: * mut ()) -> ChipErrorResult;
+
+    fn fe_write(&mut self, fe: * mut (), out: &mut [u8]) -> ChipErrorResult;
+
+    fn fe_generate(&mut self, fe: * mut ()) -> ChipErrorResult;
+
+    fn fe_mul(&mut self, fer: * mut (), fe1: * const (), fe2: * const ()) -> ChipErrorResult;
+
+    fn point_load(&mut self, input: &[u8], r: * mut ()) -> ChipErrorResult;
+
+    fn point_write(&mut self, r: * const (), out: &mut [u8]) -> ChipErrorResult;
+
+    fn point_mut(&mut self, r: * mut (), p1: * const (), p2: * const ()) -> ChipErrorResult;
+
+    fn point_add_mut(&mut self, r: * mut (), p1: * const (), fe1: * const (), p2: * const (), fe2: * const ()) -> ChipErrorResult;
+
+    fn point_invert(&mut self, r: * mut ()) -> ChipErrorResult;
+
+    fn point_cofactor_mut(&mut self, r: * mut ()) -> ChipErrorResult;
+
+    fn point_is_valid(&self, r: * mut ()) -> ChipErrorResult;
+
+    fn compute_w0(&mut self, w0out: &mut [u8], w0sin: &[u8]) -> ChipErrorResult;
+
+    fn compute_l(&mut self, lout: &mut [u8], w1sin: &[u8]) -> ChipErrorResult;
+}
+
+pub struct Spake2pP256Sha256HKDFHMAX {
+    pub m: * mut (),
+    pub n: * mut (),
+    pub g: * const (),
+    pub x: * mut (),
+    pub y: * mut (),
+    pub l: * mut (),
+    pub z: * mut (),
+    pub v: * mut (),
+    pub w0: * mut (),
+    pub w1: * mut (),
+    pub xy: * mut (),
+    pub order: * mut (),
+    pub tempbn: * mut (),
+
+    fe_size: usize,
+    hash_size: usize,
+    point_size: usize,
+    k_cab: [u8; K_MAX_HASH_LENGTH],
+    k_ae: [u8; K_MAX_HASH_LENGTH],
+    k_ca: * mut u8,
+    k_cb: * mut u8,
+    k_a: * mut u8,
+    k_e: * mut u8,
+
+    m_sha256_hash_ctx: HashSHA256Stream,
+    m_spake2p_context: Spake2pOpaqueContext,
+}
+
+pub type Spake2pVerifierSerialized = [u8; K_SPAKE2P_VERIFIER_SERIALIZED_LENGTH];
+
+pub fn generate_compressed_fabricId(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn generate_compressed_fabricId_u64(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut u64) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub enum CertificateChainValidationResult {
+    KSuccess = 0,
+
+    KRootFormatInvalid   = 100,
+    KRootArgumentInvalid = 101,
+
+    KICAFormatInvalid   = 200,
+    KICAArgumentInvalid = 201,
+
+    KLeafFormatInvalid   = 300,
+    KLeafArgumentInvalid = 301,
+
+    KChainInvalid = 400,
+
+    KNoMemory = 500,
+
+    KInternalFrameworkError = 600,
+}
+
+pub fn validate_certificate_chain(root_certificate: &[u8], ca_certificate: &[u8], leaf_certificate: &[u8], result: &mut CertificateChainValidationResult) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub enum AttestationCertType {
+    KPAA = 0,
+    KPAI = 1,
+    KDAC = 2,
+}
+
+pub fn verify_attestaction_certification_format(cert: &[u8], cert_type: AttestationCertType) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn is_certificate_valid_at_issuance(candiate_certificate: &[u8], issuer_certificate: &[u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+#[repr(align(8))]
+pub struct Spake2pOpaqueContext {
+    pub m_opaque: [u8; K_MAX_SPAKE2P_CONTEXT_SIZE],
+}
+
+fn is_certificate_valid_at_current_time(certificate: &[u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_pubkey_from_x509_cert(certificate: &[u8], pubkey: &mut P256PublicKey) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_skid_from_x509_cert(certificate: &[u8], skid: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_akid_from_x509_cert(certificate: &[u8], akid: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_crl_distribution_point_uri_from_x509_cert(certificate: &[u8], cdpurl: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_cdp_extension_crl_issuer_from_x509_cert(certificate: &[u8], crl_issuer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_serial_number_from_x509_cert(certificate: &[u8], serial_number: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_subject_from_x509_cert(certificate: &[u8], subject: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn extract_issuer_from_x509_cert(certificate: &[u8], issuer: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+fn replace_cert_if_resigned_cert_found(reference_certificate: &[u8], candiate_certifiace: &[&[u8]], out_certificate: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub enum DNAttrType {
+    KUnspecified = 0,
+    KCommonName  = 1,
+    KMatterVID   = 2,
+    KMatterPID   = 3,
+}
+
+pub struct AttestationCertVidPid {
+    pub m_vendor_id: Option<VendorId>,
+    pub m_production_id: Option<u16>,
+}
+
+impl AttestationCertVidPid {
+    pub fn is_initialized(&self) -> bool {
+        return self.m_vendor_id.is_some() || self.m_production_id.is_some();
+    }
+}
+
+pub fn extract_vid_pid_from_attribute_setting(arrt_type: DNAttrType, attr: &[u8], vid_pid_from_matter_attr: &mut AttestationCertVidPid, vid_pid_from_cn_attr: &mut AttestationCertVidPid) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn extract_vid_pid_from_x509_cert(x509_cert: &[u8], vid_pid: &mut AttestationCertVidPid) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub struct GroupOperationalCredentials {
+    pub m_start_time: u64,
+    pub m_hash: u16,
+    pub m_encryption_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+    pub m_private_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+}
+
+pub fn derive_group_operation_key(epoch_key: &[u8], compressed_fabric_id: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn derive_gropu_session(operational_key: &[u8], session_id: &mut u16) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn derive_group_private(epoch_key: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn derive_group_operational_credentials(epoch_key: &[u8], compressed_fabrc_id: &[u8], operational_credentials: &mut GroupOperationalCredentials) -> ChipErrorResult {
+    chip_ok!()
 }
 
 #[cfg(test)]
