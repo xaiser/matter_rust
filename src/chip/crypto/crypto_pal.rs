@@ -1,3 +1,6 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 use crate::chip_static_assert;
 use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE, CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE};
 use crate::chip::chip_lib::support::buffer_reader as encoding;
@@ -5,10 +8,14 @@ use crate::chip::VendorId;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
-use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_invalid_argument;
+use crate::chip_error_internal;
+
+use p256::ecdsa::{Signature,VerifyingKey};
+use p256::ecdsa::signature::Verifier;
+use sha2::{Sha256, Digest};
 
 use core::slice;
 use core::cell::UnsafeCell;
@@ -334,7 +341,6 @@ pub type IdentityProtectionKey = SensitiveDataFixedBuffer<CHIP_CRYPTO_SYMMETRIC_
 pub type IdentityProtectionKeySpan = [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
 pub type AttestationChallenge = SensitiveDataFixedBuffer<CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES>;
 
-#[derive(Clone)]
 pub struct P256PublicKey {
     m_bytes: [u8; K_P256_PUBLIC_KEY_LENGTH],
 }
@@ -352,7 +358,7 @@ impl P256PublicKey {
         }
     }
 
-    pub const fn const_default_with_raw_value(raw_value: &[u8; K_P256_PUBLIC_KEY_LENGTH]) -> Self {
+    pub fn default_with_raw_value(raw_value: &[u8; K_P256_PUBLIC_KEY_LENGTH]) -> Self {
         let mut key = Self::const_default();
         key.m_bytes.copy_from_slice(raw_value);
         key
@@ -400,7 +406,16 @@ impl ECPKey for P256PublicKey {
     }
 
     fn ecdsa_validate_msg_signature(&self, msg: &[u8], signature: &Self::Sig) -> ChipErrorResult {
-        chip_ok!()
+        // create a Sha256 object
+        let mut hasher = Sha256::new();
+
+        // write input message
+        hasher.update(msg);
+
+        // read hash digest and consume hasher
+        let result = hasher.finalize();
+
+        return self.ecdsa_validate_hash_signature(result.as_slice(), signature);
     }
     fn ecdsa_validate_msg_signature_with_raw(&self, msg: * const u8, msg_length: usize, signature: &Self::Sig) -> ChipErrorResult {
         unsafe {
@@ -409,6 +424,23 @@ impl ECPKey for P256PublicKey {
     }
 
     fn ecdsa_validate_hash_signature(&self, hash: &[u8], signature: &Self::Sig) -> ChipErrorResult {
+        let verifying_key = VerifyingKey::from_sec1_bytes(&self.m_bytes[..]);
+        if verifying_key.is_err() {
+            return Err(chip_error_internal!());
+        }
+        let verifying_key = verifying_key.unwrap();
+
+        let sig = Signature::from_slice(signature.const_bytes());
+
+        if sig.is_err() {
+            return Err(chip_error_internal!());
+        }
+
+        let sig = sig.unwrap();
+
+        if verifying_key.verify(hash, &sig).is_err() {
+            return Err(chip_error_internal!());
+        }
         chip_ok!()
     }
     fn ecdsa_validate_hash_signature_with_raw(&self,hash: * const u8, hash_length: usize, signature: &Self::Sig) -> ChipErrorResult {
@@ -456,7 +488,7 @@ pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256E
 {
     fn initialize(key_target: ECPKeyTaget) -> ChipErrorResult;
 
-    fn Serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult;
+    fn serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult;
 
     fn deserialize(input: &mut P256SerializedKeypair) -> ChipErrorResult;
 }
@@ -505,7 +537,7 @@ impl P256KeypairBase for P256Keypair {
         chip_ok!()
     }
 
-    fn Serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult {
+    fn serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult {
         chip_ok!()
     }
 
@@ -515,7 +547,7 @@ impl P256KeypairBase for P256Keypair {
 }
 
 #[derive(Default)]
-struct SymmetricKeyHandle<const CONTEXT_SIZE: usize> {
+pub struct SymmetricKeyHandle<const CONTEXT_SIZE: usize> {
     m_context: OpaqueContext<CONTEXT_SIZE>,
 }
 
@@ -678,6 +710,8 @@ pub fn add_entropy_source(fn_source: EntropySource, p_source: * mut u8, threasho
 pub struct SessionKeystore;
 
 pub trait Spake2p {
+    fn default_with_size(fe_size: usize, point_size: usize, hash_size: usize) -> Self;
+
     fn init(&mut self, context: &[u8]) -> ChipErrorResult;
 
     fn clear(&mut self);
@@ -727,7 +761,7 @@ pub trait Spake2p {
     fn compute_l(&mut self, lout: &mut [u8], w1sin: &[u8]) -> ChipErrorResult;
 }
 
-pub struct Spake2pP256Sha256HKDFHMAX {
+pub struct Spake2pP256Sha256HKDFHMAC {
     pub m: * mut (),
     pub n: * mut (),
     pub g: * const (),
@@ -758,11 +792,11 @@ pub struct Spake2pP256Sha256HKDFHMAX {
 
 pub type Spake2pVerifierSerialized = [u8; K_SPAKE2P_VERIFIER_SERIALIZED_LENGTH];
 
-pub fn generate_compressed_fabricId(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut [u8]) -> ChipErrorResult {
+pub fn generate_compressed_fabric_id(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut [u8]) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn generate_compressed_fabricId_u64(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut u64) -> ChipErrorResult {
+pub fn generate_compressed_fabric_id_u64(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut u64) -> ChipErrorResult {
     chip_ok!()
 }
 

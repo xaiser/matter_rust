@@ -9,6 +9,10 @@ edition = "2021"
 [dependencies]
 bitflags = { version = "2.9.0", default-features = false }
 matter_proc_macro = { path = "matter_proc_macro" }
+ecdsa = { version = "0.13.4", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+generic-array = "0.14"
+p256 = "0.13.2"
 
 [dev-dependencies]
 

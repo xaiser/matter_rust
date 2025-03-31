@@ -3,7 +3,6 @@ use super::peer_address::PeerAddress;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 
 use crate::ChipError;
-use crate::chip_no_error;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_no_message_handler;
@@ -21,6 +20,7 @@ macro_rules! impl_init_for_tuple {
         {
             #[allow(dead_code)]
             pub fn init(&mut self, delegates: ($(* mut <$type as Base>::DelegateType,)+), ps: ($(<$type as Init>::InitParamType,)+)) -> ChipError {
+                #[allow(unused_mut)]
                 let mut err: ChipError;
                 $(err = self.m_transports.$index.init(ps.$index);
                   if err.is_success() == false { return err; }

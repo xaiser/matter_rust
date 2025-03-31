@@ -8,7 +8,6 @@ use core::str::FromStr;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
-use crate::chip_log_progress;
 use crate::chip_log_error;
 
 use crate::ChipErrorResult;
@@ -78,13 +77,11 @@ macro_rules! impl_for_transport_mgr {
         {
             #[allow(dead_code)]
             pub fn init(&mut self, ps: ($(<$type as Init>::InitParamType,)+)) -> ChipErrorResult {
-                unsafe {
-                    let err = self.m_transports.init(
-                        ($(ptr::addr_of_mut!(self.m_receiver) as * mut <$type as Base>::DelegateType,)+), 
-                        ps);
-                    if err.is_success() == false {
-                        return Err(err);
-                    }
+                let err = self.m_transports.init(
+                    ($(ptr::addr_of_mut!(self.m_receiver) as * mut <$type as Base>::DelegateType,)+), 
+                    ps);
+                if err.is_success() == false {
+                    return Err(err);
                 }
                 // we don't do anything in the base init method, just give it a null as work around
                 // to the second borrow error
@@ -200,7 +197,7 @@ mod test {
     {}
   }
 
-  type TransType = Test<TransportMgrReceiver<SessionMgrStub>>;
+  //type TransType = Test<TransportMgrReceiver<SessionMgrStub>>;
   type MgrType = TransportMgr<(Test<TransportMgrReceiver<SessionMgrStub>>,Test<TransportMgrReceiver<SessionMgrStub>>), SessionMgrStub>;
   static mut TRANS_MGR: mem::MaybeUninit<MgrType> = mem::MaybeUninit::uninit();
   static mut SESSION_MGR: SessionMgrStub = SessionMgrStub::const_default();

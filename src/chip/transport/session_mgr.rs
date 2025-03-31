@@ -2,9 +2,6 @@ use crate::chip::system::system_packet_buffer::{PacketBufferHandle};
 use crate::chip::transport::raw::message_header::PacketHeader;
 use crate::chip::system::LayerImpl;
 
-use crate::ChipError;
-use crate::chip_no_error;
-
 use core::str::FromStr;
 use crate::chip_log_error;
 use crate::chip_internal_log;

@@ -1,5 +1,5 @@
 use crate::ChipErrorResult;
-use super::raw::base::{Base, RawTransportDelegate};
+use super::raw::base::Base;
 use crate::chip::transport::PeerAddress;
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 
