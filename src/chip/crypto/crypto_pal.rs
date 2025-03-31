@@ -13,6 +13,11 @@ use crate::chip_sdk_error;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_internal;
 
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+
 use p256::ecdsa::{Signature,VerifyingKey};
 use p256::ecdsa::signature::Verifier;
 use sha2::{Sha256, Digest};
@@ -358,7 +363,7 @@ impl P256PublicKey {
         }
     }
 
-    pub fn default_with_raw_value(raw_value: &[u8; K_P256_PUBLIC_KEY_LENGTH]) -> Self {
+    pub fn default_with_raw_value(raw_value: &[u8]) -> Self {
         let mut key = Self::const_default();
         key.m_bytes.copy_from_slice(raw_value);
         key
@@ -443,6 +448,7 @@ impl ECPKey for P256PublicKey {
         }
         chip_ok!()
     }
+
     fn ecdsa_validate_hash_signature_with_raw(&self,hash: * const u8, hash_length: usize, signature: &Self::Sig) -> ChipErrorResult {
         unsafe {
             return self.ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
@@ -953,6 +959,45 @@ mod test {
           let buf: SensitiveDataFixedBuffer<10> = SensitiveDataFixedBuffer::<10>::default();
           assert_eq!(10, buf.length());
           assert_eq!(10, buf.capacity());
+      }
+  }
+
+  mod test_p256_public_key {
+      use super::*;
+      use super::super::*;
+      use std::*;
+
+      use p256::{
+          ecdsa::{SigningKey, VerifyingKey, signature::Signer, signature::Verifier, Signature},
+          SecretKey, EncodedPoint,
+      };
+
+      #[test]
+      fn verify() {
+          let private_key_bytes: [u8; 32] = [
+              0x1f, 0x2d, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f,
+              0x9a, 0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x12,
+              0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
+              0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x02
+          ];
+
+          let secret_key = SecretKey::from_bytes(&private_key_bytes.into()).expect("Valid private key");
+          let signing_key = SigningKey::from(secret_key);
+          let verifying_key = VerifyingKey::from(&signing_key);
+          let pk = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
+
+          let message = b"Fixed key signing test";
+          // hash the message
+          let mut hasher = Sha256::new();
+          hasher.update(&message[..]);
+          let result = hasher.finalize();
+          // sign the hash
+          let signature: Signature = signing_key.sign(result.as_slice());
+          let mut sig = P256EcdsaSignature::default();
+          sig.bytes().copy_from_slice(signature.to_bytes().as_slice());
+          let _ = sig.set_length(signature.to_bytes().as_slice().len());
+
+          assert_eq!(true, pk.ecdsa_validate_msg_signature(&message[..], &sig).is_ok());
       }
   }
 }
