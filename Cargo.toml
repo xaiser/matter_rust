@@ -12,7 +12,8 @@ matter_proc_macro = { path = "matter_proc_macro" }
 ecdsa = { version = "0.13.4", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 generic-array = "0.14"
-p256 = "0.13.2"
+p256 = { version = "0.13.2", features = ["ecdh"] }
+rand_core = { version = "0.6", default-features = false }
 
 [dev-dependencies]
 

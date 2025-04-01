@@ -13,3 +13,6 @@ pub use chip_lib::core::data_model_types::CompressedFabricId as CompressedFabrid
 pub use chip_lib::core::group_id::GroupId as GroupId;
 pub use chip_lib::core::chip_encoding as encoding;
 pub use chip_lib::core::chip_vendor_id::VendorId as VendorId;
+
+// replace with real random
+pub use crypto::simple_rand::SimpleRng as CryptoRng;

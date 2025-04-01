@@ -5,6 +5,7 @@ use crate::chip_static_assert;
 use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE, CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE};
 use crate::chip::chip_lib::support::buffer_reader as encoding;
 use crate::chip::VendorId;
+use crate::chip::CryptoRng;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -20,7 +21,9 @@ use crate::chip_internal_log_impl;
 
 use p256::ecdsa::{Signature,VerifyingKey};
 use p256::ecdsa::signature::Verifier;
+use p256::ecdh::{EphemeralSecret};
 use sha2::{Sha256, Digest};
+use p256::elliptic_curve::sec1::ToEncodedPoint;
 
 use core::slice;
 use core::cell::UnsafeCell;
@@ -160,7 +163,7 @@ pub enum SupportedECPKeyTypes {
 }
 
 #[repr(u8)]
-pub enum ECPKeyTaget {
+pub enum ECPKeyTarget {
     Ecdh  = 0,
     Ecdsa = 1,
 }
@@ -492,31 +495,23 @@ pub type P256SerializedKeypair = SensitiveDataBuffer<{K_P256_PUBLIC_KEY_LENGTH +
 
 pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
 {
-    fn initialize(key_target: ECPKeyTaget) -> ChipErrorResult;
+    fn initialize(&mut self, key_target: ECPKeyTarget) -> ChipErrorResult;
 
-    fn serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult;
+    fn serialize(&self, output: &mut P256SerializedKeypair) -> ChipErrorResult;
 
-    fn deserialize(input: &mut P256SerializedKeypair) -> ChipErrorResult;
+    fn deserialize(&self, input: &mut P256SerializedKeypair) -> ChipErrorResult;
 }
 
-#[derive(Default)]
 pub struct P256Keypair
 {
     m_public_key: P256PublicKey,
-    m_keypair: UnsafeCell<P256KeypairContext>,
+    //m_keypair: UnsafeCell<P256KeypairContext>,
+    m_keypair: EphemeralSecret,
     m_initialized: bool,
 }
 
 impl P256Keypair {
-    pub const fn const_default() -> Self {
-        Self {
-            m_public_key: P256PublicKey::const_default(),
-            m_keypair: UnsafeCell::new(P256KeypairContext::const_default()),
-            m_initialized: false,
-        }
-    }
-
-    pub fn clear() {
+    pub fn clear(&mut self) {
     }
 }
 
@@ -538,16 +533,32 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
     }
 }
 
+impl Default for P256Keypair {
+    fn default() -> Self {
+        let mut rand = CryptoRng::default();
+        Self {
+            m_public_key: P256PublicKey::default(),
+            m_keypair: EphemeralSecret::random(&mut rand),
+            m_initialized: false,
+        }
+    }
+}
+
 impl P256KeypairBase for P256Keypair {
-    fn initialize(key_target: ECPKeyTaget) -> ChipErrorResult {
+    fn initialize(&mut self, _key_target: ECPKeyTarget) -> ChipErrorResult {
+        self.clear();
+        let mut rand = CryptoRng::default();
+        self.m_keypair = EphemeralSecret::random(&mut rand);
+        self.m_public_key = P256PublicKey::default_with_raw_value(self.m_keypair.public_key().to_encoded_point(false).as_bytes());
+        self.m_initialized = true;
         chip_ok!()
     }
 
-    fn serialize(output: &mut P256SerializedKeypair) -> ChipErrorResult {
+    fn serialize(&self, output: &mut P256SerializedKeypair) -> ChipErrorResult {
         chip_ok!()
     }
 
-    fn deserialize(input: &mut P256SerializedKeypair) -> ChipErrorResult {
+    fn deserialize(&self, input: &mut P256SerializedKeypair) -> ChipErrorResult {
         chip_ok!()
     }
 }
@@ -998,6 +1009,23 @@ mod test {
           let _ = sig.set_length(signature.to_bytes().as_slice().len());
 
           assert_eq!(true, pk.ecdsa_validate_msg_signature(&message[..], &sig).is_ok());
+      }
+  }
+
+  mod test_p256_keypair {
+      use super::*;
+      use super::super::*;
+      use std::*;
+
+      use p256::{
+          ecdsa::{SigningKey, VerifyingKey, signature::Signer, signature::Verifier, Signature},
+          SecretKey, EncodedPoint,
+      };
+
+      #[test]
+      fn init() {
+          let mut kp = P256Keypair::default();
+          assert_eq!(true, kp.initialize(ECPKeyTarget::Ecdh).is_ok());
       }
   }
 }
