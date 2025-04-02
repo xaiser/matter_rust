@@ -19,11 +19,12 @@ use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 
-use p256::ecdsa::{Signature,VerifyingKey};
+use p256::ecdsa::{Signature,VerifyingKey,SigningKey,signature::Signer};
 use p256::ecdsa::signature::Verifier;
 use p256::ecdh::{EphemeralSecret};
 use sha2::{Sha256, Digest};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::{PublicKey};
 
 use core::slice;
 use core::cell::UnsafeCell;
@@ -467,7 +468,9 @@ pub trait ECPKeypair<PK, Secret, Sig> {
 
     fn ecdh_derive_secret(&self, remote_public_key: &PK, out_secret: &mut Secret) ->  ChipErrorResult;
 
-    fn pubkey(&self) -> &PK;
+    fn ecdsa_pubkey(&self) -> &PK;
+
+    fn ecdh_pubkey(&self) -> &PK;
 }
 
 #[repr(align(8))]
@@ -504,9 +507,10 @@ pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256E
 
 pub struct P256Keypair
 {
-    m_public_key: P256PublicKey,
-    //m_keypair: UnsafeCell<P256KeypairContext>,
-    m_keypair: EphemeralSecret,
+    m_ecdsa_public_key: P256PublicKey,
+    m_ecdh_public_key: P256PublicKey,
+    m_ecdsa_keypair: SigningKey,
+    m_ecdh_keypair: EphemeralSecret,
     m_initialized: bool,
 }
 
@@ -517,19 +521,40 @@ impl P256Keypair {
 
 impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P256Keypair {
     fn new_certificate_signing_request(&self, csr: &mut [u8]) -> ChipErrorResult {
-        chip_ok!()
+        return Err(chip_error_internal!());
     }
 
     fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut P256EcdsaSignature) ->  ChipErrorResult {
+        let mut hasher = Sha256::new();
+        hasher.update(&msg[..]);
+        let hash_result = hasher.finalize();
+
+        let sig: Signature = self.m_ecdsa_keypair.sign(hash_result.as_slice());
+        out_signature.bytes().copy_from_slice(sig.to_bytes().as_slice());
+        out_signature.set_length(sig.to_bytes().as_slice().len())?;
         chip_ok!()
     }
 
     fn ecdh_derive_secret(&self, remote_public_key: &P256PublicKey, out_secret: &mut P256EcdhDeriveSecret) ->  ChipErrorResult {
+        let pk = PublicKey::from_sec1_bytes(remote_public_key.const_bytes());
+        if pk.is_err() {
+            return Err(chip_error_internal!());
+        }
+        let pk = pk.unwrap();
+        let secret = self.m_ecdh_keypair.diffie_hellman(&pk);
+
+        out_secret.bytes().copy_from_slice(secret.raw_secret_bytes());
+        out_secret.set_length(secret.raw_secret_bytes().len())?;
+        
         chip_ok!()
     }
 
-    fn pubkey(&self) -> &P256PublicKey {
-        return &self.m_public_key;
+    fn ecdsa_pubkey(&self) -> &P256PublicKey {
+        return &self.m_ecdsa_public_key;
+    }
+
+    fn ecdh_pubkey(&self) -> &P256PublicKey {
+        return &self.m_ecdh_public_key;
     }
 }
 
@@ -537,8 +562,10 @@ impl Default for P256Keypair {
     fn default() -> Self {
         let mut rand = CryptoRng::default();
         Self {
-            m_public_key: P256PublicKey::default(),
-            m_keypair: EphemeralSecret::random(&mut rand),
+            m_ecdsa_public_key: P256PublicKey::default(),
+            m_ecdh_public_key: P256PublicKey::default(),
+            m_ecdsa_keypair: SigningKey::random(&mut rand),
+            m_ecdh_keypair: EphemeralSecret::random(&mut rand),
             m_initialized: false,
         }
     }
@@ -548,8 +575,11 @@ impl P256KeypairBase for P256Keypair {
     fn initialize(&mut self, _key_target: ECPKeyTarget) -> ChipErrorResult {
         self.clear();
         let mut rand = CryptoRng::default();
-        self.m_keypair = EphemeralSecret::random(&mut rand);
-        self.m_public_key = P256PublicKey::default_with_raw_value(self.m_keypair.public_key().to_encoded_point(false).as_bytes());
+        self.m_ecdh_keypair = EphemeralSecret::random(&mut rand);
+        self.m_ecdh_public_key = P256PublicKey::default_with_raw_value(self.m_ecdh_keypair.public_key().to_encoded_point(false).as_bytes());
+        self.m_ecdsa_keypair = SigningKey::random(&mut rand);
+        let verifying_key = VerifyingKey::from(&self.m_ecdsa_keypair);
+        self.m_ecdsa_public_key = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
         self.m_initialized = true;
         chip_ok!()
     }
@@ -1026,6 +1056,16 @@ mod test {
       fn init() {
           let mut kp = P256Keypair::default();
           assert_eq!(true, kp.initialize(ECPKeyTarget::Ecdh).is_ok());
+      }
+
+      #[test]
+      fn sign_message() {
+          let mut kp = P256Keypair::default();
+          let _ = kp.initialize(ECPKeyTarget::Ecdh);
+
+          let mut sig: P256EcdsaSignature = P256EcdsaSignature::default();
+          let message = b"plain text";
+          assert_eq!(true, kp.ecdsa_sign_msg(&message[..], &mut sig).is_ok());
       }
   }
 }
