@@ -516,6 +516,12 @@ pub struct P256Keypair
 
 impl P256Keypair {
     pub fn clear(&mut self) {
+        let mut rand = CryptoRng::default();
+        self.m_ecdh_keypair = EphemeralSecret::random(&mut rand);
+        self.m_ecdh_public_key = P256PublicKey::default();
+        self.m_ecdsa_keypair = SigningKey::random(&mut rand);
+        self.m_ecdsa_public_key = P256PublicKey::default();
+        self.m_initialized = false;
     }
 }
 
@@ -574,13 +580,18 @@ impl Default for P256Keypair {
 impl P256KeypairBase for P256Keypair {
     fn initialize(&mut self, _key_target: ECPKeyTarget) -> ChipErrorResult {
         self.clear();
-        let mut rand = CryptoRng::default();
-        self.m_ecdh_keypair = EphemeralSecret::random(&mut rand);
-        self.m_ecdh_public_key = P256PublicKey::default_with_raw_value(self.m_ecdh_keypair.public_key().to_encoded_point(false).as_bytes());
-        self.m_ecdsa_keypair = SigningKey::random(&mut rand);
-        let verifying_key = VerifyingKey::from(&self.m_ecdsa_keypair);
-        self.m_ecdsa_public_key = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
-        self.m_initialized = true;
+        static mut TEST: u32 = 0;
+        unsafe {
+            TEST += 1;
+            //let mut rand = CryptoRng::default();
+            let mut rand = CryptoRng::default_with_seed(TEST);
+            self.m_ecdh_keypair = EphemeralSecret::random(&mut rand);
+            self.m_ecdh_public_key = P256PublicKey::default_with_raw_value(self.m_ecdh_keypair.public_key().to_encoded_point(false).as_bytes());
+            self.m_ecdsa_keypair = SigningKey::random(&mut rand);
+            let verifying_key = VerifyingKey::from(&self.m_ecdsa_keypair);
+            self.m_ecdsa_public_key = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
+            self.m_initialized = true;
+        }
         chip_ok!()
     }
 
@@ -1066,6 +1077,21 @@ mod test {
           let mut sig: P256EcdsaSignature = P256EcdsaSignature::default();
           let message = b"plain text";
           assert_eq!(true, kp.ecdsa_sign_msg(&message[..], &mut sig).is_ok());
+      }
+
+      #[test]
+      fn drive_secret() {
+          let mut alice = P256Keypair::default();
+          let _ = alice.initialize(ECPKeyTarget::Ecdh);
+          let mut bob = P256Keypair::default();
+          let _ = bob.initialize(ECPKeyTarget::Ecdh);
+          let alice_pub_key = alice.ecdh_pubkey();
+          let bob_pub_key = bob.ecdh_pubkey();
+          let mut s1: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
+          let mut s2: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
+          assert_eq!(true, alice.ecdh_derive_secret(bob_pub_key, &mut s1).is_ok());
+          assert_eq!(true, bob.ecdh_derive_secret(alice_pub_key, &mut s2).is_ok());
+          assert_eq!(s1.const_bytes(), s2.const_bytes());
       }
   }
 }
