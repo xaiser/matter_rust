@@ -27,7 +27,6 @@ use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{PublicKey};
 
 use core::slice;
-use core::cell::UnsafeCell;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;

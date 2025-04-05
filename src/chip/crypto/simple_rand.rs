@@ -1,7 +1,5 @@
 use rand_core::{RngCore, CryptoRng, SeedableRng, Error};
 
-use core::slice;
-
 pub struct SimpleRng {
     state: u32,
 }
