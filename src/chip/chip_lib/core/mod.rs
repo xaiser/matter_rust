@@ -7,3 +7,4 @@ pub mod chip_encoding;
 pub mod chip_vendor_id;
 pub mod data_model_types;
 pub mod chip_config;
+pub mod scoped_node_id;
