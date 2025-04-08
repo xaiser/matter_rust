@@ -242,42 +242,42 @@ pub mod little_endian {
     }
 
     #[inline]
-    pub fn write_u8(p: &mut [u8], v: u8) {
+    pub fn put_u8(p: &mut [u8], v: u8) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_u16(p: &mut [u8], v: u16) {
+    pub fn put_u16(p: &mut [u8], v: u16) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_u32(p: &mut [u8], v: u32) {
+    pub fn put_u32(p: &mut [u8], v: u32) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_u64(p: &mut [u8], v: u64) {
+    pub fn put_u64(p: &mut [u8], v: u64) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_i8(p: &mut [u8], v: i8) {
+    pub fn put_i8(p: &mut [u8], v: i8) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_i16(p: &mut [u8], v: i16) {
+    pub fn put_i16(p: &mut [u8], v: i16) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_i32(p: &mut [u8], v: i32) {
+    pub fn put_i32(p: &mut [u8], v: i32) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
-    pub fn write_i64(p: &mut [u8], v: i64) {
+    pub fn put_i64(p: &mut [u8], v: i64) {
             p.copy_from_slice(&v.to_le_bytes());
     }
 
@@ -376,42 +376,42 @@ pub mod big_endian {
     }
 
     #[inline]
-    pub fn write_u8(p: &mut [u8], v: u8) {
+    pub fn put_u8(p: &mut [u8], v: u8) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_u16(p: &mut [u8], v: u16) {
+    pub fn put_u16(p: &mut [u8], v: u16) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_u32(p: &mut [u8], v: u32) {
+    pub fn put_u32(p: &mut [u8], v: u32) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_u64(p: &mut [u8], v: u64) {
+    pub fn put_u64(p: &mut [u8], v: u64) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_i8(p: &mut [u8], v: i8) {
+    pub fn put_i8(p: &mut [u8], v: i8) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_i16(p: &mut [u8], v: i16) {
+    pub fn put_i16(p: &mut [u8], v: i16) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_i32(p: &mut [u8], v: i32) {
+    pub fn put_i32(p: &mut [u8], v: i32) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
-    pub fn write_i64(p: &mut [u8], v: i64) {
+    pub fn put_i64(p: &mut [u8], v: i64) {
             p.copy_from_slice(&v.to_be_bytes());
     }
 

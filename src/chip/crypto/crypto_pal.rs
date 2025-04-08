@@ -14,10 +14,12 @@ use crate::chip_sdk_error;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_internal;
 
+/*
 use core::str::FromStr;
 use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
+*/
 
 use p256::ecdsa::{Signature,VerifyingKey,SigningKey,signature::Signer};
 use p256::ecdsa::signature::Verifier;
