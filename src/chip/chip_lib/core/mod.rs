@@ -9,3 +9,8 @@ pub mod data_model_types;
 pub mod chip_config;
 pub mod scoped_node_id;
 pub mod tlv_common;
+pub mod chip_persistent_storage_delegate;
+pub mod tlv_backing_store;
+pub mod tlv_types;
+pub mod tlv_writer;
+pub mod tlv_tags;

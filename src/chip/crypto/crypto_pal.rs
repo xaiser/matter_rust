@@ -269,7 +269,7 @@ impl<const KCAPACITY: usize> SensitiveDataBuffer<KCAPACITY> {
         return self.m_bytes.as_ptr();
     }
 
-    pub const fn capacity(&self) -> usize { KCAPACITY }
+    pub const fn capacity() -> usize { KCAPACITY }
 }
 
 impl<const KCAPACITY: usize> Drop for SensitiveDataBuffer<KCAPACITY> {
@@ -326,7 +326,7 @@ impl<const KCAPACITY: usize> SensitiveDataFixedBuffer<KCAPACITY> {
         return self.m_bytes.as_ptr();
     }
 
-    pub const fn capacity(&self) -> usize { KCAPACITY }
+    pub const fn capacity() -> usize { KCAPACITY }
 }
 
 impl<const KCAPACITY: usize> Drop for SensitiveDataFixedBuffer<KCAPACITY> {
@@ -1004,14 +1004,14 @@ mod test {
       fn new_one() {
           let buf: SensitiveDataBuffer<10> = SensitiveDataBuffer::<10>::default();
           assert_eq!(0, buf.length());
-          assert_eq!(10, buf.capacity());
+          assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
       }
 
       #[test]
       fn new_fix_one() {
           let buf: SensitiveDataFixedBuffer<10> = SensitiveDataFixedBuffer::<10>::default();
           assert_eq!(10, buf.length());
-          assert_eq!(10, buf.capacity());
+          assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
       }
   }
 

@@ -128,6 +128,7 @@ mod fabric_info_private {
     use crate::chip::{NodeId,FabricId,VendorId,ScopedNodeId,CompressedFabricId};
     use crate::chip::chip_lib::core::node_id::{KUNDEFINED_NODE_ID, is_operational_node_id};
     use crate::chip::chip_lib::core::data_model_types::{FabricIndex, KUNDEFINED_FABRIC_ID, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX};
+    use crate::chip::chip_lib::core::chip_persistent_storage_delegate::PersistentStorageDelegate;
 
     use crate::ChipErrorResult;
     use crate::chip_ok;
@@ -136,7 +137,8 @@ mod fabric_info_private {
     use crate::chip_error_invalid_argument;
     use crate::verify_or_return_error;
     use crate::verify_or_return_value;
-    use crate::chip::crypto::crypto_pal::{P256PublicKey,P256Keypair,P256EcdsaSignature};
+    use crate::chip::crypto::crypto_pal::{P256PublicKey,P256Keypair,P256EcdsaSignature,P256SerializedKeypair};
+    use crate::tlv_estimate_struct_overhead;
 
     use core::cell::UnsafeCell;
     use core::{ptr,str};
@@ -179,14 +181,32 @@ mod fabric_info_private {
 
     impl FabricInfo {
         pub(super) fn init(&mut self, init_params: InitParams) -> ChipErrorResult {
+            init_params.are_valid()?;
+
+            self.reset();
+
+            self.m_node_id = init_params.m_node_id;
+            self.m_fabric_id = init_params.m_fabric_id;
+            self.m_fabric_index = init_params.m_fabric_index;
+            self.m_compressed_fabric_id = init_params.m_compressed_fabric_id;
+            self.m_root_publick_key = init_params.m_root_publick_key;
+            self.m_vendor_id = init_params.m_vendor_id;
+            self.m_should_advertise_identity = init_params.m_should_advertise_identity;
+
+            if init_params.m_operation_key.is_null() == false {
+                self.set_externally_owned_operational_keypair(init_params.m_operation_key)?;
+            } else {
+                self.set_operational_keypair(init_params.m_operation_key)?;
+            }
+
             chip_ok!()
         }
 
-        pub(super) fn set_operational_keypair(&mut self, keypair: &P256Keypair) -> ChipErrorResult {
+        pub(super) fn set_operational_keypair(&mut self, keypair: * const P256Keypair) -> ChipErrorResult {
             chip_ok!()
         }
 
-        pub(super) fn set_externally_owned_operational_keypair(&mut self, keypair: &mut P256Keypair) -> ChipErrorResult {
+        pub(super) fn set_externally_owned_operational_keypair(&mut self, keypair: * mut P256Keypair) -> ChipErrorResult {
             chip_ok!()
         }
 
@@ -220,6 +240,23 @@ mod fabric_info_private {
 
         pub(super) fn set_should_advertise_identity(&mut self, advertise_identity: bool) {
             self.m_should_advertise_identity = advertise_identity;
+        }
+
+        pub(super) const fn metadata_tlv_max_size() -> usize {
+            tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), KFABRIC_LABEL_MAX_LENGTH_IN_BYTES)
+        }
+
+        pub(super) const fn op_key_tlv_max_size() -> usize {
+            tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), P256SerializedKeypair::capacity())
+        }
+
+        pub(super) fn commit_to_storge<Storage: PersistentStorageDelegate>(&self, storage: * mut Storage) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        pub(super) fn load_from_storge<Storage: PersistentStorageDelegate>(&self, storage: * mut Storage, new_fabric_index: FabricIndex,
+            rcac: &[u8], noc: &[u8]) -> ChipErrorResult {
+            chip_ok!()
         }
     }
 }
