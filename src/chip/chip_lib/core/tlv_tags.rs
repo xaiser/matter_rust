@@ -7,3 +7,18 @@ pub enum TlvCommonProfiles {
 
     KcommonProfileId = 0
 }
+
+impl From<u32> for TlvCommonProfiles {
+    fn from(value: u32) -> Self {
+        match value {
+            0x0 => TlvCommonProfiles::KcommonProfileId,
+            _ => TlvCommonProfiles::KprofileIdNotSpecified,
+        }
+    }
+}
+
+impl Into<u32> for TlvCommonProfiles {
+    fn into(self) -> u32 {
+        self as u32
+    }
+}
