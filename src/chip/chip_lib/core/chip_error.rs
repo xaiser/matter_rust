@@ -279,6 +279,13 @@ macro_rules! chip_error_buffer_too_small{
 }
 
 #[macro_export]
+macro_rules! chip_error_tlv_container_open{
+    () => {
+        chip_core_error!(0x27)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_wrong_encryption_type_from_peer{
     () => {
         chip_core_error!(0x80)
