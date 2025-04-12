@@ -126,7 +126,7 @@ where
     EndianPutter: EndianPut + Default 
 {
     #[allow(dead_code)]
-    fn put_u16(&mut self, x: u16) -> &mut Self {
+    pub fn put_u16(&mut self, x: u16) -> &mut Self {
         let len = core::mem::size_of::<u16>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_unsign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);
@@ -136,7 +136,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn put_i16(&mut self, x: i16) -> &mut Self {
+    pub fn put_i16(&mut self, x: i16) -> &mut Self {
         let len = core::mem::size_of::<i16>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_sign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);
@@ -146,7 +146,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn put_u32(&mut self, x: u32) -> &mut Self {
+    pub fn put_u32(&mut self, x: u32) -> &mut Self {
         let len = core::mem::size_of::<u32>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_unsign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);
@@ -156,7 +156,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn put_i32(&mut self, x: i32) -> &mut Self {
+    pub fn put_i32(&mut self, x: i32) -> &mut Self {
         let len = core::mem::size_of::<i32>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_sign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);
@@ -166,7 +166,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn put_u64(&mut self, x: u64) -> &mut Self {
+    pub fn put_u64(&mut self, x: u64) -> &mut Self {
         let len = core::mem::size_of::<u64>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_unsign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);
@@ -176,7 +176,7 @@ where
     }
 
     #[allow(dead_code)]
-    fn put_i64(&mut self, x: i64) -> &mut Self {
+    pub fn put_i64(&mut self, x: i64) -> &mut Self {
         let len = core::mem::size_of::<i64>();
         if self.available() > 0 {
             let _ = self.m_endian_putter.endian_sign_put(x.into(), len, &mut self.m_buf[self.m_needed..]);

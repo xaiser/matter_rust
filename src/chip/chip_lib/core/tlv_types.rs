@@ -1,3 +1,4 @@
+#[derive(PartialEq)]
 pub enum TlvType {
     KtlvTypeNotSpecified     = -1,
     KtlvTypeUnknownContainer = -2,
@@ -14,4 +15,84 @@ pub enum TlvType {
     KtlvTypeStructure = 0x15,
     KtlvTypeArray     = 0x16,
     KtlvTypeList      = 0x17
+}
+
+#[derive(Clone,Copy,PartialEq,PartialOrd)]
+#[repr(i8)]
+pub enum TlvElementType {
+    // IMPORTANT: All values here except NotSpecified must have no bits in
+    // common with values of TagControl.
+    NotSpecified           = -1,
+    Int8                   = 0x00,
+    Int16                  = 0x01,
+    Int32                  = 0x02,
+    Int64                  = 0x03,
+    UInt8                  = 0x04,
+    UInt16                 = 0x05,
+    UInt32                 = 0x06,
+    UInt64                 = 0x07,
+    BooleanFalse           = 0x08,
+    BooleanTrue            = 0x09,
+    FloatingPointNumber32  = 0x0A,
+    FloatingPointNumber64  = 0x0B,
+    UTF8String1ByteLength = 0x0C,
+    UTF8String2ByteLength = 0x0D,
+    UTF8String4ByteLength = 0x0E,
+    UTF8String8ByteLength = 0x0F,
+    ByteString1ByteLength = 0x10,
+    ByteString2ByteLength = 0x11,
+    ByteString4ByteLength = 0x12,
+    ByteString8ByteLength = 0x13,
+    // IMPORTANT: Values starting at Null must match the corresponding values of
+    // TLVType.
+    Null           = 0x14,
+    Structure      = 0x15,
+    Array          = 0x16,
+    List           = 0x17,
+    EndOfContainer = 0x18
+}
+
+#[derive(Clone,Copy,PartialEq)]
+pub enum TLVFieldSize
+{
+    KTLVFieldSize0Byte = -1,
+    KTLVFieldSize1Byte = 0,
+    KTLVFieldSize2Byte = 1,
+    KTLVFieldSize4Byte = 2,
+    KTLVFieldSize8Byte = 3
+}
+
+pub enum TLVTypeMask
+{
+    KTLVTypeMask     = 0x1F,
+    KTLVTypeSizeMask = 0x03
+}
+
+impl From<u8> for TLVFieldSize {
+    fn from(v: u8) -> Self {
+        match v {
+            0 => TLVFieldSize::KTLVFieldSize1Byte,
+            1 => TLVFieldSize::KTLVFieldSize2Byte,
+            2 => TLVFieldSize::KTLVFieldSize4Byte,
+            3 => TLVFieldSize::KTLVFieldSize8Byte,
+            _ => TLVFieldSize::KTLVFieldSize0Byte,
+        }
+    }
+}
+
+pub fn tlv_type_has_value(e_type: TlvElementType) -> bool {
+    return (e_type <= TlvElementType::UInt64) || 
+        ((e_type >= TlvElementType::FloatingPointNumber32) && (e_type <= TlvElementType::ByteString8ByteLength));
+}
+
+pub fn get_tlv_field_size(e_type: TlvElementType) -> TLVFieldSize {
+    if tlv_type_has_value(e_type) {
+        return TLVFieldSize::from(e_type as u8 & TLVTypeMask::KTLVTypeMask as u8);
+    }
+
+    return TLVFieldSize::KTLVFieldSize0Byte;
+}
+
+pub fn tlv_field_size_to_bytes(size: TLVFieldSize) -> u8 {
+    return (if size != TLVFieldSize::KTLVFieldSize0Byte { 1 << size as u8 } else { 0 }) as u8;
 }

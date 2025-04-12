@@ -1,6 +1,11 @@
 use super::tlv_backing_store::TlvBackingStore;
-use super::tlv_types::TlvType;
-use super::tlv_tags::{Tag,TlvCommonProfiles};
+use super::tlv_types::{TlvType,TlvElementType};
+use super::tlv_types;
+use super::tlv_tags::{Tag,TlvCommonProfiles,TLVTagControl};
+use super::tlv_tags;
+
+use crate::chip::chip_lib::support::buffer_writer::little_endian::BufferWriter as LittleEndianBufferWriter;
+use crate::chip::chip_lib::support::buffer_writer::BufferWriter;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -10,6 +15,7 @@ use crate::chip_error_internal;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_tlv_container_open;
 use crate::chip_error_no_memory;
+use crate::chip_error_invalid_tlv_tag;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -139,6 +145,80 @@ where
     }
 
     pub fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn write_element_head(&mut self, e_type: TlvElementType, tag: Tag, len_or_val: u64) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(!self.is_container_open(), Err(chip_error_tlv_container_open!()));
+
+        let mut staging_buf: [u8; 17] = [0; 17];
+        let tag_num: u32 = tlv_tags::tag_num_from_tag(&tag);
+
+        let mut writer: LittleEndianBufferWriter = LittleEndianBufferWriter::default_with_buf(&mut staging_buf[..]);
+
+        if tlv_tags::is_special_tag(&tag) {
+            if tag_num <= tlv_tags::SpecialTagNumber::KContextTagMaxNum as u32 {
+                if (self.m_container_type != TlvType::KtlvTypeStructure) &&
+                    (self.m_container_type != TlvType::KtlvTypeList) {
+                    return Err(chip_error_invalid_tlv_tag!());
+                }
+
+                writer.put_u8(TLVTagControl::ContextSpecific as u8 | e_type as u8);
+                writer.put_u8(tag_num as u8);
+            } else {
+                if (e_type != TlvElementType::EndOfContainer) &&
+                    (self.m_container_type != TlvType::KtlvTypeNotSpecified) && 
+                    (self.m_container_type != TlvType::KtlvTypeArray) && 
+                    (self.m_container_type != TlvType::KtlvTypeList) {
+                    return Err(chip_error_invalid_tlv_tag!());
+                }
+                writer.put_u8(TLVTagControl::Anonymous as u8 | e_type as u8);
+            }
+        } else {
+            let profile_id: u32 = tlv_tags::profile_id_from_tag(&tag);
+
+            if (self.m_container_type != TlvType::KtlvTypeNotSpecified) &&
+                (self.m_container_type != TlvType::KtlvTypeStructure) && 
+                    (self.m_container_type != TlvType::KtlvTypeList) {
+                    return Err(chip_error_invalid_tlv_tag!());
+            }
+
+            if profile_id == TlvCommonProfiles::KcommonProfileId as u32{
+                if tag_num <= u16::MAX.into() {
+                    writer.put_u8(TLVTagControl::CommonProfile2Bytes as u8 | e_type as u8);
+                    writer.put_u16(tag_num as u16);
+                } else {
+                    writer.put_u8(TLVTagControl::CommonProfile4Bytes as u8 | e_type as u8);
+                    writer.put_u32(tag_num);
+                }
+            } else if profile_id == self.m_implicit_profile_id {
+                if tag_num <= u16::MAX.into() {
+                    writer.put_u8(TLVTagControl::ImplicitProfile2Bytes as u8 | e_type as u8);
+                    writer.put_u16(tag_num as u16);
+                } else {
+                    writer.put_u8(TLVTagControl::ImplicitProfile4Bytes as u8 | e_type as u8);
+                    writer.put_u32(tag_num);
+                }
+            } else {
+                let vendor_id: u16 = (profile_id >> 16) as u16;
+                let profile_num = (profile_id & 0x0000FFFF) as u16;
+                if tag_num <= u16::MAX.into() {
+                    writer.put_u8(TLVTagControl::FullyQualified6Bytes as u8 | e_type as u8);
+                    writer.put_u16(vendor_id);
+                    writer.put_u16(profile_num);
+                    writer.put_u16(tag_num as u16);
+                } else {
+                    writer.put_u8(TLVTagControl::FullyQualified8Bytes as u8 | e_type as u8);
+                    writer.put_u16(vendor_id);
+                    writer.put_u16(profile_num);
+                    writer.put_u32(tag_num);
+                }
+            }
+        } // end of not special tag
+        
+        let length_size = tlv_types::tlv_field_size_to_bytes(tlv_types::get_tlv_field_size(e_type));
+
         chip_ok!()
     }
 

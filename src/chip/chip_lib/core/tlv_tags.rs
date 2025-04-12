@@ -1,6 +1,8 @@
 #![allow(dead_code)]
+
+use core::ops::Shr;
 pub enum TlvCommonProfiles {
-    /**
+    /*
      * Used to indicate the absence of a profile id in a variable or member.
      * This is essentially the same as kCHIPProfile_NotSpecified defined in CHIPProfiles.h
      */
@@ -24,42 +26,39 @@ impl Into<u32> for TlvCommonProfiles {
     }
 }
 
-mod private {
-    use core::ops::Shr;
 
-    #[repr(u8)]
-    #[derive(Clone,Copy)]
-    pub enum TLVTagControl
-    {
-        // IMPORTANT: All values here must have no bits in common with specified
-        // values of TLVElementType.
-        Anonymous              = 0x00,
-        ContextSpecific        = 0x20,
-        CommonProfile2Bytes   = 0x40,
-        CommonProfile4Bytes   = 0x60,
-        ImplicitProfile2Bytes = 0x80,
-        ImplicitProfile4Bytes = 0xA0,
-        FullyQualified6Bytes  = 0xC0,
-        FullyQualified8Bytes  = 0xE0
-    }
+#[repr(u8)]
+#[derive(Clone,Copy)]
+pub enum TLVTagControl
+{
+    // IMPORTANT: All values here must have no bits in common with specified
+    // values of TLVElementType.
+    Anonymous              = 0x00,
+    ContextSpecific        = 0x20,
+    CommonProfile2Bytes   = 0x40,
+    CommonProfile4Bytes   = 0x60,
+    ImplicitProfile2Bytes = 0x80,
+    ImplicitProfile4Bytes = 0xA0,
+    FullyQualified6Bytes  = 0xC0,
+    FullyQualified8Bytes  = 0xE0
+}
 
-    impl Shr<u32> for TLVTagControl {
-        type Output = u8;
+impl Shr<u32> for TLVTagControl {
+    type Output = u8;
 
-        fn shr(self, rhs: u32) -> Self::Output {
-            (self as u8) >> rhs
-        }
-    }
-
-    pub enum TLVTagControlMS
-    {
-        KTLVTagControlMask  = 0xE0,
-        KTLVTagControlShift = 5
+    fn shr(self, rhs: u32) -> Self::Output {
+        (self as u8) >> rhs
     }
 }
 
+pub enum TLVTagControlMS
+{
+    KTLVTagControlMask  = 0xE0,
+    KTLVTagControlShift = 5
+}
+
 #[repr(u32)]
-pub enum SpecialTagNumver {
+pub enum SpecialTagNumber {
     KContextTagMaxNum = u8::MAX as u32,
     KAnonymousTagNum,
     KUnknownImplicitTagNum
@@ -110,9 +109,21 @@ pub fn common_tag(tag_num: u32) -> Tag {
 }
 
 pub fn anonymous_tag() -> Tag {
-    return profile_tag(Tag::KSPECIAL_TAG_PROFILE_ID as u32, SpecialTagNumver::KAnonymousTagNum as u32);
+    return profile_tag(Tag::KSPECIAL_TAG_PROFILE_ID as u32, SpecialTagNumber::KAnonymousTagNum as u32);
 }
 
 pub fn unknown_implicit_tag() -> Tag {
-    return profile_tag(Tag::KSPECIAL_TAG_PROFILE_ID as u32, SpecialTagNumver::KUnknownImplicitTagNum as u32);
+    return profile_tag(Tag::KSPECIAL_TAG_PROFILE_ID as u32, SpecialTagNumber::KUnknownImplicitTagNum as u32);
+}
+
+pub fn tag_num_from_tag(tag: &Tag) -> u32 {
+    return tag.m_val as u32;
+}
+
+pub fn profile_id_from_tag(tag: &Tag) -> u32 {
+    return !((tag.m_val >> Tag::KPROFILE_ID_SHIFT) as u32);
+}
+
+pub fn is_special_tag(tag: &Tag) -> bool {
+    return profile_id_from_tag(tag) == Tag::KSPECIAL_TAG_PROFILE_ID;
 }

@@ -279,9 +279,23 @@ macro_rules! chip_error_buffer_too_small{
 }
 
 #[macro_export]
+macro_rules! chip_error_invalid_tlv_tag{
+    () => {
+        chip_core_error!(0x24)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_tlv_container_open{
     () => {
         chip_core_error!(0x27)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_invalid_argument{
+    () => {
+        chip_core_error!(0x2f)
     };
 }
 
@@ -317,13 +331,6 @@ macro_rules! chip_error_end_point_pool_full{
 macro_rules! chip_error_inbound_message_too_big{
     () => {
         chip_core_error!(0xc2)
-    };
-}
-
-#[macro_export]
-macro_rules! chip_error_invalid_argument{
-    () => {
-        chip_core_error!(0x2f)
     };
 }
 
