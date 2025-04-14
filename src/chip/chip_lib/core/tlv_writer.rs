@@ -16,9 +16,11 @@ use crate::chip_error_incorrect_state;
 use crate::chip_error_tlv_container_open;
 use crate::chip_error_no_memory;
 use crate::chip_error_invalid_tlv_tag;
+use crate::chip_error_buffer_too_small;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
+use crate::verify_or_die;
 
 use core::ptr;
 
@@ -218,6 +220,41 @@ where
         } // end of not special tag
         
         let length_size = tlv_types::tlv_field_size_to_bytes(tlv_types::get_tlv_field_size(e_type));
+
+        if length_size > 0 {
+            let _ = writer.endian_unsign_put(len_or_val, length_size as usize);
+        }
+
+        verify_or_die!(writer.is_fit());
+
+        return self.write_data(writer.const_buffer(), writer.fit().unwrap());
+    }
+
+    fn write_data(&mut self, buf: &[u8], mut len: usize) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!((self.m_len_written + len) <= self.m_max_len, Err(chip_error_buffer_too_small!()));
+
+        while len > 0 {
+            if self.m_remaining_len == 0 {
+                verify_or_return_error!(self.m_backing_store.is_null() == false, Err(chip_error_no_memory!()));
+                unsafe {
+                    verify_or_return_error!(self.m_write_point.offset_from(self.m_buf_start) > 0, Err(chip_error_incorrect_state!()));
+                    verify_or_return_error!((self.m_write_point.offset_from(self.m_buf_start) as u64) < (u32::MAX as u64), Err(chip_error_incorrect_state!()));
+
+                    (*self.m_backing_store).finalize_buffer(
+                        self as * mut Self, self.m_buf_start, self.m_write_point.offset_from(self.m_buf_start) as usize)?;
+                    (*self.m_backing_store).get_new_buffer(self as * mut Self, &mut self.m_buf_start, &mut self.m_remaining_len)?;
+                }
+
+                verify_or_return_error!(self.m_remaining_len > 0, Err(chip_error_no_memory!()));
+
+                self.m_write_point = self.m_buf_start;
+
+                if self.m_remaining_len > (self.m_max_len - self.m_len_written) {
+                    self.m_remaining_len = self.m_max_len - self.m_len_written;
+                }
+            }
+        }
 
         chip_ok!()
     }

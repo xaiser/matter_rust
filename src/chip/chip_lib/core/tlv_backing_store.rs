@@ -6,5 +6,7 @@ pub trait TlvBackingStore {
 
     fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult;
 
+    fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: &mut * mut u8, buf_len: &mut usize) -> ChipErrorResult;
+
     fn get_new_buffer_will_always_fail(&self) -> bool;
 }

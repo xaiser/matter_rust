@@ -32,6 +32,10 @@ pub trait BufferWriter<'a> {
     fn buffer(&mut self) -> &mut [u8];
 
     fn const_buffer(&self) -> &[u8];
+
+    fn endian_sign_put(&mut self, x: i64, len: usize) -> &mut Self;
+
+    fn endian_unsign_put(&mut self, x: u64, len: usize) -> &mut Self;
 }
 
 pub struct EndianBufferWriter<'a, EndianPutter>
@@ -118,6 +122,16 @@ impl<'a, EndianPutter> BufferWriter<'a> for EndianBufferWriter<'a, EndianPutter>
 
     fn const_buffer(&self) -> &[u8] {
         return self.m_buf as &[u8];
+    }
+
+    fn endian_sign_put(&mut self, x: i64, len: usize) -> &mut Self {
+        let _ = self.m_endian_putter.endian_sign_put(x, len, &mut self.m_buf[..]);
+        self
+    }
+
+    fn endian_unsign_put(&mut self, x: u64, len: usize) -> &mut Self {
+        let _ = self.m_endian_putter.endian_unsign_put(x, len, &mut self.m_buf[..]);
+        self
     }
 }
 
