@@ -104,7 +104,7 @@ where
         self.m_buf_start = ptr::null_mut();
         self.m_remaining_len = 0;
         unsafe {
-            (*self.m_backing_store).on_init_writer(self as * mut Self, ptr::addr_of!(self.m_buf_start), ptr::addr_of_mut!(self.m_remaining_len))?;
+            (*self.m_backing_store).on_init_writer(self as * mut Self, ptr::addr_of_mut!(self.m_buf_start), ptr::addr_of_mut!(self.m_remaining_len))?;
         }
 
         verify_or_return_error!(self.m_buf_start.is_null() == false, Err(chip_error_internal!()));
@@ -233,6 +233,7 @@ where
     fn write_data(&mut self, buf: &[u8], mut len: usize) -> ChipErrorResult {
         verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
         verify_or_return_error!((self.m_len_written + len) <= self.m_max_len, Err(chip_error_buffer_too_small!()));
+        let mut p_buf: * const u8 = buf.as_ptr();
 
         while len > 0 {
             if self.m_remaining_len == 0 {
@@ -254,6 +255,19 @@ where
                     self.m_remaining_len = self.m_max_len - self.m_len_written;
                 }
             }
+            let mut write_len = len;
+            if write_len > self.m_remaining_len {
+                write_len = self.m_remaining_len;
+            }
+
+            unsafe {
+                ptr::copy_nonoverlapping(p_buf, self.m_write_point, write_len);
+                self.m_write_point = self.m_write_point.add(write_len);
+                self.m_remaining_len -= write_len;
+                self.m_len_written += write_len;
+                p_buf = p_buf.add(write_len);
+                len -= write_len;
+            }
         }
 
         chip_ok!()
@@ -270,4 +284,147 @@ where
     fn set_close_container_reserved(&mut self, close_container_reserved: bool) {
         self.m_close_container_recerved = close_container_reserved;
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::*;
+    use crate::chip::chip_lib::core::tlv_backing_store::TlvBackingStore;
+
+    mod no_backing {
+        use super::*;
+        use super::super::*;
+        use std::*;
+
+        struct DummyBackStore;
+        impl TlvBackingStore for DummyBackStore {
+            fn on_init_writer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, _buf: * mut * mut u8, _buf_len: * mut usize) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, _buf: * mut u8, _buf_len: usize) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, _buf: * mut * mut u8, _buf_len: &mut usize) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn get_new_buffer_will_always_fail(&self) -> bool {
+                false
+            }
+        }
+
+        type TheTlvWriter = TlvWriterBasic<DummyBackStore>;
+        const THE_BUF_LEN: usize = 32;
+        static mut BUFFER: [u8; THE_BUF_LEN] = [0; THE_BUF_LEN];
+
+        fn setup_non_init() -> TheTlvWriter {
+            TheTlvWriter::const_default()
+        }
+
+        fn setup() -> TheTlvWriter {
+            let mut writer = TheTlvWriter::const_default();
+            unsafe {
+                BUFFER.fill(0);
+                writer.init(BUFFER.as_mut_ptr(), THE_BUF_LEN as u32);
+            }
+            return writer;
+        }
+
+        #[test]
+        fn init() {
+            let mut writer = setup_non_init();
+            assert_eq!(false, writer.is_initialized());
+            let mut commit_buf: [u8; 8] = [0; 8];
+            writer.init(commit_buf.as_mut_ptr(), 8);
+            assert_eq!(true, writer.is_initialized());
+        }
+
+        #[test]
+        fn write_element_head() {
+            let mut writer = setup();
+            assert_eq!(true, writer.is_initialized());
+        }
+    }
+
+    /*
+    const TMP_BUF_LEN: usize = 64;
+
+    struct VecBackingStore {
+        m_back: Vec<Vec<u8>>,
+        m_current: [u8; TMP_BUF_LEN],
+        pub m_always_fail: bool,
+    }
+
+    impl VecBackingStore {
+        pub fn reset(&mut self) {
+            for row in self.m_back.iter_mut() {
+                row.clear();
+            }
+            self.m_back.clear();
+            self.m_current.fill(0);
+        }
+    }
+
+    impl Default for VecBackingStore {
+        fn default() -> Self {
+            Self {
+                m_back: Vec::new(),
+                m_current: [0; TMP_BUF_LEN],
+                m_always_fail: false,
+            }
+        }
+    }
+
+    impl TlvBackingStore for VecBackingStore {
+        fn on_init_writer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, mut buf: * mut * mut u8, buf_len: * mut usize) -> ChipErrorResult {
+            self.reset();
+
+            unsafe {
+                *buf = self.m_current.as_mut_ptr();
+                *buf_len = TMP_BUF_LEN;
+            }
+
+            chip_ok!()
+        }
+
+        fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
+            self.m_back.push(Vec::<u8>::new());
+            if let Some(last) = self.m_back.last_mut() {
+                for i in 0..buf_len {
+                    unsafe {
+                        last.push(*(buf.add(i)));
+                    }
+                }
+            } else {
+                return Err(chip_error_no_memory!());
+            }
+            chip_ok!()
+        }
+
+        fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut * mut u8, buf_len: &mut usize) -> ChipErrorResult {
+            self.m_current.fill(0);
+            unsafe {
+                *buf = self.m_current.as_mut_ptr();
+                *buf_len = TMP_BUF_LEN;
+            }
+            chip_ok!()
+        }
+
+        fn get_new_buffer_will_always_fail(&self) -> bool {
+            return self.m_always_fail;
+        }
+    }
+
+    fn setup() -> VecBackingStore {
+        let back = VecBackingStore::default();
+    }
+
+    #[test]
+    fn init() {
+        assert_eq!(1, 1);
+    }
+    */
 }
