@@ -87,12 +87,12 @@ pub fn tlv_type_has_value(e_type: TlvElementType) -> bool {
 
 pub fn get_tlv_field_size(e_type: TlvElementType) -> TLVFieldSize {
     if tlv_type_has_value(e_type) {
-        return TLVFieldSize::from(e_type as u8 & TLVTypeMask::KTLVTypeMask as u8);
+        return TLVFieldSize::from((e_type as u8) & (TLVTypeMask::KTLVTypeSizeMask as u8));
     }
 
     return TLVFieldSize::KTLVFieldSize0Byte;
 }
 
 pub fn tlv_field_size_to_bytes(size: TLVFieldSize) -> u8 {
-    return (if size != TLVFieldSize::KTLVFieldSize0Byte { 1 << size as u8 } else { 0 }) as u8;
+    return (if size != TLVFieldSize::KTLVFieldSize0Byte { 1 << (size as u8) } else { 0 }) as u8;
 }

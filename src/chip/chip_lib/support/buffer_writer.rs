@@ -125,12 +125,22 @@ impl<'a, EndianPutter> BufferWriter<'a> for EndianBufferWriter<'a, EndianPutter>
     }
 
     fn endian_sign_put(&mut self, x: i64, len: usize) -> &mut Self {
-        let _ = self.m_endian_putter.endian_sign_put(x, len, &mut self.m_buf[..]);
+        let available = self.available();
+        if available > 0 {
+            let copy_len: usize = min(available as usize, len);
+            let _ = self.m_endian_putter.endian_sign_put(x, copy_len, &mut self.m_buf[self.m_needed..]);
+        }
+        self.m_needed += len;
         self
     }
 
     fn endian_unsign_put(&mut self, x: u64, len: usize) -> &mut Self {
-        let _ = self.m_endian_putter.endian_unsign_put(x, len, &mut self.m_buf[..]);
+        let available = self.available();
+        if available > 0 {
+            let copy_len: usize = min(available as usize, len);
+            let _ = self.m_endian_putter.endian_unsign_put(x, copy_len, &mut self.m_buf[self.m_needed..]);
+        }
+        self.m_needed += len;
         self
     }
 }

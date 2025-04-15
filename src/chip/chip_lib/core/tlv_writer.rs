@@ -22,6 +22,11 @@ use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::verify_or_die;
 
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+
 use core::ptr;
 
 pub trait TlvWriter {
@@ -219,7 +224,12 @@ where
             }
         } // end of not special tag
         
+
+        chip_log_detail!(Inet, "has value {}", tlv_types::tlv_type_has_value(e_type));
+        chip_log_detail!(Inet, "size 1 {}", tlv_types::get_tlv_field_size(e_type) as u8);
         let length_size = tlv_types::tlv_field_size_to_bytes(tlv_types::get_tlv_field_size(e_type));
+
+        chip_log_detail!(Inet, "size 2 {}", length_size);
 
         if length_size > 0 {
             let _ = writer.endian_unsign_put(len_or_val, length_size as usize);
@@ -296,6 +306,9 @@ mod test {
         use super::*;
         use super::super::*;
         use std::*;
+        use crate::chip::chip_lib::core::tlv_tags;
+        use crate::chip::chip_lib::core::tlv_tags::{TLVTagControl};
+        use crate::chip::chip_lib::core::tlv_types::{TlvElementType,TlvType};
 
         struct DummyBackStore;
         impl TlvBackingStore for DummyBackStore {
@@ -343,9 +356,111 @@ mod test {
         }
 
         #[test]
-        fn write_element_head() {
+        fn write_element_head_context_tag() {
             let mut writer = setup();
-            assert_eq!(true, writer.is_initialized());
+            writer.m_container_type = TlvType::KtlvTypeStructure;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::context_tag(1), 2).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::ContextSpecific as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(2, BUFFER[2]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_context_tag_not_valid_tag() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::context_tag(1), 1).is_err());
+        }
+
+        #[test]
+        fn write_element_head_anonymous() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::anonymous_tag(), 1).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::Anonymous as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_anonymous_tag_structure() {
+            let mut writer = setup();
+            writer.m_container_type = TlvType::KtlvTypeStructure;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::anonymous_tag(), 1).is_err());
+        }
+
+        #[test]
+        fn write_element_head_common_tag_but_container_array() {
+            let mut writer = setup();
+            writer.m_container_type = TlvType::KtlvTypeArray;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag(0, 1), 2).is_err());
+        }
+
+        #[test]
+        fn write_element_head_common_tag_with_num_less_u16_max() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::common_tag(1), 2).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::CommonProfile2Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_common_tag_with_num_big_u16_max() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::common_tag(0x1FFFF), 2).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::CommonProfile4Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(0xFF, BUFFER[1]);
+                assert_eq!(0xFF, BUFFER[2]);
+                assert_eq!(0x01, BUFFER[3]);
+                assert_eq!(0x00, BUFFER[4]);
+                assert_eq!(2, BUFFER[5]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_implicit_tag_with_num_less_u16_max() {
+            let mut writer = setup();
+            writer.m_implicit_profile_id = 0x1;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag(1,2), 3).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::ImplicitProfile2Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(2, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(3, BUFFER[3]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_implicit_tag_with_num_big_u16_max() {
+            let mut writer = setup();
+            writer.m_implicit_profile_id = 0x1;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag(1,0x1FFFF), 2).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::ImplicitProfile4Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(0xFF, BUFFER[1]);
+                assert_eq!(0xFF, BUFFER[2]);
+                assert_eq!(0x01, BUFFER[3]);
+                assert_eq!(0x00, BUFFER[4]);
+                assert_eq!(2, BUFFER[5]);
+            }
+        }
+
+        #[test]
+        fn write_element_head_regular_tag_with_num_less_u16_max() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag(1,2), 3).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::ImplicitProfile2Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(2, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(3, BUFFER[3]);
+            }
         }
     }
 
