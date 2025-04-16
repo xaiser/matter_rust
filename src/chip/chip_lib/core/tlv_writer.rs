@@ -22,10 +22,12 @@ use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::verify_or_die;
 
+/*
 use core::str::FromStr;
 use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
+*/
 
 use core::ptr;
 
@@ -225,11 +227,7 @@ where
         } // end of not special tag
         
 
-        chip_log_detail!(Inet, "has value {}", tlv_types::tlv_type_has_value(e_type));
-        chip_log_detail!(Inet, "size 1 {}", tlv_types::get_tlv_field_size(e_type) as u8);
         let length_size = tlv_types::tlv_field_size_to_bytes(tlv_types::get_tlv_field_size(e_type));
-
-        chip_log_detail!(Inet, "size 2 {}", length_size);
 
         if length_size > 0 {
             let _ = writer.endian_unsign_put(len_or_val, length_size as usize);
@@ -454,92 +452,174 @@ mod test {
         #[test]
         fn write_element_head_regular_tag_with_num_less_u16_max() {
             let mut writer = setup();
-            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag(1,2), 3).is_ok());
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag_vendor_id(1,2,3), 4).is_ok());
             unsafe {
-                assert_eq!(TLVTagControl::ImplicitProfile2Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
-                assert_eq!(2, BUFFER[1]);
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
                 assert_eq!(0, BUFFER[2]);
-                assert_eq!(3, BUFFER[3]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+                assert_eq!(4, BUFFER[7]);
             }
         }
-    }
 
-    /*
-    const TMP_BUF_LEN: usize = 64;
-
-    struct VecBackingStore {
-        m_back: Vec<Vec<u8>>,
-        m_current: [u8; TMP_BUF_LEN],
-        pub m_always_fail: bool,
-    }
-
-    impl VecBackingStore {
-        pub fn reset(&mut self) {
-            for row in self.m_back.iter_mut() {
-                row.clear();
-            }
-            self.m_back.clear();
-            self.m_current.fill(0);
-        }
-    }
-
-    impl Default for VecBackingStore {
-        fn default() -> Self {
-            Self {
-                m_back: Vec::new(),
-                m_current: [0; TMP_BUF_LEN],
-                m_always_fail: false,
-            }
-        }
-    }
-
-    impl TlvBackingStore for VecBackingStore {
-        fn on_init_writer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, mut buf: * mut * mut u8, buf_len: * mut usize) -> ChipErrorResult {
-            self.reset();
-
+        #[test]
+        fn write_element_head_regular_tag_with_num_big_u16_max() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::profile_tag_vendor_id(1,2,0x1FFFF), 4).is_ok());
             unsafe {
-                *buf = self.m_current.as_mut_ptr();
-                *buf_len = TMP_BUF_LEN;
+                assert_eq!(TLVTagControl::FullyQualified8Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(0xFF, BUFFER[5]);
+                assert_eq!(0xFF, BUFFER[6]);
+                assert_eq!(0x01, BUFFER[7]);
+                assert_eq!(0x00, BUFFER[8]);
+                assert_eq!(4, BUFFER[9]);
             }
-
-            chip_ok!()
         }
 
-        fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
-            self.m_back.push(Vec::<u8>::new());
-            if let Some(last) = self.m_back.last_mut() {
-                for i in 0..buf_len {
-                    unsafe {
-                        last.push(*(buf.add(i)));
-                    }
+        #[test]
+        fn write_element_head_regular_tag_with_no_value() {
+            let mut writer = setup();
+            assert_eq!(true, writer.write_element_head(TlvElementType::BooleanFalse, tlv_tags::profile_tag_vendor_id(1,2,3), 4).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::BooleanFalse as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+            }
+        }
+    } // end of no_backing
+
+    mod backing {
+        use super::*;
+        use super::super::*;
+        use std::*;
+        use crate::chip::chip_lib::core::tlv_tags;
+        use crate::chip::chip_lib::core::tlv_tags::{TLVTagControl};
+        use crate::chip::chip_lib::core::tlv_types::{TlvElementType,TlvType};
+
+        const TMP_BUF_LEN: usize = 4;
+
+        struct VecBackingStore {
+            pub m_back: Vec<Vec<u8>>,
+            pub m_current: [u8; TMP_BUF_LEN],
+            pub m_always_fail: bool,
+        }
+
+        impl VecBackingStore {
+            pub fn reset(&mut self) {
+                for row in self.m_back.iter_mut() {
+                    row.clear();
                 }
-            } else {
-                return Err(chip_error_no_memory!());
+                self.m_back.clear();
+                self.m_current.fill(0);
             }
-            chip_ok!()
         }
 
-        fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut * mut u8, buf_len: &mut usize) -> ChipErrorResult {
-            self.m_current.fill(0);
+        impl Default for VecBackingStore {
+            fn default() -> Self {
+                Self {
+                    m_back: Vec::new(),
+                    m_current: [0; TMP_BUF_LEN],
+                    m_always_fail: false,
+                }
+            }
+        }
+
+        impl TlvBackingStore for VecBackingStore {
+            fn on_init_writer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, mut buf: * mut * mut u8, buf_len: * mut usize) -> ChipErrorResult {
+                self.reset();
+
+                unsafe {
+                    *buf = self.m_current.as_mut_ptr();
+                    *buf_len = TMP_BUF_LEN;
+                }
+
+                chip_ok!()
+            }
+
+            fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
+                self.m_back.push(Vec::<u8>::new());
+                if let Some(last) = self.m_back.last_mut() {
+                    for i in 0..buf_len {
+                        unsafe {
+                            last.push(*(buf.add(i)));
+                        }
+                    }
+                } else {
+                    return Err(chip_error_no_memory!());
+                }
+                chip_ok!()
+            }
+
+            fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, buf: * mut * mut u8, buf_len: &mut usize) -> ChipErrorResult {
+                self.m_current.fill(0);
+                unsafe {
+                    *buf = self.m_current.as_mut_ptr();
+                    *buf_len = TMP_BUF_LEN;
+                }
+                chip_ok!()
+            }
+
+            fn get_new_buffer_will_always_fail(&self) -> bool {
+                return self.m_always_fail;
+            }
+        }
+        type TheTlvWriter = TlvWriterBasic<VecBackingStore>;
+
+        fn setup(backing: * mut VecBackingStore) -> TheTlvWriter {
+            let mut writer = TheTlvWriter::const_default();
+            // to allow max_len > remaining_len, so we need a + 32 here
+            let _ = writer.init_backing_store(backing, (TMP_BUF_LEN  + 32) as u32);
+
+            writer
+        }
+
+        #[test]
+        fn init() {
+            let mut writer = TheTlvWriter::const_default();
+            assert_eq!(false, writer.is_initialized());
+            let mut backing = VecBackingStore::default();
+            assert_eq!(true, writer.init_backing_store(ptr::addr_of_mut!(backing), TMP_BUF_LEN as u32).is_ok());
+            assert_eq!(true, writer.is_initialized());
+        }
+
+        #[test]
+        fn write_element_head_context_tag() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            writer.m_container_type = TlvType::KtlvTypeStructure;
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::context_tag(1), 2).is_ok());
             unsafe {
-                *buf = self.m_current.as_mut_ptr();
-                *buf_len = TMP_BUF_LEN;
+                assert_eq!(TLVTagControl::ContextSpecific as u8 | TlvElementType::UInt8 as u8, backing.m_current[0]);
+                assert_eq!(1, backing.m_current[1]);
+                assert_eq!(2, backing.m_current[2]);
             }
-            chip_ok!()
         }
 
-        fn get_new_buffer_will_always_fail(&self) -> bool {
-            return self.m_always_fail;
+        #[test]
+        fn write_element_head_common_tag_with_num_big_u16_max() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            assert_eq!(true, writer.write_element_head(TlvElementType::UInt8, tlv_tags::common_tag(0x1FFFF), 2).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::CommonProfile4Bytes as u8 | TlvElementType::UInt8 as u8, backing.m_back[0][0]);
+                assert_eq!(0xFF, backing.m_back[0][1]);
+                assert_eq!(0xFF, backing.m_back[0][2]);
+                assert_eq!(0x01, backing.m_back[0][3]);
+                assert_eq!(0x00, backing.m_current[0]);
+                assert_eq!(2, backing.m_current[1]);
+            }
         }
     }
 
-    fn setup() -> VecBackingStore {
-        let back = VecBackingStore::default();
-    }
-
-    #[test]
-    fn init() {
-        assert_eq!(1, 1);
-    }
-    */
 }
