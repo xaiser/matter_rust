@@ -258,6 +258,13 @@ macro_rules! chip_error_incorrect_state{
 }
 
 #[macro_export]
+macro_rules! chip_error_message_too_long{
+    () => {
+        chip_core_error!(0x04)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_no_memory{
     () => {
         chip_core_error!(0x0b)

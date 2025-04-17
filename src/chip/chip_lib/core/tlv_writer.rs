@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::tlv_backing_store::TlvBackingStore;
-use super::tlv_types::{TlvType,TlvElementType};
+use super::tlv_types::{TlvType,TlvElementType,TLVTypeMask,TLVFieldSize};
 use super::tlv_types;
 use super::tlv_tags::{Tag,TlvCommonProfiles,TLVTagControl};
 use super::tlv_tags;
@@ -19,10 +19,13 @@ use crate::chip_error_tlv_container_open;
 use crate::chip_error_no_memory;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_buffer_too_small;
+use crate::chip_error_invalid_argument;
+use crate::chip_error_message_too_long;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::verify_or_die;
+
 
 /*
 use core::str::FromStr;
@@ -31,7 +34,34 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 */
 
-use core::ptr;
+use core::{fmt,ptr};
+
+mod private {
+    use core::fmt::{self, Write};
+
+    pub struct StrWriter<'a> {
+        buf: &'a mut [u8],
+        pos: usize,
+    }
+
+    impl<'a> Write for StrWriter<'a> {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            let bytes = s.as_bytes();
+            if self.pos + bytes.len() > self.buf.len() {
+                return Err(fmt::Error);
+            }
+            self.buf[self.pos..self.pos + bytes.len()].copy_from_slice(bytes);
+            self.pos += bytes.len();
+            Ok(())
+        }
+    }
+
+    pub fn format_args_to_str<'a>(buf: &'a mut [u8], args: fmt::Arguments<'_>) -> Result<&'a str, fmt::Error> {
+        let mut writer = StrWriter { buf, pos: 0 };
+        write!(&mut writer, "{}", args)?;
+        core::str::from_utf8(&writer.buf[..writer.pos]).map_err(|_| fmt::Error)
+    }
+}
 
 pub trait TlvWriter {
 }
@@ -281,6 +311,16 @@ where
     }
 
     pub fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
+        verify_or_return_error!(buf.len() <= u32::MAX as usize, Err(chip_error_message_too_long!()));
+        return self.write_element_with_data(TlvType::KtlvTypeByteString, tag, &buf[..]);
+    }
+
+    pub fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult {
+        // Rust str is UTF-8 encoded and doesn't have terminating null.
+        return self.write_element_with_data(TlvType::KtlvTypeUTF8String, tag, buf.as_bytes());
+    }
+
+    pub fn put_string_f(&mut self, tag: Tag, args: fmt::Arguments) -> ChipErrorResult {
         chip_ok!()
     }
 
@@ -363,6 +403,30 @@ where
         verify_or_die!(writer.is_fit());
 
         return self.write_data(writer.const_buffer(), writer.fit().unwrap());
+    }
+
+    pub fn write_element_with_data(&mut self, the_type: TlvType, tag: Tag, data: &[u8]) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        if (the_type as u64) & (TLVTypeMask::KTLVTypeSizeMask as u64) != 0 {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        let mut len_field_size: TLVFieldSize;
+
+        let data_len = data.len();
+
+        if data_len <= u8::MAX as usize {
+            len_field_size = TLVFieldSize::KTLVFieldSize1Byte;
+        } else if data_len <= u16::MAX as usize {
+            len_field_size = TLVFieldSize::KTLVFieldSize2Byte;
+        } else {
+            len_field_size = TLVFieldSize::KTLVFieldSize4Byte;
+        }
+
+        self.write_element_head(TlvElementType::from((the_type as i8) | (len_field_size as i8)),
+            tag, data_len as u64)?;
+
+        return self.write_data(data, data_len);
     }
 
     fn write_data(&mut self, buf: &[u8], mut len: usize) -> ChipErrorResult {
@@ -611,6 +675,49 @@ mod test {
         }
 
         #[test]
+        fn put_u8() {
+            let mut writer = setup();
+            assert_eq!(true, writer.put_u8(tlv_tags::profile_tag_vendor_id(1,2,0x1FFFF), 0x11).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified8Bytes as u8 | TlvElementType::UInt8 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(0xFF, BUFFER[5]);
+                assert_eq!(0xFF, BUFFER[6]);
+                assert_eq!(0x01, BUFFER[7]);
+                assert_eq!(0x00, BUFFER[8]);
+                assert_eq!(0x11, BUFFER[9]);
+            }
+        }
+
+        #[test]
+        fn put_u64() {
+            let mut writer = setup();
+            assert_eq!(true, writer.put_u64(tlv_tags::profile_tag_vendor_id(1,2,0x1FFFF), 0x1122334444332211).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified8Bytes as u8 | TlvElementType::UInt64 as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(0xFF, BUFFER[5]);
+                assert_eq!(0xFF, BUFFER[6]);
+                assert_eq!(0x01, BUFFER[7]);
+                assert_eq!(0x00, BUFFER[8]);
+                assert_eq!(0x11, BUFFER[9]);
+                assert_eq!(0x22, BUFFER[10]);
+                assert_eq!(0x33, BUFFER[11]);
+                assert_eq!(0x44, BUFFER[12]);
+                assert_eq!(0x44, BUFFER[13]);
+                assert_eq!(0x33, BUFFER[14]);
+                assert_eq!(0x22, BUFFER[15]);
+                assert_eq!(0x11, BUFFER[16]);
+            }
+        }
+
+        #[test]
         fn write_element_head_regular_tag_with_no_value() {
             let mut writer = setup();
             assert_eq!(true, writer.write_element_head(TlvElementType::BooleanFalse, tlv_tags::profile_tag_vendor_id(1,2,3), 4).is_ok());
@@ -622,6 +729,46 @@ mod test {
                 assert_eq!(0, BUFFER[4]);
                 assert_eq!(3, BUFFER[5]);
                 assert_eq!(0, BUFFER[6]);
+            }
+        }
+
+        #[test]
+        fn put_bytes() {
+            let mut writer = setup();
+            assert_eq!(true, writer.put_bytes(tlv_tags::profile_tag_vendor_id(1,2,3), &[0x11,0x12,0x13,0x14]).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::ByteString1ByteLength as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+                assert_eq!(4, BUFFER[7]);
+                assert_eq!(0x11, BUFFER[8]);
+                assert_eq!(0x12, BUFFER[9]);
+                assert_eq!(0x13, BUFFER[10]);
+                assert_eq!(0x14, BUFFER[11]);
+            }
+        }
+
+        #[test]
+        fn put_string() {
+            let mut writer = setup();
+            assert_eq!(true, writer.put_string(tlv_tags::profile_tag_vendor_id(1,2,3), "abcd").is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::UTF8String1ByteLength as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+                assert_eq!(4, BUFFER[7]);
+                assert_eq!('a', BUFFER[8] as char);
+                assert_eq!('b', BUFFER[9] as char);
+                assert_eq!('c', BUFFER[10] as char);
+                assert_eq!('d', BUFFER[11] as char);
             }
         }
     } // end of no_backing

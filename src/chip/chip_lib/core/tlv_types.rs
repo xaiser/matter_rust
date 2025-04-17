@@ -1,4 +1,4 @@
-#[derive(PartialEq)]
+#[derive(Clone,Copy,PartialEq)]
 pub enum TlvType {
     KtlvTypeNotSpecified     = -1,
     KtlvTypeUnknownContainer = -2,
@@ -51,6 +51,41 @@ pub enum TlvElementType {
     List           = 0x17,
     EndOfContainer = 0x18
 }
+
+impl From<i8> for TlvElementType {
+    fn from(v: i8) -> Self {
+        match v {
+            -1 => TlvElementType::NotSpecified,
+            0x00 => TlvElementType::Int8,
+            0x01 => TlvElementType::Int16,
+            0x02 => TlvElementType::Int32,
+            0x03 => TlvElementType::Int64,
+            0x04 => TlvElementType::UInt8,
+            0x05 => TlvElementType::UInt16,
+            0x06 => TlvElementType::UInt32,
+            0x07 => TlvElementType::UInt64,
+            0x08 => TlvElementType::BooleanFalse,
+            0x09 => TlvElementType::BooleanTrue,
+            0x0A => TlvElementType::FloatingPointNumber32,
+            0x0B => TlvElementType::FloatingPointNumber64,
+            0x0C => TlvElementType::UTF8String1ByteLength,
+            0x0D => TlvElementType::UTF8String2ByteLength,
+            0x0E => TlvElementType::UTF8String4ByteLength,
+            0x0F => TlvElementType::UTF8String8ByteLength,
+            0x10 => TlvElementType::ByteString1ByteLength,
+            0x11 => TlvElementType::ByteString2ByteLength,
+            0x12 => TlvElementType::ByteString4ByteLength,
+            0x13 => TlvElementType::ByteString8ByteLength,
+            0x14 => TlvElementType::Null,
+            0x15 => TlvElementType::Structure,
+            0x16 => TlvElementType::Array,
+            0x17 => TlvElementType::List,
+            0x18 => TlvElementType::EndOfContainer,
+            _ => TlvElementType::NotSpecified, // fallback for invalid input
+        }
+    }
+}
+                                                                                                                                                                                                                                                                                                                                                                                               
 
 #[derive(Clone,Copy,PartialEq)]
 pub enum TLVFieldSize
