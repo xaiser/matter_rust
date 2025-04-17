@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_types::{TlvType,TlvElementType};
 use super::tlv_types;
@@ -154,6 +156,131 @@ where
     }
 
     pub fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
+        let type_bool = if v == true { TlvElementType::BooleanTrue } else { TlvElementType::BooleanFalse };
+
+        self.write_element_head(type_bool, tag, 0)
+    }
+
+    pub fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult {
+        return self.put_u64(tag, v as u64);
+    }
+
+    pub fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult {
+            self.put_u64(tag, v as u64)
+    }
+
+    pub fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult {
+            self.put_u64(tag, v as u64)
+    }
+
+    pub fn put_u8_preserve_size(&mut self, tag: Tag, v: u8, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            return self.write_element_head(TlvElementType::UInt8, tag, v as u64);
+        }
+        return self.put_u8(tag, v);
+    }
+
+    pub fn put_u16_preserve_size(&mut self, tag: Tag, v: u16, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::UInt16, tag, v as u64)
+        } else {
+            self.put_u16(tag, v)
+        }
+    }
+
+    pub fn put_u32_preserve_size(&mut self, tag: Tag, v: u32, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::UInt32, tag, v as u64)
+        } else {
+            self.put_u32(tag, v)
+        }
+    }
+
+    pub fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
+        let mut elem_type: TlvElementType;
+
+        if v <= u8::MAX as u64 {
+            elem_type = TlvElementType::UInt8;
+        } else if v <= u16::MAX as u64 {
+            elem_type = TlvElementType::UInt16;
+        } else if v <= u32::MAX as u64 {
+            elem_type = TlvElementType::UInt32;
+        } else {
+            elem_type = TlvElementType::UInt64;
+        }
+
+        return self.write_element_head(elem_type, tag, v);
+    }
+
+    pub fn put_u64_preserve_size(&mut self, tag: Tag, v: u64, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::UInt64, tag, v)
+        } else {
+            self.put_u64(tag, v)
+        }
+    }
+
+    pub fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult {
+            self.put_i64(tag, v as i64)
+    }
+
+    pub fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult {
+            self.put_i64(tag, v as i64)
+    }
+
+    pub fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult {
+            self.put_i64(tag, v as i64)
+    }
+
+    pub fn put_i8_preserve_size(&mut self, tag: Tag, v: i8, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::Int8, tag, v as u64)
+        } else {
+            self.put_i8(tag, v)
+        }
+    }
+
+    pub fn put_i16_preserve_size(&mut self, tag: Tag, v: i16, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::Int16, tag, v as u64)
+        } else {
+            self.put_i16(tag, v)
+        }
+    }
+
+    pub fn put_i32_preserve_size(&mut self, tag: Tag, v: i32, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::Int32, tag, v as u64)
+        } else {
+            self.put_i32(tag, v)
+        }
+    }
+
+    pub fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
+        let mut elem_type: TlvElementType;
+
+        if v <= i8::MAX as i64 && v >= i8::MIN as i64{
+            elem_type = TlvElementType::Int8;
+        } else if v <= i16::MAX as i64 && v >= i16::MIN as i64 {
+            elem_type = TlvElementType::Int16;
+        } else if v <= i32::MAX as i64 && v >= i32::MIN as i64 {
+            elem_type = TlvElementType::Int32;
+        } else {
+            elem_type = TlvElementType::Int64;
+        }
+
+        return self.write_element_head(elem_type, tag, v as u64);
+    }
+
+    pub fn put_i64_preserve_size(&mut self, tag: Tag, v: i64, preserve_size: bool) -> ChipErrorResult {
+        if preserve_size {
+            self.write_element_head(TlvElementType::Int64, tag, v as u64)
+        } else {
+            self.put_i64(tag, v)
+        }
+    }
+
+    pub fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
         chip_ok!()
     }
 
