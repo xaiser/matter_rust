@@ -16,6 +16,7 @@ use crate::chip_sdk_error;
 use crate::chip_error_internal;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_tlv_container_open;
+use crate::chip_error_wrong_tlv_type;
 use crate::chip_error_no_memory;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_buffer_too_small;
@@ -38,6 +39,8 @@ use core::{fmt,ptr};
 
 mod private {
     use core::fmt::{self, Write};
+
+    pub const KEND_OF_CONTAINER_MARKER_SIZE: usize = 1;
 
     pub struct StrWriter<'a> {
         buf: &'a mut [u8],
@@ -63,7 +66,44 @@ mod private {
     }
 }
 
+pub struct TlvWriterInitParams<BackingStoreType> {
+    pub m_implicit_profile_id: u32,
+    pub m_backing_store: * mut BackingStoreType,
+    pub m_buf_start: * mut u8,
+    pub m_write_point: * mut u8,
+    pub m_remaining_len: usize,
+    pub m_len_written: usize,
+    pub m_max_len: usize,
+    pub m_container_type: TlvType,
+    pub m_initiialization_cookie: u16,
+    pub m_container_open: bool,
+    pub m_close_container_recerved: bool,
+}
+
+impl<BackingStoreType> Default for TlvWriterInitParams<BackingStoreType> {
+    fn default() -> Self {
+        TlvWriterInitParams {
+            m_implicit_profile_id: 0,
+            m_backing_store: ptr::null_mut(),
+            m_buf_start: ptr::null_mut(),
+            m_write_point: ptr::null_mut(),
+            m_remaining_len: 0,
+            m_len_written: 0,
+            m_max_len: 0,
+            m_container_type: TlvType::KtlvTypeNotSpecified,
+            m_initiialization_cookie: 0,
+            m_container_open: false,
+            m_close_container_recerved: true,
+        }
+    }
+}
+
 pub trait TlvWriter {
+    type BackingStoreType;
+    fn init_with_params(&mut self, params: TlvWriterInitParams<Self::BackingStoreType>);
+    fn get_init_params(&self) -> TlvWriterInitParams<Self::BackingStoreType>;
+    fn is_container_open(&self) -> bool;
+    fn init(&mut self, buf: * mut u8, max_len: u32);
 }
 
 pub struct TlvWriterBasic<BackingStoreType> 
@@ -88,7 +128,63 @@ where
 impl<BackingStoreType> TlvWriter for TlvWriterBasic<BackingStoreType>
 where
     BackingStoreType: TlvBackingStore,
-{}
+{
+    type BackingStoreType = BackingStoreType;
+
+    fn init_with_params(&mut self, params: TlvWriterInitParams<Self::BackingStoreType>) {
+        self.m_implicit_profile_id = params.m_implicit_profile_id;
+        self.m_backing_store = params.m_backing_store as _;
+        self.m_buf_start = params.m_buf_start;
+        self.m_write_point = params.m_write_point;
+        self.m_remaining_len = params.m_remaining_len;
+        self.m_len_written = params.m_len_written;
+        self.m_max_len = params.m_max_len;
+        self.m_container_type = params.m_container_type;
+        self.m_initiialization_cookie = params.m_initiialization_cookie;
+        self.m_container_open = params.m_container_open;
+        self.m_close_container_recerved = params.m_close_container_recerved;
+    }
+
+    fn get_init_params(&self) -> TlvWriterInitParams<Self::BackingStoreType> {
+        TlvWriterInitParams {
+            m_implicit_profile_id: self.m_implicit_profile_id,
+            m_backing_store: self.m_backing_store as _,
+            m_buf_start: self.m_buf_start,
+            m_write_point: self.m_write_point,
+            m_remaining_len: self.m_remaining_len,
+            m_len_written: self.m_len_written,
+            m_max_len: self.m_max_len,
+            m_container_type: self.m_container_type,
+            m_initiialization_cookie: self.m_initiialization_cookie,
+            m_container_open: self.m_container_open,
+            m_close_container_recerved: self.m_close_container_recerved,
+        }
+    }
+
+    fn is_container_open(&self) -> bool {
+        self.m_container_open
+    }
+
+    fn init(&mut self, buf: * mut u8, max_len: u32) {
+        let actual_max_len: usize = if max_len > u32::MAX { u32::MAX as usize } else { max_len as usize };
+
+        self.m_buf_start = buf;
+        self.m_initiialization_cookie = 0;
+        self.m_backing_store = ptr::null_mut();
+        self.m_write_point = buf;
+        self.m_remaining_len = actual_max_len;
+        self.m_len_written = 0;
+        self.m_max_len = actual_max_len;
+        self.m_container_type = TlvType::KtlvTypeNotSpecified;
+        self.m_reserved_size = 0;
+        self.m_implicit_profile_id = TlvCommonProfiles::KprofileIdNotSpecified.into();
+
+        self.set_container_open(false);
+        self.set_close_container_reserved(true);
+
+        self.m_initiialization_cookie = Self::KEXPECTED_INITIALIZATION_COOKIE;
+    }
+}
 
 
 impl<BackingStoreType> TlvWriterBasic<BackingStoreType> 
@@ -113,26 +209,6 @@ where
             m_container_open: false,
             m_close_container_recerved: true,
         }
-    }
-
-    pub fn init(&mut self, buf: * mut u8, max_len: u32) {
-        let actual_max_len: usize = if max_len > u32::MAX { u32::MAX as usize } else { max_len as usize };
-
-        self.m_buf_start = buf;
-        self.m_initiialization_cookie = 0;
-        self.m_backing_store = ptr::null_mut();
-        self.m_write_point = buf;
-        self.m_remaining_len = actual_max_len;
-        self.m_len_written = 0;
-        self.m_max_len = actual_max_len;
-        self.m_container_type = TlvType::KtlvTypeNotSpecified;
-        self.m_reserved_size = 0;
-        self.m_implicit_profile_id = TlvCommonProfiles::KprofileIdNotSpecified.into();
-
-        self.set_container_open(false);
-        self.set_close_container_reserved(true);
-
-        self.m_initiialization_cookie = Self::KEXPECTED_INITIALIZATION_COOKIE;
     }
 
     pub fn init_backing_store(&mut self, backing_store: * mut BackingStoreType, max_len: u32) -> ChipErrorResult {
@@ -321,7 +397,101 @@ where
     }
 
     pub fn put_string_f(&mut self, tag: Tag, args: fmt::Arguments) -> ChipErrorResult {
+        // TODO: use heap??
+        const MAX_STR_SIZE_BYTES: usize = 32;
+        let mut tmp_buf: [u8; MAX_STR_SIZE_BYTES] = [0; MAX_STR_SIZE_BYTES];
+        let the_str = private::format_args_to_str(&mut tmp_buf[..], args);
+        if the_str.is_err() {
+            return Err(chip_error_no_memory!());
+        }
+        let the_str = the_str.unwrap();
+
+        return self.put_string(tag, the_str);
+    }
+
+    pub fn put_null(&mut self, tag: Tag) -> ChipErrorResult {
+        return self.write_element_head(TlvElementType::Null, tag, 0);
+    }
+
+    pub fn copy_element(&mut self) -> ChipErrorResult {
+        // TODO: wait for reader implement
         chip_ok!()
+    }
+
+    pub fn copy_element_tag(&mut self, tag: Tag) -> ChipErrorResult {
+        // TODO: wait for reader implement
+        chip_ok!()
+    }
+
+    pub fn open_container<WriterType: TlvWriter>(&mut self, tag: Tag, container_type: TlvType,
+        container_writer: &mut WriterType) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(tlv_types::tlv_type_is_container(container_type), Err(chip_error_wrong_tlv_type!()));
+
+        if self.is_close_container_reserved() {
+            verify_or_return_error!(self.m_max_len >= private::KEND_OF_CONTAINER_MARKER_SIZE,
+                Err(chip_error_buffer_too_small!()));
+            self.m_max_len -= private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        self.write_element_head(TlvElementType::from_container_type(container_type), tag, 0).map_err(|e| {
+            if self.is_close_container_reserved() {
+                self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+            }
+            e
+        })?;
+
+        container_writer.init_with_params(
+            TlvWriterInitParams {
+                m_implicit_profile_id: self.m_implicit_profile_id,
+                m_backing_store: self.m_backing_store as * mut <WriterType as TlvWriter>::BackingStoreType,
+                m_buf_start: self.m_buf_start,
+                m_write_point: self.m_write_point,
+                m_remaining_len: self.m_remaining_len,
+                m_len_written: 0,
+                m_max_len: self.m_max_len - self.m_len_written,
+                m_container_type: container_type,
+                m_initiialization_cookie: Self::KEXPECTED_INITIALIZATION_COOKIE,
+                m_container_open: false,
+                m_close_container_recerved: self.m_close_container_recerved,
+            }
+        );
+
+        self.set_container_open(true);
+
+        chip_ok!()
+    }
+
+    pub fn close_container<WriterType: TlvWriter>(&mut self, container_writer: &mut WriterType) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        let params = container_writer.get_init_params();
+
+        if !tlv_types::tlv_type_is_container(params.m_container_type) {
+            return Err(chip_error_incorrect_state!());
+        }
+
+        if container_writer.is_container_open() {
+            return Err(chip_error_tlv_container_open!());
+        }
+        self.m_backing_store = params.m_backing_store as _;
+        self.m_buf_start = params.m_buf_start;
+        self.m_write_point = params.m_write_point;
+        self.m_remaining_len = params.m_remaining_len;
+        self.m_len_written = params.m_len_written;
+
+        if self.is_close_container_reserved() {
+            self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        self.set_container_open(false);
+
+        container_writer.init(ptr::null_mut(), 0);
+
+        return self.write_element_head(TlvElementType::EndOfContainer, tlv_tags::anonymous_tag(), 0);
+    }
+
+    fn is_close_container_reserved(&self) -> bool {
+        self.m_close_container_recerved
     }
 
     fn write_element_head(&mut self, e_type: TlvElementType, tag: Tag, len_or_val: u64) -> ChipErrorResult {
@@ -470,10 +640,6 @@ where
         }
 
         chip_ok!()
-    }
-
-    fn is_container_open(&self) -> bool {
-        self.m_container_open
     }
 
     fn set_container_open(&mut self, container_open: bool) {
@@ -771,6 +937,27 @@ mod test {
                 assert_eq!('d', BUFFER[11] as char);
             }
         }
+
+        #[test]
+        fn put_string_f() {
+            let mut writer = setup();
+            assert_eq!(true, writer.put_string_f(tlv_tags::profile_tag_vendor_id(1,2,3), format_args!("{}and{}", 1, 2)).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::UTF8String1ByteLength as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+                assert_eq!(5, BUFFER[7]);
+                assert_eq!('1', BUFFER[8] as char);
+                assert_eq!('a', BUFFER[9] as char);
+                assert_eq!('n', BUFFER[10] as char);
+                assert_eq!('d', BUFFER[11] as char);
+                assert_eq!('2', BUFFER[12] as char);
+            }
+        }
     } // end of no_backing
 
     mod backing {
@@ -850,6 +1037,25 @@ mod test {
         }
         type TheTlvWriter = TlvWriterBasic<VecBackingStore>;
 
+        #[derive(Default)]
+        struct DummyOtherWrite {
+            pub m_container_open: bool,
+        }
+
+        impl TlvWriter for DummyOtherWrite {
+            type BackingStoreType = VecBackingStore;
+            fn init_with_params(&mut self, _params: TlvWriterInitParams<VecBackingStore>) {
+            }
+            fn get_init_params(&self) -> TlvWriterInitParams<Self::BackingStoreType> {
+                return TlvWriterInitParams::<Self::BackingStoreType>::default();
+            }
+            fn is_container_open(&self) -> bool {
+                self.m_container_open
+            }
+            fn init(&mut self, _buf: * mut u8, _max_len: u32) {
+            }
+        }
+
         fn setup(backing: * mut VecBackingStore) -> TheTlvWriter {
             let mut writer = TheTlvWriter::const_default();
             // to allow max_len > remaining_len, so we need a + 32 here
@@ -893,6 +1099,35 @@ mod test {
                 assert_eq!(0x00, backing.m_current[0]);
                 assert_eq!(2, backing.m_current[1]);
             }
+        }
+
+        #[test]
+        fn open_container_wrong_type() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut container_writer = DummyOtherWrite::default();
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeNotSpecified, 
+                    &mut container_writer).is_err());
+        }
+
+        #[test]
+        fn open_container_buffer_too_small() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = TheTlvWriter::const_default();
+            let _ = writer.init_backing_store(ptr::addr_of_mut!(backing), 0);
+            let mut container_writer = DummyOtherWrite::default();
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut container_writer).is_err());
+        }
+
+        #[test]
+        fn open_container() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut container_writer = DummyOtherWrite::default();
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut container_writer).is_ok());
+            assert_eq!(true, writer.is_container_open());
         }
     }
 

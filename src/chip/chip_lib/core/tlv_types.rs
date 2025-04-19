@@ -1,4 +1,4 @@
-#[derive(Clone,Copy,PartialEq)]
+#[derive(Clone,Copy,PartialEq,PartialOrd)]
 pub enum TlvType {
     KtlvTypeNotSpecified     = -1,
     KtlvTypeUnknownContainer = -2,
@@ -85,6 +85,17 @@ impl From<i8> for TlvElementType {
         }
     }
 }
+
+impl TlvElementType {
+    pub fn from_container_type(the_type: TlvType) -> Self {
+        match the_type {
+            TlvType::KtlvTypeStructure => TlvElementType::Structure,
+            TlvType::KtlvTypeArray => TlvElementType::Array,
+            TlvType::KtlvTypeList => TlvElementType::List,
+            _ => TlvElementType::NotSpecified,
+        }
+    }
+}
                                                                                                                                                                                                                                                                                                                                                                                                
 
 #[derive(Clone,Copy,PartialEq)]
@@ -130,4 +141,9 @@ pub fn get_tlv_field_size(e_type: TlvElementType) -> TLVFieldSize {
 
 pub fn tlv_field_size_to_bytes(size: TLVFieldSize) -> u8 {
     return (if size != TLVFieldSize::KTLVFieldSize0Byte { 1 << (size as u8) } else { 0 }) as u8;
+}
+
+#[inline]
+pub fn tlv_type_is_container(the_type: TlvType) -> bool {
+    return the_type >= TlvType::KtlvTypeStructure && the_type <= TlvType::KtlvTypeList;
 }

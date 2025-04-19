@@ -293,6 +293,13 @@ macro_rules! chip_error_invalid_tlv_tag{
 }
 
 #[macro_export]
+macro_rules! chip_error_wrong_tlv_type{
+    () => {
+        chip_core_error!(0x26)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_tlv_container_open{
     () => {
         chip_core_error!(0x27)
