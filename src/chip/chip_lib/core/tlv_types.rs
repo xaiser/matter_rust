@@ -1,4 +1,4 @@
-#[derive(Clone,Copy,PartialEq,PartialOrd)]
+#[derive(Clone,Copy,PartialEq,PartialOrd,Debug)]
 pub enum TlvType {
     KtlvTypeNotSpecified     = -1,
     KtlvTypeUnknownContainer = -2,

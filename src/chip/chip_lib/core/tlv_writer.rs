@@ -27,7 +27,6 @@ use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::verify_or_die;
 
-
 /*
 use core::str::FromStr;
 use crate::chip_log_detail;
@@ -466,7 +465,8 @@ where
         verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
         let params = container_writer.get_init_params();
 
-        if !tlv_types::tlv_type_is_container(params.m_container_type) {
+
+        if false == tlv_types::tlv_type_is_container(params.m_container_type) {
             return Err(chip_error_incorrect_state!());
         }
 
@@ -479,6 +479,7 @@ where
         self.m_remaining_len = params.m_remaining_len;
         self.m_len_written = params.m_len_written;
 
+
         if self.is_close_container_reserved() {
             self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
         }
@@ -488,6 +489,57 @@ where
         container_writer.init(ptr::null_mut(), 0);
 
         return self.write_element_head(TlvElementType::EndOfContainer, tlv_tags::anonymous_tag(), 0);
+    }
+
+    pub fn start_container(&mut self, tag: Tag, container_type: TlvType, outer_container_type: &mut TlvType) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+
+        verify_or_return_error!(tlv_types::tlv_type_is_container(container_type), Err(chip_error_incorrect_state!()));
+
+        if self.is_close_container_reserved() {
+            verify_or_return_error!(self.m_max_len >= private::KEND_OF_CONTAINER_MARKER_SIZE, Err(chip_error_incorrect_state!()));
+            self.m_max_len -= private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        self.write_element_head(TlvElementType::from_container_type(container_type), tag, 0).map_err(|e| {
+            if self.is_close_container_reserved() {
+                self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+            }
+            e
+        })?;
+
+        *outer_container_type = self.m_container_type;
+        self.m_container_type = container_type;
+
+        self.set_container_open(false);
+
+        chip_ok!()
+    }
+
+    pub fn end_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(tlv_types::tlv_type_is_container(self.m_container_type), Err(chip_error_incorrect_state!()));
+
+        self.m_container_type = outer_container_type;
+
+        if self.is_close_container_reserved() {
+            self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        return self.write_element_head(TlvElementType::EndOfContainer, tlv_tags::anonymous_tag(), 0);
+    }
+
+    pub fn put_pre_encoded_container(&mut self, tag: Tag, container_type: TlvType, data: &[u8]) -> ChipErrorResult {
+        verify_or_return_error!(tlv_types::tlv_type_is_container(container_type), Err(chip_error_invalid_argument!()));
+
+        self.write_element_head(TlvElementType::from_container_type(container_type), tag, 0)?;
+
+        return self.write_data(data, data.len());
+    }
+
+    pub fn copy_container(&mut self) -> ChipErrorResult {
+        // TODO: wait for reader implement
+        chip_ok!()
     }
 
     fn is_close_container_reserved(&self) -> bool {
@@ -958,6 +1010,27 @@ mod test {
                 assert_eq!('2', BUFFER[12] as char);
             }
         }
+
+        #[test]
+        fn end_tontainer() {
+            let mut writer = setup();
+            let mut outer_type: TlvType = TlvType::KtlvTypeNotSpecified;
+            assert_eq!(true, writer.start_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut outer_type).is_ok());
+            assert_eq!(false, writer.is_container_open());
+            assert_eq!(TlvType::KtlvTypeNotSpecified, outer_type);
+            assert_eq!(true, writer.end_container(outer_type).is_ok());
+            unsafe {
+                assert_eq!(TLVTagControl::FullyQualified6Bytes as u8 | TlvElementType::Array as u8, BUFFER[0]);
+                assert_eq!(1, BUFFER[1]);
+                assert_eq!(0, BUFFER[2]);
+                assert_eq!(2, BUFFER[3]);
+                assert_eq!(0, BUFFER[4]);
+                assert_eq!(3, BUFFER[5]);
+                assert_eq!(0, BUFFER[6]);
+                assert_eq!(TLVTagControl::Anonymous as u8 | TlvElementType::EndOfContainer as u8, BUFFER[7]);
+            }
+        }
     } // end of no_backing
 
     mod backing {
@@ -1129,6 +1202,62 @@ mod test {
                     &mut container_writer).is_ok());
             assert_eq!(true, writer.is_container_open());
         }
-    }
 
+        #[test]
+        fn close_tontainer() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut backing_1 = VecBackingStore::default();
+            let mut container_writer = setup(ptr::addr_of_mut!(backing_1));
+            //let mut container_writer = DummyOtherWrite::default();
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut container_writer).is_ok());
+            assert_eq!(true, writer.close_container(&mut container_writer).is_ok());
+            assert_eq!(false, writer.is_container_open());
+        }
+
+        #[test]
+        fn close_tontainer_wrong_type() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut backing_1 = VecBackingStore::default();
+            let mut container_writer = setup(ptr::addr_of_mut!(backing_1));
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut container_writer).is_ok());
+            container_writer.m_container_type = TlvType::KtlvTypeNotSpecified;
+            assert_eq!(true, writer.close_container(&mut container_writer).is_err());
+        }
+
+        #[test]
+        fn close_tontainer_nested_open() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut backing_1 = VecBackingStore::default();
+            let mut container_writer = setup(ptr::addr_of_mut!(backing_1));
+            assert_eq!(true, writer.open_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut container_writer).is_ok());
+            container_writer.set_container_open(true);
+            assert_eq!(true, writer.close_container(&mut container_writer).is_err());
+        }
+
+        #[test]
+        fn start_tontainer() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut outer_type: TlvType = TlvType::KtlvTypeNotSpecified;
+            assert_eq!(true, writer.start_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeArray, 
+                    &mut outer_type).is_ok());
+            assert_eq!(false, writer.is_container_open());
+            assert_eq!(TlvType::KtlvTypeNotSpecified, outer_type);
+        }
+
+        #[test]
+        fn start_tontainer_wrong_type() {
+            let mut backing = VecBackingStore::default();
+            let mut writer = setup(ptr::addr_of_mut!(backing));
+            let mut outer_type: TlvType = TlvType::KtlvTypeNotSpecified;
+            assert_eq!(true, writer.start_container(tlv_tags::profile_tag_vendor_id(1,2,3), TlvType::KtlvTypeBoolean, 
+                    &mut outer_type).is_err());
+        }
+    }
 }
