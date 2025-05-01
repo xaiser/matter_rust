@@ -90,6 +90,12 @@ impl Tag {
     pub(super) const KSPECIAL_TAG_PROFILE_ID: u32 = 0xFFFFFFFF;
 }
 
+pub const fn unknown_tag() -> Tag {
+    Tag {
+        m_val: 0xFFFFFFFFFFFFFFFF,
+    }
+}
+
 pub fn profile_tag(profile_id: u32, tag_num: u32) -> Tag {
     return Tag::default_with_value(((!profile_id as u64) << Tag::KPROFILE_ID_SHIFT as u8) | tag_num as u64);
 }

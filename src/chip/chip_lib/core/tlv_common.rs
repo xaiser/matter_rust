@@ -10,6 +10,8 @@ macro_rules! tlv_estimate_struct_overhead{
     }
 }
 
+pub const KTLVCONTROL_BYTE_NOT_SPECIFIED: u16 = 0xFFFF;
+
 #[cfg(test)]
 mod test {
     use super::*;
