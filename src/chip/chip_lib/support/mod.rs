@@ -8,3 +8,4 @@ pub mod chip_fault_injection;
 pub mod fault_injection;
 pub mod buffer_reader;
 pub mod buffer_writer;
+pub mod hsm;
