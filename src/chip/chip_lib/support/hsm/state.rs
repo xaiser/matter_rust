@@ -1,25 +1,9 @@
-pub type IdType = u8;
-
-pub const ROOT_IDX: usize = 0;
+pub use super::common::{State, ROOT_IDX, IdType};
 
 pub struct HierarchyStateMachine<'a, E: Copy + 'a, const N:usize>
 {
     m_states: [&'a dyn State<Event = E>; N],
     m_current_state: usize,
-}
-
-pub trait State { 
-    type Event;
-
-    fn handle(&self, event: Self::Event) -> (Option<Self::Event>, Option<IdType>);
-
-    fn entry(&self) {}
-
-    fn exit(&self) {}
-
-    fn parent(&self) -> Option<IdType>;
-
-    fn id(&self) -> IdType;
 }
 
 impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N>
@@ -71,8 +55,18 @@ impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N>
                 current_exit = self.find(self.m_states[e].parent());
             }
 
+            // self-transition case
+            if current == next {
+                self.m_states[current].exit();
+            }
+
             // run entry
             self.run_entry(common_parent, next);
+
+            // self-transition case
+            if current == next {
+                self.m_states[current].entry();
+            }
 
             return next;
         } else {
@@ -136,7 +130,24 @@ mod test {
             fn id(&self) -> IdType { 0 }
         }
 
+        pub struct DummyState1;
+
+        impl State for DummyState1 {
+            type Event = u8;
+
+            fn handle(&self, _event: Self::Event) -> (Option<Self::Event>, Option<IdType>) {
+                return (None, None);
+            }
+
+            fn parent(&self) -> Option<IdType> {
+                None
+            }
+
+            fn id(&self) -> IdType { 0 }
+        }
+
         static STATIC_STATE: DummyState = DummyState;
+        static STATIC_STATE_1: DummyState1 = DummyState1;
 
         #[test]
         fn init_dummy_state() {
@@ -145,8 +156,8 @@ mod test {
 
         #[test]
         fn init_state_machine() {
-            let s = HierarchyStateMachine::<u8, 1> {
-                m_states: [&STATIC_STATE],
+            let s = HierarchyStateMachine::<u8, 2> {
+                m_states: [&STATIC_STATE, &STATIC_STATE_1],
                 m_current_state: 0
             };
         }
@@ -385,8 +396,8 @@ mod test {
             };
 
             assert_eq!(1, s.transition(1, 1));
-            assert_eq!(false, *s1.entry.borrow());
-            assert_eq!(false, *s1.exit.borrow());
+            assert_eq!(true, *s1.entry.borrow());
+            assert_eq!(true, *s1.exit.borrow());
         }
 
         #[test]
