@@ -286,6 +286,13 @@ macro_rules! chip_error_buffer_too_small{
 }
 
 #[macro_export]
+macro_rules! chip_error_tlv_underrun{
+    () => {
+        chip_core_error!(0x22)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_invalid_tlv_tag{
     () => {
         chip_core_error!(0x24)
@@ -317,6 +324,13 @@ macro_rules! chip_error_invalid_argument{
 macro_rules! chip_error_wrong_encryption_type_from_peer{
     () => {
         chip_core_error!(0x80)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_invalid_integer_value {
+    () => {
+        chip_core_error!(0x8f)
     };
 }
 

@@ -1,4 +1,4 @@
-use super::tlv_types::{self, TlvType};
+use super::tlv_types::{self, TlvType, TlvElementType, TLVTypeMask};
 use super::tlv_tags::{self, Tag,TlvCommonProfiles,TLVTagControl};
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_common;
@@ -9,6 +9,14 @@ use crate::chip_ok;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_internal;
+
+use crate::chip_error_wrong_tlv_type;
+use crate::chip_error_tlv_underrun;
+use crate::chip_error_invalid_integer_value;
+
+use crate::verify_or_return_error;
+use crate::verify_or_return_value;
+use crate::verify_or_die;
 
 use core::{fmt,ptr};
 
@@ -39,13 +47,20 @@ pub trait TlvReader {
 
     fn get_boolean(&self) -> Result<bool, ChipError>;
 
+    fn get_i8(&self) -> Result<i8, ChipError>;
+    fn get_i16(&self) -> Result<i16, ChipError>;
+    fn get_i32(&self) -> Result<i32, ChipError>;
+    fn get_u8(&self) -> Result<u8, ChipError>;
+    fn get_u16(&self) -> Result<u16, ChipError>;
+    fn get_u32(&self) -> Result<u32, ChipError>;
+
     fn get_i64(&self) -> Result<i64, ChipError>;
 
     fn get_u64(&self) -> Result<u64, ChipError>;
 
-    fn get_bytes(&mut self, bytes: &mut [u8]) -> ChipErrorResult;
+    fn get_bytes(&mut self) -> Result<&[u8], ChipError>;
 
-    fn get_string(&mut self, bytes: &mut [u8]) -> ChipErrorResult;
+    fn get_string(&mut self) -> Result<Option<&str>, ChipError>;
 
     fn get_data_slice(&self) -> Result<&[u8], ChipError>;
 
@@ -118,6 +133,71 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     fn set_container_open(&mut self, open: bool) {
         self.m_container_open = open;
     }
+
+    fn get_element_type(&self) -> TlvElementType {
+        if self.m_control_byte == tlv_common::KTLVCONTROL_BYTE_NOT_SPECIFIED {
+            return TlvElementType::NotSpecified;
+        }
+
+        return TlvElementType::from(self.m_control_byte & (TLVTypeMask::KTLVTypeMask as u16));
+    }
+
+    fn get_data_ptr(&self) -> Result<* const u8, ChipError> {
+        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
+          Err(chip_error_wrong_tlv_type!()));
+
+        if self.get_length() == 0 {
+            return Ok(ptr::null());
+        }
+
+        unsafe {
+            let remaining_len = self.m_buf_end.offset_from_unsigned(self.m_read_point);
+            verify_or_return_error!(remaining_len >= self.m_elem_len_or_val as usize, 
+                Err(chip_error_tlv_underrun!()));
+        }
+
+        Ok(self.m_read_point)
+    }
+
+    fn ensure_data(&mut self, no_data_err: ChipError) -> ChipErrorResult {
+        if self.m_read_point == self.m_buf_end {
+            verify_or_return_error!((self.m_len_read != self.m_max_len) && (!self.m_backing_store.is_null()),
+                Err(no_data_err));
+
+            let mut buf_len: usize = 0;
+            unsafe {
+                (*self.m_backing_store).get_next_buffer(self as _, ptr::addr_of_mut!(self.m_read_point),
+                    ptr::addr_of_mut!(buf_len))?;
+
+                verify_or_return_error!(buf_len > 0, Err(no_data_err));
+
+                buf_len = core::cmp::min(buf_len, self.m_max_len - self.m_len_read);
+                self.m_buf_end = self.m_read_point.add(buf_len);
+            }
+        }
+
+        chip_ok!()
+    }
+
+    fn read_data(&mut self, buf: &mut [u8]) -> ChipErrorResult {
+        let mut start: usize = 0;
+        while start < buf.len() {
+            self.ensure_data(chip_error_tlv_underrun!())?;
+            unsafe {
+                let remaining_len = self.m_buf_end.offset_from_unsigned(self.m_read_point);
+                let mut read_len = buf.len() - start;
+                if read_len > remaining_len {
+                    read_len = remaining_len;
+                }
+                buf[start..start + read_len].copy_from_slice(core::slice::from_raw_parts(self.m_read_point, read_len));
+                start += read_len;
+                let _ = self.m_read_point.add(read_len);
+                self.m_len_read += read_len;
+            }
+        }
+
+        chip_ok!()
+    }
 }
 
 
@@ -142,6 +222,24 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn init_backing_store(&mut self, backing_store: * mut Self::BackingStoreType, max_len: u32) -> ChipErrorResult {
+        self.m_backing_store = backing_store;
+        self.m_read_point = ptr::null_mut();
+        let mut buf_len: usize = 0;
+
+        unsafe {
+            (*self.m_backing_store).on_init_reader(self as _, ptr::addr_of_mut!(self.m_read_point), ptr::addr_of_mut!(buf_len))?;
+            self.m_buf_end = self.m_read_point.add(buf_len as usize);
+        }
+
+        self.m_len_read = 0;
+        self.m_max_len = max_len as usize;
+        self.clear_element_state();
+        self.m_container_type = TlvType::KtlvTypeNotSpecified;
+        self.set_container_open(false);
+        self.m_implicit_profile_id = TlvCommonProfiles::KprofileIdNotSpecified as u32;
+
+        self.m_app_data = ptr::null_mut();
+        
         chip_ok!()
     }
 
@@ -166,7 +264,21 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn get_type(&self) -> TlvType {
-        TlvType::KtlvTypeNotSpecified
+        let ele_type = self.get_element_type();
+        match ele_type {
+            TlvElementType::EndOfContainer => {
+                TlvType::KtlvTypeNotSpecified
+            },
+            TlvElementType::FloatingPointNumber32 | TlvElementType::FloatingPointNumber64 => {
+                TlvType::KtlvTypeFloatingPointNumber
+            },
+            TlvElementType::NotSpecified | TlvElementType::Null => {
+                return TlvType::from(ele_type as i16);
+            },
+            _ => {
+                return TlvType::from(((ele_type as u8) & !(TLVTypeMask::KTLVTypeSizeMask as u8)) as i16);
+            }
+        }
     }
 
     fn get_tag(&self) -> Tag {
@@ -174,6 +286,9 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn get_length(&self) -> usize {
+        if tlv_types::tlv_type_has_length(self.get_element_type()) {
+            return self.m_elem_len_or_val.try_into().unwrap();
+        }
         0
     }
 
@@ -182,23 +297,134 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn get_boolean(&self) -> Result<bool, ChipError> {
-        Ok(false)
+        let ele_type = self.get_element_type();
+        match ele_type {
+            TlvElementType::BooleanFalse => {
+                Ok(false)
+            },
+            TlvElementType::BooleanTrue => {
+                Ok(true)
+            },
+            _ => {
+                Err(chip_error_wrong_tlv_type!())
+            }
+        }
+    }
+
+    fn get_i8(&self) -> Result<i8, ChipError> {
+        let vi64 = self.get_i64()?;
+
+        if let Ok(vi8) = i8::try_from(vi64) {
+            return Ok(vi8);
+        }
+
+        Err(chip_error_invalid_integer_value!())
+    }
+
+    fn get_i16(&self) -> Result<i16, ChipError> {
+        let vi64 = self.get_i64()?;
+
+        if let Ok(vi16) = i16::try_from(vi64) {
+            return Ok(vi16);
+        }
+
+        Err(chip_error_invalid_integer_value!())
+    }
+
+    fn get_i32(&self) -> Result<i32, ChipError> {
+        let vi64 = self.get_i64()?;
+
+        if let Ok(vi32) = i32::try_from(vi64) {
+            return Ok(vi32);
+        }
+
+        Err(chip_error_invalid_integer_value!())
+    }
+
+    fn get_u8(&self) -> Result<u8, ChipError> {
+        let vu64 = self.get_u64()?;
+
+        if let Ok(vu8) = u8::try_from(vu64) {
+            return Ok(vu8);
+        }
+
+        Err(chip_error_invalid_integer_value!())
+    }
+
+    fn get_u16(&self) -> Result<u16, ChipError> {
+        let vu64 = self.get_u64()?;
+
+        if let Ok(vu16) = u16::try_from(vu64) {
+            return Ok(vu16);
+        }
+
+        Err(chip_error_invalid_integer_value!())
+    }
+
+    fn get_u32(&self) -> Result<u32, ChipError> {
+        let vu64 = self.get_u64()?;
+
+        if let Ok(vu32) = u32::try_from(vu64) {
+            return Ok(vu32);
+        }
+
+        Err(chip_error_invalid_integer_value!())
     }
 
     fn get_i64(&self) -> Result<i64, ChipError> {
-        Ok(0)
+        match self.get_element_type() {
+            TlvElementType::Int8 => {
+                Ok((self.m_elem_len_or_val as u8) as i64)
+            },
+            TlvElementType::Int16 => {
+                Ok((self.m_elem_len_or_val as u16) as i64)
+            },
+            TlvElementType::Int32 => {
+                Ok((self.m_elem_len_or_val as u32) as i64)
+            },
+            TlvElementType::Int64 => {
+                Ok(self.m_elem_len_or_val as i64)
+            },
+            _ => {
+                Err(chip_error_wrong_tlv_type!())
+            }
+        }
     }
 
     fn get_u64(&self) -> Result<u64, ChipError> {
-        Ok(0)
+        match self.get_element_type() {
+            TlvElementType::UInt8 | TlvElementType::UInt16 | TlvElementType::UInt32 | TlvElementType::UInt64 => {
+                Ok(self.m_elem_len_or_val)
+            },
+            _ => {
+                Err(chip_error_wrong_tlv_type!())
+            }
+        }
     }
 
-    fn get_bytes(&mut self, bytes: &mut [u8]) -> ChipErrorResult {
-        chip_ok!()
+    fn get_bytes(&mut self) -> Result<&[u8], ChipError> {
+        let val = self.get_data_ptr()?;
+
+        unsafe {
+            return Ok(core::slice::from_raw_parts(val, self.get_length()));
+         }
     }
 
-    fn get_string(&mut self, bytes: &mut [u8]) -> ChipErrorResult {
-        chip_ok!()
+    fn get_string(&mut self) -> Result<Option<&str>, ChipError> {
+        verify_or_return_error!(tlv_types::tlv_type_is_utf8_string(self.get_element_type()),
+          Err(chip_error_wrong_tlv_type!()));
+
+        let val = self.get_data_ptr()?;
+
+        if val.is_null() {
+            return Ok(None);
+        }
+        unsafe {
+            let end = core::slice::from_raw_parts(val, self.get_length()).iter().position(|&b| b == 0x1F).
+                unwrap_or(self.get_length());
+
+            return Ok(core::str::from_utf8(core::slice::from_raw_parts(val, end)).ok());
+        }
     }
 
     fn get_data_slice(&self) -> Result<&[u8], ChipError> {

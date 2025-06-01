@@ -713,6 +713,7 @@ mod test {
         use super::*;
         use super::super::*;
         use std::*;
+        use crate::chip::chip_lib::core::tlv_reader::TlvReader;
         use crate::chip::chip_lib::core::tlv_tags;
         use crate::chip::chip_lib::core::tlv_tags::{TLVTagControl};
         use crate::chip::chip_lib::core::tlv_types::{TlvElementType,TlvType};
@@ -1037,6 +1038,7 @@ mod test {
         use super::*;
         use super::super::*;
         use std::*;
+        use crate::chip::chip_lib::core::tlv_reader::TlvReader;
         use crate::chip::chip_lib::core::tlv_tags;
         use crate::chip::chip_lib::core::tlv_tags::{TLVTagControl};
         use crate::chip::chip_lib::core::tlv_types::{TlvElementType,TlvType};

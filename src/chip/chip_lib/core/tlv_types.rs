@@ -17,6 +17,26 @@ pub enum TlvType {
     KtlvTypeList      = 0x17
 }
 
+impl From<i16> for TlvType {
+    fn from(value: i16) -> Self {
+        match value {
+            -1 => TlvType::KtlvTypeNotSpecified,
+            -2 => TlvType::KtlvTypeUnknownContainer,
+            0x00 => TlvType::KtlvTypeSignedInteger,
+            0x04 => TlvType::KtlvTypeUnsignedInteger,
+            0x08 => TlvType::KtlvTypeBoolean,
+            0x0A => TlvType::KtlvTypeFloatingPointNumber,
+            0x0C => TlvType::KtlvTypeUTF8String,
+            0x10 => TlvType::KtlvTypeByteString,
+            0x14 => TlvType::KtlvTypeNull,
+            0x15 => TlvType::KtlvTypeStructure,
+            0x16 => TlvType::KtlvTypeArray,
+            0x17 => TlvType::KtlvTypeList,
+            _ => TlvType::KtlvTypeNotSpecified, // fallback for unknown values
+        }
+    }
+}
+
 #[derive(Clone,Copy,PartialEq,PartialOrd)]
 #[repr(i8)]
 pub enum TlvElementType {
@@ -56,6 +76,39 @@ impl From<i8> for TlvElementType {
     fn from(v: i8) -> Self {
         match v {
             -1 => TlvElementType::NotSpecified,
+            0x00 => TlvElementType::Int8,
+            0x01 => TlvElementType::Int16,
+            0x02 => TlvElementType::Int32,
+            0x03 => TlvElementType::Int64,
+            0x04 => TlvElementType::UInt8,
+            0x05 => TlvElementType::UInt16,
+            0x06 => TlvElementType::UInt32,
+            0x07 => TlvElementType::UInt64,
+            0x08 => TlvElementType::BooleanFalse,
+            0x09 => TlvElementType::BooleanTrue,
+            0x0A => TlvElementType::FloatingPointNumber32,
+            0x0B => TlvElementType::FloatingPointNumber64,
+            0x0C => TlvElementType::UTF8String1ByteLength,
+            0x0D => TlvElementType::UTF8String2ByteLength,
+            0x0E => TlvElementType::UTF8String4ByteLength,
+            0x0F => TlvElementType::UTF8String8ByteLength,
+            0x10 => TlvElementType::ByteString1ByteLength,
+            0x11 => TlvElementType::ByteString2ByteLength,
+            0x12 => TlvElementType::ByteString4ByteLength,
+            0x13 => TlvElementType::ByteString8ByteLength,
+            0x14 => TlvElementType::Null,
+            0x15 => TlvElementType::Structure,
+            0x16 => TlvElementType::Array,
+            0x17 => TlvElementType::List,
+            0x18 => TlvElementType::EndOfContainer,
+            _ => TlvElementType::NotSpecified, // fallback for invalid input
+        }
+    }
+}
+
+impl From<u16> for TlvElementType {
+    fn from(v: u16) -> Self {
+        match v {
             0x00 => TlvElementType::Int8,
             0x01 => TlvElementType::Int16,
             0x02 => TlvElementType::Int32,
@@ -129,6 +182,18 @@ impl From<u8> for TLVFieldSize {
 pub fn tlv_type_has_value(e_type: TlvElementType) -> bool {
     return (e_type <= TlvElementType::UInt64) || 
         ((e_type >= TlvElementType::FloatingPointNumber32) && (e_type <= TlvElementType::ByteString8ByteLength));
+}
+
+pub fn tlv_type_has_length(e_type: TlvElementType) -> bool {
+    return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
+}
+
+pub fn tlv_type_is_string(e_type: TlvElementType) -> bool {
+    return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
+}
+
+pub fn tlv_type_is_utf8_string(e_type: TlvElementType) -> bool {
+    return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
 }
 
 pub fn get_tlv_field_size(e_type: TlvElementType) -> TLVFieldSize {
