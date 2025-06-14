@@ -51,6 +51,24 @@ impl Shr<u32> for TLVTagControl {
     }
 }
 
+impl TryFrom<u8> for TLVTagControl {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(TLVTagControl::Anonymous),
+            0x20 => Ok(TLVTagControl::ContextSpecific),
+            0x40 => Ok(TLVTagControl::CommonProfile2Bytes),
+            0x60 => Ok(TLVTagControl::CommonProfile4Bytes),
+            0x80 => Ok(TLVTagControl::ImplicitProfile2Bytes),
+            0xA0 => Ok(TLVTagControl::ImplicitProfile4Bytes),
+            0xC0 => Ok(TLVTagControl::FullyQualified6Bytes),
+            0xE0 => Ok(TLVTagControl::FullyQualified8Bytes),
+            _ => Err(()),
+        }
+    }
+}
+
 pub enum TLVTagControlMS
 {
     KTLVTagControlMask  = 0xE0,

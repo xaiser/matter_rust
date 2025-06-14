@@ -286,9 +286,31 @@ macro_rules! chip_error_buffer_too_small{
 }
 
 #[macro_export]
+macro_rules! chip_error_end_of_tlv{
+    () => {
+        chip_core_error!(0x21)
+    };
+}
+
+// another name
+#[macro_export]
+macro_rules! chip_end_of_tlv{
+    () => {
+        chip_core_error!(0x21)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_tlv_underrun{
     () => {
         chip_core_error!(0x22)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_invalid_tlv_element{
+    () => {
+        chip_core_error!(0x23)
     };
 }
 

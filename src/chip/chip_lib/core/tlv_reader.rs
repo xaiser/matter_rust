@@ -1,5 +1,5 @@
 use super::tlv_types::{self, TlvType, TlvElementType, TLVTypeMask};
-use super::tlv_tags::{self, Tag,TlvCommonProfiles,TLVTagControl};
+use super::tlv_tags::{self, Tag,TlvCommonProfiles,TLVTagControl,TLVTagControlMS};
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_common;
 use crate::ChipErrorResult;
@@ -13,6 +13,10 @@ use crate::chip_error_internal;
 use crate::chip_error_wrong_tlv_type;
 use crate::chip_error_tlv_underrun;
 use crate::chip_error_invalid_integer_value;
+use crate::chip_error_buffer_too_small;
+use crate::chip_error_incorrect_state;
+use crate::chip_error_end_of_tlv;;
+use crate::chip_error_invalid_tlv_element;;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -60,17 +64,20 @@ pub trait TlvReader {
 
     fn get_bytes(&mut self) -> Result<&[u8], ChipError>;
 
-    fn get_string(&mut self) -> Result<Option<&str>, ChipError>;
+    fn get_bytes_raw(&mut self, buf: * mut u8, buf_len: usize) -> ChipErrorResult;
 
-    fn get_data_slice(&self) -> Result<&[u8], ChipError>;
+    fn get_string(&mut self) -> Result<Option<&str>, ChipError>;
+    
+    fn get_string_raw(&mut self, buf: * mut u8, buf_size: usize) -> ChipErrorResult;
 
     fn enter_container(&mut self) -> Result<TlvType, ChipError>;
 
     fn exit_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult;
 
-    fn open_container(&mut self) -> Result<Self, ChipError> where Self: Sized;
+    //fn open_container(&mut self) -> Result<Self, ChipError> where Self: Sized;
+    fn open_container(&mut self, reader: &mut Self) -> ChipErrorResult;
 
-    fn close_container(&mut self, reader: Self) -> ChipErrorResult;
+    fn close_container(&mut self, reader: &mut Self) -> ChipErrorResult;
 
     fn get_container_type(&self) -> TlvType;
 
@@ -107,6 +114,8 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     where 
         BackingStoreType: TlvBackingStore,
 {
+    const TAG_SIZES: [u8; 8] = [0, 1, 2, 4, 2, 4, 6, 8];
+
     pub const fn const_default() -> Self {
         Self {
             m_implicit_profile_id: TlvCommonProfiles::KprofileIdNotSpecified as u32,
@@ -179,7 +188,31 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
+    fn read_data_raw(&mut self, mut buf: * mut u8, mut len: usize) -> ChipErrorResult {
+        while len > 0 {
+            self.ensure_data(chip_error_tlv_underrun!())?;
+            unsafe {
+                let remaining_len = self.m_buf_end.offset_from_unsigned(self.m_read_point);
+                let mut read_len = len;
+                if read_len > remaining_len {
+                    read_len = remaining_len;
+                }
+                if !buf.is_null() {
+                    ptr::copy_nonoverlapping(self.m_read_point, buf, read_len);
+                    buf = buf.add(read_len);
+                }
+                self.m_read_point = self.m_read_point.add(read_len);
+                self.m_len_read += read_len;
+                len -= read_len;
+            }
+        }
+
+        chip_ok!()
+    }
+
     fn read_data(&mut self, buf: &mut [u8]) -> ChipErrorResult {
+        return self.read_data_raw(buf.as_mut_ptr(), buf.len());
+        /*
         let mut start: usize = 0;
         while start < buf.len() {
             self.ensure_data(chip_error_tlv_underrun!())?;
@@ -197,6 +230,48 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         }
 
         chip_ok!()
+        */
+    }
+
+
+    #[inline]
+    fn is_container_open(&self) -> bool {
+        self.m_container_open
+    }
+
+    fn skip_data(&mut self) -> ChipErrorResult {
+        let elem_type = self.get_element_type();
+
+        if tlv_types::tlv_type_has_length(elem_type) {
+            return self.read_data_raw(ptr::null_mut(), self.m_elem_len_or_val as usize);
+        }
+
+        chip_ok!()
+    }
+
+    fn read_element(&mut self) -> ChipErrorResult {
+        self.ensure_data(chip_error_end_of_tlv)?;
+        verify_or_return_error!(self.m_read_point.is_null() == false, chip_error_invalid_tlv_element!());
+
+        self.m_container_type = self.m_read_point.read() as u16;
+
+        let elem_type = self.get_element_type();
+        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type), chip_error_invalid_tlv_element!());
+
+        // we have check the range in is_valid_tlv_type.
+        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::kTLVTagControlMask as u8) as u8).unwrap();
+
+        let tag_bytes = TAG_SIZES[(tag_control >> (TLVTagControlMS::kTLVTagControlShift as u32)) as usize];
+
+        let len_or_val_field_size = tlv_types::get_tlv_field_size(elem_type);
+
+        let val_or_len_bytes = tlv_types::tlv_field_size_to_bytes(len_or_val_field_size);
+
+        let ele_head_byts: u8 = 1 + tag_bytes + val_or_len_bytes;
+
+        let staging_buf[u8; 17] = [0; 17];
+
+        self.read_data_raw(staging_buf.as_ptr_mut(), ele_head_byts)?;
     }
 }
 
@@ -410,6 +485,25 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
          }
     }
 
+    fn get_bytes_raw(&mut self, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
+        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
+          Err(chip_error_wrong_tlv_type!()));
+
+        if self.m_elem_len_or_val > buf_len as u64 {
+            return Err(chip_error_buffer_too_small!());
+        }
+
+        unsafe {
+            let mut buf_slice = core::slice::from_raw_parts_mut(buf, self.m_elem_len_or_val as usize);
+
+            self.read_data(buf_slice)?;
+        }
+
+        self.m_elem_len_or_val = 0;
+
+        chip_ok!()
+    }
+
     fn get_string(&mut self) -> Result<Option<&str>, ChipError> {
         verify_or_return_error!(tlv_types::tlv_type_is_utf8_string(self.get_element_type()),
           Err(chip_error_wrong_tlv_type!()));
@@ -427,9 +521,21 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         }
     }
 
-    fn get_data_slice(&self) -> Result<&[u8], ChipError> {
-        Err(chip_error_internal!())
+    fn get_string_raw(&mut self, buf: * mut u8, buf_size: usize) -> ChipErrorResult {
+        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
+          Err(chip_error_wrong_tlv_type!()));
+
+        if (self.m_elem_len_or_val + 1)> buf_size as u64 {
+            return Err(chip_error_buffer_too_small!());
+        }
+
+        unsafe {
+            *buf.add(self.m_elem_len_or_val as usize) = 0;
+        }
+
+        return self.get_bytes_raw(buf, buf_size - 1);
     }
+
 
     fn enter_container(&mut self) -> Result<TlvType, ChipError> {
         Ok(TlvType::KtlvTypeNotSpecified)
@@ -439,11 +545,36 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
-    fn open_container(&mut self) -> Result<Self, ChipError> where Self: Sized {
-        Err(chip_error_internal!())
+    fn open_container(&mut self, reader: &mut Self) -> ChipErrorResult {
+        let elem_type = self.get_element_type();
+        if !tlv_types::tlv_elem_type_is_container(elem_type) {
+            return Err(chip_error_incorrect_state!());
+        }
+        reader.m_backing_store = self.m_backing_store;
+        reader.m_read_point = self.m_read_point;
+        reader.m_buf_end = self.m_buf_end;
+        reader.m_len_read = self.m_len_read;
+        reader.m_max_len = self.m_max_len;
+        reader.clear_element_state();
+        reader.m_container_type = TlvType::from(elem_type);
+        reader.set_container_open(false);
+        reader.m_implicit_profile_id = self.m_implicit_profile_id;
+        reader.m_app_data = self.m_app_data;
+
+        self.set_container_open(true);
+
+        chip_ok!()
     }
 
-    fn close_container(&mut self, reader: Self) -> ChipErrorResult {
+    fn close_container(&mut self, reader: &mut Self) -> ChipErrorResult {
+        if !self.is_container_open() {
+            return Err(chip_error_incorrect_state!());
+        }
+
+        if TlvElementType::from_container_type(reader.m_container_type) != self.get_element_type() {
+            return Err(chip_error_incorrect_state!());
+        }
+
         chip_ok!()
     }
 

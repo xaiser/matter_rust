@@ -17,6 +17,34 @@ pub enum TlvType {
     KtlvTypeList      = 0x17
 }
 
+impl From<TlvElementType> for TlvType {
+    fn from(elem: TlvElementType) -> Self {
+        use TlvElementType::*;
+        use TlvType::*;
+
+        match elem {
+            NotSpecified => KtlvTypeNotSpecified,
+            Int8 | Int16 | Int32 | Int64 => KtlvTypeSignedInteger,
+            UInt8 | UInt16 | UInt32 | UInt64 => KtlvTypeUnsignedInteger,
+            BooleanFalse | BooleanTrue => KtlvTypeBoolean,
+            FloatingPointNumber32 | FloatingPointNumber64 => KtlvTypeFloatingPointNumber,
+            UTF8String1ByteLength
+                | UTF8String2ByteLength
+                | UTF8String4ByteLength
+                | UTF8String8ByteLength => KtlvTypeUTF8String,
+            ByteString1ByteLength
+                | ByteString2ByteLength
+                | ByteString4ByteLength
+                | ByteString8ByteLength => KtlvTypeByteString,
+            Null => KtlvTypeNull,
+            Structure => KtlvTypeStructure,
+            Array => KtlvTypeArray,
+            List => KtlvTypeList,
+            EndOfContainer => KtlvTypeUnknownContainer,
+        }
+    }
+}
+
 impl From<i16> for TlvType {
     fn from(value: i16) -> Self {
         match value {
@@ -184,14 +212,17 @@ pub fn tlv_type_has_value(e_type: TlvElementType) -> bool {
         ((e_type >= TlvElementType::FloatingPointNumber32) && (e_type <= TlvElementType::ByteString8ByteLength));
 }
 
+#[inline]
 pub fn tlv_type_has_length(e_type: TlvElementType) -> bool {
     return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
 }
 
+#[inline]
 pub fn tlv_type_is_string(e_type: TlvElementType) -> bool {
     return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
 }
 
+#[inline]
 pub fn tlv_type_is_utf8_string(e_type: TlvElementType) -> bool {
     return e_type >= TlvElementType::UTF8String1ByteLength && e_type <= TlvElementType::ByteString8ByteLength;
 }
@@ -211,4 +242,14 @@ pub fn tlv_field_size_to_bytes(size: TLVFieldSize) -> u8 {
 #[inline]
 pub fn tlv_type_is_container(the_type: TlvType) -> bool {
     return the_type >= TlvType::KtlvTypeStructure && the_type <= TlvType::KtlvTypeList;
+}
+
+#[inline]
+pub fn tlv_elem_type_is_container(the_type: TlvElementType) -> bool {
+    return the_type >= TlvElementType::Structure && the_type <= TlvElementType::List;
+}
+
+#[inline]
+pub fn is_valid_tlv_type(the_type: TlvElementType) -> bool {
+    return the_type <= TlvElementType::EndOfContainer;
 }
