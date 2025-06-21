@@ -302,6 +302,29 @@ pub mod little_endian {
     define_write_raw!(write_i16_raw, i16);
     define_write_raw!(write_i32_raw, i32);
     define_write_raw!(write_i64_raw, i64);
+
+    macro_rules! define_read_raw {
+        ($name:ident, $ty:ty) => {
+            #[inline]
+            pub fn $name(p: &mut * const u8) -> $ty {
+                unsafe {
+                    let size = core::mem::size_of::<$ty>();
+                    let v = <$ty>::from_le_bytes(core::slice::from_raw_parts(*p, size).try_into().unwrap());
+                    *p = (*p).add(size);
+                    return v;
+                }
+            }
+        };
+    }
+
+    define_read_raw!(read_u8_raw, u8);
+    define_read_raw!(read_u16_raw, u16);
+    define_read_raw!(read_u32_raw, u32);
+    define_read_raw!(read_u64_raw, u64);
+    define_read_raw!(read_i8_raw, i8);
+    define_read_raw!(read_i16_raw, i16);
+    define_read_raw!(read_i32_raw, i32);
+    define_read_raw!(read_i64_raw, i64);
 }
 
 pub mod big_endian {
@@ -436,4 +459,27 @@ pub mod big_endian {
     define_write_raw!(write_i16_raw, i16);
     define_write_raw!(write_i32_raw, i32);
     define_write_raw!(write_i64_raw, i64);
+
+    macro_rules! define_read_raw {
+        ($name:ident, $ty:ty) => {
+            #[inline]
+            pub fn $name(p: &mut * const u8) -> $ty {
+                unsafe {
+                    let size = core::mem::size_of::<$ty>();
+                    let v = <$ty>::from_be_bytes(core::slice::from_raw_parts(*p, size).try_into().unwrap());
+                    *p = (*p).add(size);
+                    return v;
+                }
+            }
+        };
+    }
+
+    define_read_raw!(read_u8_raw, u8);
+    define_read_raw!(read_u16_raw, u16);
+    define_read_raw!(read_u32_raw, u32);
+    define_read_raw!(read_u64_raw, u64);
+    define_read_raw!(read_i8_raw, i8);
+    define_read_raw!(read_i16_raw, i16);
+    define_read_raw!(read_i32_raw, i32);
+    define_read_raw!(read_i64_raw, i64);
 }

@@ -15,8 +15,8 @@ use crate::chip_error_tlv_underrun;
 use crate::chip_error_invalid_integer_value;
 use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
-use crate::chip_error_end_of_tlv;;
-use crate::chip_error_invalid_tlv_element;;
+use crate::chip_error_end_of_tlv;
+use crate::chip_error_invalid_tlv_element;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -249,29 +249,43 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
-    fn read_element(&mut self) -> ChipErrorResult {
-        self.ensure_data(chip_error_end_of_tlv)?;
-        verify_or_return_error!(self.m_read_point.is_null() == false, chip_error_invalid_tlv_element!());
+    /*
+    fn read_tag(&mut self, tag_control: TLVTagControl, buf: &[u8]) -> Result<(Tag, usize), ChipError> {
+        match tag_control {
+            TLVTagControl::ContextSpecific => {
+            },
+        }
+    }
+    */
 
-        self.m_container_type = self.m_read_point.read() as u16;
+    fn read_element(&mut self) -> ChipErrorResult {
+        self.ensure_data(chip_error_end_of_tlv!())?;
+        verify_or_return_error!(self.m_read_point.is_null() == false, Err(chip_error_invalid_tlv_element!()));
+
+        unsafe {
+            self.m_container_type = TlvType::from(self.m_read_point.read() as i16);
+        }
 
         let elem_type = self.get_element_type();
-        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type), chip_error_invalid_tlv_element!());
+        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type), Err(chip_error_invalid_tlv_element!()));
 
         // we have check the range in is_valid_tlv_type.
-        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::kTLVTagControlMask as u8) as u8).unwrap();
+        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8).unwrap();
 
-        let tag_bytes = TAG_SIZES[(tag_control >> (TLVTagControlMS::kTLVTagControlShift as u32)) as usize];
+        let tag_bytes = Self::TAG_SIZES[(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
 
         let len_or_val_field_size = tlv_types::get_tlv_field_size(elem_type);
 
         let val_or_len_bytes = tlv_types::tlv_field_size_to_bytes(len_or_val_field_size);
 
-        let ele_head_byts: u8 = 1 + tag_bytes + val_or_len_bytes;
+        let ele_head_bytes: u8 = 1 + tag_bytes + val_or_len_bytes;
 
-        let staging_buf[u8; 17] = [0; 17];
+        let mut staging_buf: [u8; 17] = [0; 17];
 
-        self.read_data_raw(staging_buf.as_ptr_mut(), ele_head_byts)?;
+        //self.read_data_raw(staging_buf.as_ptr_mut(), ele_head_byts)?;
+        self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
+
+        return chip_ok!();
     }
 }
 
