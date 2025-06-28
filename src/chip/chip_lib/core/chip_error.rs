@@ -322,6 +322,13 @@ macro_rules! chip_error_invalid_tlv_tag{
 }
 
 #[macro_export]
+macro_rules! chip_error_unknown_implicit_tlv_tag{
+    () => {
+        chip_core_error!(0x25)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_wrong_tlv_type{
     () => {
         chip_core_error!(0x26)
@@ -332,6 +339,20 @@ macro_rules! chip_error_wrong_tlv_type{
 macro_rules! chip_error_tlv_container_open{
     () => {
         chip_core_error!(0x27)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_unexpected_tlv_element{
+    () => {
+        chip_core_error!(0x2b)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_not_implemented{
+    () => {
+        chip_core_error!(0x2d)
     };
 }
 

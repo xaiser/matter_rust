@@ -17,6 +17,10 @@ use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_end_of_tlv;
 use crate::chip_error_invalid_tlv_element;
+use crate::chip_error_invalid_tlv_tag;
+use crate::chip_error_not_implemented;
+use crate::chip_error_unexpected_tlv_element;
+use crate::chip_error_unknown_implicit_tlv_tag;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -249,14 +253,72 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
-    /*
+    fn skip_to_end_of_container(&mut self) -> ChipErrorResult {
+        let outer_container_type = self.m_container_type;
+        let mut nest_level: u32 = 0;
+
+        self.set_container_open(false);
+
+        loop {
+            let elem_type = self.get_element_type();
+            if elem_type == TlvElementType::EndOfContainer {
+                if nest_level == 0 {
+                    return chip_ok!();
+                }
+                nest_level -= 1;
+                self.m_container_type = if nest_level == 0 { outer_container_type } else { TlvType::KtlvTypeUnknownContainer }
+            } else if tlv_types::tlv_elem_type_is_container(elem_type) {
+                nest_level += 1;
+                self.m_container_type = TlvType::from(elem_type);
+            }
+
+            self.skip_data()?;
+            let _ = self.read_element()?;
+        }
+    }
+
     fn read_tag(&mut self, tag_control: TLVTagControl, buf: &[u8]) -> Result<(Tag, usize), ChipError> {
         match tag_control {
             TLVTagControl::ContextSpecific => {
+                return Ok((tlv_tags::context_tag(buf[0]), 1));
             },
+            TLVTagControl::CommonProfile2Bytes => {
+                return Ok((tlv_tags::common_tag(u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
+            },
+            TLVTagControl::CommonProfile4Bytes => {
+                return Ok((tlv_tags::common_tag(u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
+            },
+            TLVTagControl::ImplicitProfile2Bytes => {
+                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                } else {
+                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
+                }
+            },
+            TLVTagControl::ImplicitProfile4Bytes => {
+                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                } else {
+                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
+                }
+            },
+            TLVTagControl::FullyQualified6Bytes => {
+                let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                let tag_num = u32::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf"));
+                return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
+            },
+            TLVTagControl::FullyQualified8Bytes => {
+                let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                let tag_num = u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
+                return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
+            },
+            _ => {
+                Ok((tlv_tags::anonymous_tag(),0))
+            }
         }
     }
-    */
 
     fn read_element(&mut self) -> ChipErrorResult {
         self.ensure_data(chip_error_end_of_tlv!())?;
@@ -282,8 +344,41 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
 
         let mut staging_buf: [u8; 17] = [0; 17];
 
-        //self.read_data_raw(staging_buf.as_ptr_mut(), ele_head_byts)?;
         self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
+
+        if let Ok((the_tag, tag_size)) = self.read_tag(tag_control, &staging_buf[..]) {
+            self.m_elem_tag = the_tag;
+            self.m_elem_len_or_val = u64::from_le_bytes(staging_buf[tag_size..(tag_size + val_or_len_bytes as usize)].try_into().expect("read_data: small buf"));
+            verify_or_return_error!(!tlv_types::tlv_type_has_length(elem_type) || self.m_elem_len_or_val <= (u32::MAX as u64), Err(chip_error_not_implemented!()));
+        } else {
+            return Err(chip_error_not_implemented!());
+        }
+
+        return chip_ok!();
+    }
+
+    fn verify_element(&self) -> ChipErrorResult {
+        if self.get_element_type() == TlvElementType::EndOfContainer {
+            if self.m_container_type == TlvType::KtlvTypeNotSpecified {
+                return Err(chip_error_invalid_tlv_element!());
+            }
+            if self.m_elem_tag != tlv_tags::anonymous_tag() {
+                return Err(chip_error_invalid_tlv_tag!());
+            }
+        } else {
+            if self.m_elem_tag == tlv_tags::unknown_implicit_tag() {
+                return Err(chip_error_unknown_implicit_tlv_tag!());
+            }
+
+            match self.m_container_type {
+                TlvType::KtlvTypeNotSpecified if tlv_tags::is_context_tag(self.m_elem_tag) => {
+                    return Err(chip_error_invalid_tlv_tag!());
+                },
+                _ => {
+                    return Err(chip_error_incorrect_state!());
+                }
+            }
+        }
 
         return chip_ok!();
     }
@@ -333,22 +428,46 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn next(&mut self) -> ChipErrorResult {
+        self.skip()?;
+        let _ = self.read_element()?;
+
+        let elem_type = self.get_element_type();
+
+        verify_or_return_error!(elem_type != TlvElementType::EndOfContainer,
+            Err(chip_error_end_of_tlv!()));
+
+        if tlv_types::tlv_type_is_string(elem_type) && self.get_length() != 0 {
+            self.ensure_data(chip_error_tlv_underrun!())?;
+        }
+
         chip_ok!()
     }
 
     fn next_tag(&mut self, expected_tag: Tag) -> ChipErrorResult {
+        self.next()?;
+        self.expect(expected_tag)?;
         chip_ok!()
     }
 
     fn expect(&mut self, expected_tag: Tag) -> ChipErrorResult {
+        verify_or_return_error!(self.get_type() != TlvType::KtlvTypeNotSpecified,
+            Err(chip_error_wrong_tlv_type!()));
+        verify_or_return_error!(self.get_tag() == expected_tag,
+            Err(chip_error_unexpected_tlv_element!()));
         chip_ok!()
     }
 
     fn next_type_tag(&mut self, expected_type: TlvType, expected_tag: Tag) -> ChipErrorResult {
+        self.next()?;
+        self.expect_type_tag(expected_type, expected_tag)?;
         chip_ok!()
     }
 
     fn expect_type_tag(&mut self, expected_type: TlvType, expected_tag: Tag) -> ChipErrorResult {
+        verify_or_return_error!(self.get_type() == expected_type,
+            Err(chip_error_wrong_tlv_type!()));
+        verify_or_return_error!(self.get_tag() == expected_tag,
+            Err(chip_error_unexpected_tlv_element!()));
         chip_ok!()
     }
 
@@ -371,7 +490,7 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn get_tag(&self) -> Tag {
-        tlv_tags::anonymous_tag()
+        self.m_elem_tag
     }
 
     fn get_length(&self) -> usize {
@@ -552,10 +671,25 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
 
     fn enter_container(&mut self) -> Result<TlvType, ChipError> {
-        Ok(TlvType::KtlvTypeNotSpecified)
+        let elem_type = self.get_element_type();
+        verify_or_return_error!(!tlv_types::tlv_elem_type_is_container(elem_type),
+            Err(chip_error_incorrect_state!()));
+
+        let outer_container_type = self.m_container_type;
+        self.m_container_type = TlvType::from(elem_type);
+
+        self.clear_element_state();
+        self.set_container_open(false);
+
+        return Ok(outer_container_type);
     }
 
     fn exit_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult {
+        self.skip_to_end_of_container()?;
+
+        self.m_container_type = outer_container_type;
+        self.clear_element_state();
+
         chip_ok!()
     }
 
@@ -589,6 +723,16 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
             return Err(chip_error_incorrect_state!());
         }
 
+        self.skip_to_end_of_container()?;
+
+        self.m_backing_store = reader.m_backing_store;
+        self.m_read_point = reader.m_read_point;
+        self.m_buf_end = reader.m_buf_end;
+        self.m_len_read = reader.m_len_read;
+        self.m_max_len = reader.m_max_len;
+
+        self.clear_element_state();
+
         chip_ok!()
     }
 
@@ -609,6 +753,18 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn skip(&mut self) -> ChipErrorResult {
+        let elem_type = self.get_element_type();
+        verify_or_return_error!(elem_type != TlvElementType::EndOfContainer,
+            Err(chip_error_end_of_tlv!()));
+
+        if tlv_types::tlv_elem_type_is_container(elem_type) {
+            let mut outer_container_type = self.enter_container()?;
+            return self.exit_container(outer_container_type);
+        }
+
+        self.skip_data()?;
+        self.clear_element_state();
+
         chip_ok!()
     }
 

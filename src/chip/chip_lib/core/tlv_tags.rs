@@ -82,7 +82,7 @@ pub enum SpecialTagNumber {
     KUnknownImplicitTagNum
 }
 
-#[derive(Default)]
+#[derive(Default,PartialEq,Copy,Clone)]
 pub struct Tag {
 
     // The storage of the tag value uses the following encoding:
