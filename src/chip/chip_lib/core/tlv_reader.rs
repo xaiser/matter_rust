@@ -2,6 +2,7 @@ use super::tlv_types::{self, TlvType, TlvElementType, TLVTypeMask};
 use super::tlv_tags::{self, Tag,TlvCommonProfiles,TLVTagControl,TLVTagControlMS};
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_common;
+use super::chip_encoding::little_endian;
 use crate::ChipErrorResult;
 use crate::ChipError;
 
@@ -26,6 +27,11 @@ use crate::chip_error_unknown_implicit_tlv_tag;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::verify_or_die;
+
+use core::str::FromStr;
+use crate::chip_log_detail;
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
 
 use core::{fmt,ptr};
 
@@ -302,6 +308,65 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         }
     }
 
+    fn read_tag_raw(&mut self, tag_control: TLVTagControl, mut p: * const u8) -> Result<(Tag, usize), ChipError> {
+        unsafe {
+            match tag_control {
+                TLVTagControl::ContextSpecific => {
+                    return Ok((tlv_tags::context_tag(p.read()), 1));
+                },
+                TLVTagControl::CommonProfile2Bytes => {
+                    return Ok((tlv_tags::common_tag(little_endian::read_u16_raw(&mut p).into()), 2));
+                },
+                TLVTagControl::CommonProfile4Bytes => {
+                    return Ok((tlv_tags::common_tag(little_endian::read_u32_raw(&mut p)), 4));
+                },
+                TLVTagControl::ImplicitProfile2Bytes => {
+                    if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                        return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                    } else {
+                        //return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
+                        return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, little_endian::read_u16_raw(&mut p).into()), 2));
+                    }
+                },
+                TLVTagControl::ImplicitProfile4Bytes => {
+                    if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                        return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                    } else {
+                        //return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
+                        return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, little_endian::read_u32_raw(&mut p)), 4));
+                    }
+                },
+                TLVTagControl::FullyQualified6Bytes => {
+                    /*
+                    let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                    let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                    let tag_num = u32::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf"));
+                    return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
+                    */
+                    let vendor_id = little_endian::read_u16_raw(&mut p);
+                    let profile_num = little_endian::read_u16_raw(&mut p);
+                    let tag_num: u32 = little_endian::read_u16_raw(&mut p).into();
+                    return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
+                },
+                TLVTagControl::FullyQualified8Bytes => {
+                    /*
+                    let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                    let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                    let tag_num = u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
+                    */
+                    let vendor_id = little_endian::read_u16_raw(&mut p);
+                    let profile_num = little_endian::read_u16_raw(&mut p);
+                    let tag_num: u32 = little_endian::read_u16_raw(&mut p).into();
+                    return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
+                },
+                _ => {
+                    Ok((tlv_tags::anonymous_tag(),0))
+                }
+            }
+        }
+    }
+
+
     fn read_tag(&mut self, tag_control: TLVTagControl, buf: &[u8]) -> Result<(Tag, usize), ChipError> {
         match tag_control {
             TLVTagControl::ContextSpecific => {
@@ -350,11 +415,12 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         verify_or_return_error!(self.m_read_point.is_null() == false, Err(chip_error_invalid_tlv_element!()));
 
         unsafe {
-            self.m_container_type = TlvType::from(self.m_read_point.read() as i16);
+            self.m_control_byte = self.m_read_point.read() as u16;
         }
 
         let elem_type = self.get_element_type();
         verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type), Err(chip_error_invalid_tlv_element!()));
+
 
         // we have check the range in is_valid_tlv_type.
         let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8).unwrap();
@@ -368,8 +434,24 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         let ele_head_bytes: u8 = 1 + tag_bytes + val_or_len_bytes;
 
         let mut staging_buf: [u8; 17] = [0; 17];
+        let mut p: * const u8;
 
+        unsafe {
+            if ele_head_bytes > (self.m_buf_end.offset_from(self.m_read_point) as u8) {
+                self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
+                p = staging_buf.as_ptr();
+            } else {
+                p = self.m_read_point;
+                self.m_read_point = self.m_read_point.add(ele_head_bytes as usize);
+                self.m_len_read += ele_head_bytes as usize;
+            }
+            p = p.add(1);
+            fkdsajf;dasjk
+        }
+
+        /*
         self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
+        chip_log_detail!(Inet, "start next 2");
 
         if let Ok((the_tag, tag_size)) = self.read_tag(tag_control, &staging_buf[..]) {
             self.m_elem_tag = the_tag;
@@ -378,6 +460,8 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         } else {
             return Err(chip_error_not_implemented!());
         }
+        chip_log_detail!(Inet, "start next 3");
+        */
 
         return self.verify_element();
     }
@@ -891,10 +975,27 @@ mod test {
             return reader;
         }
 
+        fn setup_with_values(buf: &[u8]) -> TheTlvReader {
+            let mut reader = TheTlvReader::const_default();
+            unsafe {
+                //BUFFER.fill(0);
+                reader.init(buf.as_ptr(), buf.len());
+            }
+            return reader;
+        }
+
         #[test]
         fn init() {
             let reader = setup();
             assert_eq!(1,1);
+        }
+
+        #[test]
+        fn get_boolean_true() {
+            let mut reader = setup_with_values(&[0x08]);
+            //print!("type is {:?}", reader.get_type());
+            reader.next().inspect_err(|e| print!("next err {:?}", e));
+            assert_eq!(true,reader.get_boolean().is_ok_and(|v| v == false));
         }
     }
 }

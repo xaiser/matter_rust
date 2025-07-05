@@ -65,7 +65,7 @@ impl From<i16> for TlvType {
     }
 }
 
-#[derive(Clone,Copy,PartialEq,PartialOrd)]
+#[derive(Clone,Copy,PartialEq,PartialOrd,Debug)]
 #[repr(i8)]
 pub enum TlvElementType {
     // IMPORTANT: All values here except NotSpecified must have no bits in
