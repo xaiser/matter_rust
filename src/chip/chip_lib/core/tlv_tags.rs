@@ -106,6 +106,7 @@ impl Tag {
     pub(super) const KPROFILE_ID_SHIFT: u32 = 32;
     pub(super) const KVENDOR_ID_SHIFT: u32 = 48;
     pub(super) const KSPECIAL_TAG_PROFILE_ID: u32 = 0xFFFFFFFF;
+    pub(super) const KCONTEXT_TAG_MAX_NUM: u32 = u8::MAX as u32;
 }
 
 pub const fn unknown_tag() -> Tag {
@@ -150,4 +151,8 @@ pub fn profile_id_from_tag(tag: &Tag) -> u32 {
 
 pub fn is_special_tag(tag: &Tag) -> bool {
     return profile_id_from_tag(tag) == Tag::KSPECIAL_TAG_PROFILE_ID;
+}
+
+pub fn is_context_tag(tag: &Tag) -> bool {
+    return profile_id_from_tag(tag) == Tag::KSPECIAL_TAG_PROFILE_ID && tag_num_from_tag(tag) <= Tag::KCONTEXT_TAG_MAX_NUM;
 }

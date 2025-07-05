@@ -9,6 +9,7 @@ use crate::chip_ok;
 use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::chip_error_internal;
+use crate::chip_no_error;
 
 use crate::chip_error_wrong_tlv_type;
 use crate::chip_error_tlv_underrun;
@@ -114,6 +115,30 @@ pub struct TlvReaderBasic<BackingStoreType>
     m_container_open: bool,
 }
 
+impl<BackingStoreType> Clone for TlvReaderBasic<BackingStoreType>
+    where 
+        BackingStoreType: TlvBackingStore,
+{
+    fn clone(&self) -> Self {
+        let reader = Self {
+            m_implicit_profile_id: self.m_implicit_profile_id,
+            m_app_data: self.m_app_data,
+            m_elem_tag: self.m_elem_tag,
+            m_elem_len_or_val: self.m_elem_len_or_val,
+            m_backing_store: self.m_backing_store,
+            m_read_point: self.m_read_point,
+            m_buf_end: self.m_buf_end,
+            m_len_read: self.m_len_read,
+            m_max_len: self.m_max_len,
+            m_container_type: self.m_container_type,
+            m_control_byte: self.m_control_byte,
+            m_container_open: self.m_container_open,
+        };
+
+        return reader;
+    }
+}
+
 impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     where 
         BackingStoreType: TlvBackingStore,
@@ -164,7 +189,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         }
 
         unsafe {
-            let remaining_len = self.m_buf_end.offset_from_unsigned(self.m_read_point);
+            let remaining_len = self.m_buf_end.offset_from(self.m_read_point) as usize;
             verify_or_return_error!(remaining_len >= self.m_elem_len_or_val as usize, 
                 Err(chip_error_tlv_underrun!()));
         }
@@ -196,7 +221,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         while len > 0 {
             self.ensure_data(chip_error_tlv_underrun!())?;
             unsafe {
-                let remaining_len = self.m_buf_end.offset_from_unsigned(self.m_read_point);
+                let remaining_len = self.m_buf_end.offset_from(self.m_read_point) as usize;
                 let mut read_len = len;
                 if read_len > remaining_len {
                     read_len = remaining_len;
@@ -354,7 +379,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             return Err(chip_error_not_implemented!());
         }
 
-        return chip_ok!();
+        return self.verify_element();
     }
 
     fn verify_element(&self) -> ChipErrorResult {
@@ -371,7 +396,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             }
 
             match self.m_container_type {
-                TlvType::KtlvTypeNotSpecified if tlv_tags::is_context_tag(self.m_elem_tag) => {
+                TlvType::KtlvTypeNotSpecified if tlv_tags::is_context_tag(&self.m_elem_tag) => {
                     return Err(chip_error_invalid_tlv_tag!());
                 },
                 _ => {
@@ -381,6 +406,56 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         }
 
         return chip_ok!();
+    }
+
+    pub fn get_element_head_length(&self) -> Result<u8, ChipError> {
+        let elem_type = self.get_element_type();
+        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type),
+            Err(chip_error_invalid_tlv_element!()));
+
+        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8).unwrap();
+
+        let tag_bytes = Self::TAG_SIZES[(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
+
+        let len_or_val_field_size = tlv_types::get_tlv_field_size(elem_type);
+
+        let val_or_len_bytes = tlv_types::tlv_field_size_to_bytes(len_or_val_field_size);
+
+        verify_or_return_error!((1 + tag_bytes + val_or_len_bytes) <= u8::MAX,
+            Err(chip_error_internal!()));
+
+        return Ok((1 + tag_bytes + val_or_len_bytes) as u8);
+    }
+
+    pub fn find_element_with_tag(&self, tag: &Tag) -> Result<Self, ChipError> {
+        let mut reader = self.clone();
+
+        while reader.next().is_ok() {
+            verify_or_return_error!(TlvType::KtlvTypeNotSpecified != reader.get_type(),
+                Err(chip_error_invalid_tlv_element!()));
+            if *tag == reader.get_tag() {
+                return Ok(reader.clone());
+            }
+        }
+
+        return Err(chip_error_invalid_tlv_tag!());
+    }
+
+    pub fn count_remaining_in_container(&self) -> Result<isize, ChipError> {
+        verify_or_return_error!(TlvType::KtlvTypeNotSpecified != self.m_container_type,
+           Err(chip_error_incorrect_state!()));
+
+        let mut reader = self.clone();
+        let mut count: isize = 0;
+        let mut return_err: ChipError = chip_no_error!();
+
+        while reader.next().inspect_err(|e| return_err = *e).is_ok() {
+            count += 1;
+        }
+        if return_err == chip_error_end_of_tlv!() {
+            return Ok(count);
+        }
+        return Err(return_err);
     }
 }
 
