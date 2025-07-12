@@ -434,34 +434,36 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         let ele_head_bytes: u8 = 1 + tag_bytes + val_or_len_bytes;
 
         let mut staging_buf: [u8; 17] = [0; 17];
-        let mut p: * const u8;
 
-        unsafe {
-            if ele_head_bytes > (self.m_buf_end.offset_from(self.m_read_point) as u8) {
-                self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
-                p = staging_buf.as_ptr();
-            } else {
-                p = self.m_read_point;
-                self.m_read_point = self.m_read_point.add(ele_head_bytes as usize);
-                self.m_len_read += ele_head_bytes as usize;
-            }
-            p = p.add(1);
-            fkdsajf;dasjk
-        }
-
-        /*
         self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
-        chip_log_detail!(Inet, "start next 2");
+        chip_log_detail!(Inet, "val_or_len_bytes {}", val_or_len_bytes);
 
-        if let Ok((the_tag, tag_size)) = self.read_tag(tag_control, &staging_buf[..]) {
+        if let Ok((the_tag, tag_size)) = self.read_tag(tag_control, &staging_buf[1..]) {
             self.m_elem_tag = the_tag;
-            self.m_elem_len_or_val = u64::from_le_bytes(staging_buf[tag_size..(tag_size + val_or_len_bytes as usize)].try_into().expect("read_data: small buf"));
+            match val_or_len_bytes {
+                0 => {
+                    self.m_elem_len_or_val = 0;
+                }
+                1 => {
+                    self.m_elem_len_or_val = u8::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u8")) as u64;
+                },
+                2 => {
+                    self.m_elem_len_or_val = u16::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u16")) as u64;
+                },
+                4 => {
+                    self.m_elem_len_or_val = u32::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u32")) as u64;
+                },
+                8 => {
+                    self.m_elem_len_or_val = u64::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u64"));
+                },
+                _ => {
+                    return Err(chip_error_not_implemented!());
+                }
+            }
             verify_or_return_error!(!tlv_types::tlv_type_has_length(elem_type) || self.m_elem_len_or_val <= (u32::MAX as u64), Err(chip_error_not_implemented!()));
         } else {
             return Err(chip_error_not_implemented!());
         }
-        chip_log_detail!(Inet, "start next 3");
-        */
 
         return self.verify_element();
     }
@@ -480,12 +482,34 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             }
 
             match self.m_container_type {
-                TlvType::KtlvTypeNotSpecified if tlv_tags::is_context_tag(&self.m_elem_tag) => {
-                    return Err(chip_error_invalid_tlv_tag!());
+                TlvType::KtlvTypeNotSpecified => {
+                    if tlv_tags::is_context_tag(&self.m_elem_tag) {
+                        return Err(chip_error_invalid_tlv_tag!());
+                    }
+                },
+                TlvType::KtlvTypeStructure => {
+                    if self.m_elem_tag == tlv_tags::anonymous_tag() {
+                        return Err(chip_error_invalid_tlv_tag!());
+                    }
+                },
+                TlvType::KtlvTypeArray => {
+                    if self.m_elem_tag == tlv_tags::anonymous_tag() {
+                        return Err(chip_error_invalid_tlv_tag!());
+                    }
+                },
+                TlvType::KtlvTypeUnknownContainer | TlvType::KtlvTypeList => {
+                    // do nothing
                 },
                 _ => {
                     return Err(chip_error_incorrect_state!());
                 }
+            }
+        }
+
+        if tlv_types::tlv_type_has_length(self.get_element_type()) {
+            let overall_len_remaining: u32 = (self.m_max_len - self.m_len_read) as u32;
+            if overall_len_remaining < (self.m_elem_len_or_val as u32) {
+                return Err(chip_error_tlv_underrun!());
             }
         }
 
@@ -680,6 +704,8 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
     fn get_i8(&self) -> Result<i8, ChipError> {
         let vi64 = self.get_i64()?;
+
+        chip_log_detail!(Inet, "vi64 is {}", vi64 as i8);
 
         if let Ok(vi8) = i8::try_from(vi64) {
             return Ok(vi8);
@@ -991,11 +1017,31 @@ mod test {
         }
 
         #[test]
-        fn get_boolean_true() {
+        fn get_boolean_false() {
             let mut reader = setup_with_values(&[0x08]);
-            //print!("type is {:?}", reader.get_type());
-            reader.next().inspect_err(|e| print!("next err {:?}", e));
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
             assert_eq!(true,reader.get_boolean().is_ok_and(|v| v == false));
+        }
+
+        #[test]
+        fn get_boolean_true() {
+            let mut reader = setup_with_values(&[0x09]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_boolean().is_ok_and(|v| v == true));
+        }
+
+        #[test]
+        fn get_i8_value_42() {
+            let mut reader = setup_with_values(&[0x00, 0x2a]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_i8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn get_i8_value_neg_17() {
+            let mut reader = setup_with_values(&[0x00, 0xef]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
         }
     }
 }
