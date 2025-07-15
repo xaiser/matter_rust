@@ -703,7 +703,9 @@ mod test {
               assert_eq!(d.addr.get().get_address(), EXPECTED_SEND_ADDR.clone());
               assert_eq!(d.addr.get().get_port(), EXPECTED_SEND_PORT);
               for i in 0..4 {
-                  assert_eq!((*d.data.get())[i], EXPECTED_SEND_MSG[i].into());
+                  let vec = d.data.get().as_ref().unwrap();
+                  //assert_eq!((*d.data.get())[i], EXPECTED_SEND_MSG[i] as u32);
+                  assert_eq!(vec[i], EXPECTED_SEND_MSG[i] as u32);
               }
           }
       }
