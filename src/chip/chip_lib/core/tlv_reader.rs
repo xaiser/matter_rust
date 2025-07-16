@@ -436,7 +436,6 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         let mut staging_buf: [u8; 17] = [0; 17];
 
         self.read_data(&mut staging_buf[0..ele_head_bytes as usize])?;
-        chip_log_detail!(Inet, "val_or_len_bytes {}", val_or_len_bytes);
 
         if let Ok((the_tag, tag_size)) = self.read_tag(tag_control, &staging_buf[1..]) {
             self.m_elem_tag = the_tag;
@@ -705,8 +704,6 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     fn get_i8(&self) -> Result<i8, ChipError> {
         let vi64 = self.get_i64()?;
 
-        chip_log_detail!(Inet, "vi64 is {}", vi64 as i8);
-
         if let Ok(vi8) = i8::try_from(vi64) {
             return Ok(vi8);
         }
@@ -767,13 +764,13 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     fn get_i64(&self) -> Result<i64, ChipError> {
         match self.get_element_type() {
             TlvElementType::Int8 => {
-                Ok((self.m_elem_len_or_val as u8) as i64)
+                Ok((self.m_elem_len_or_val as i8) as i64)
             },
             TlvElementType::Int16 => {
-                Ok((self.m_elem_len_or_val as u16) as i64)
+                Ok((self.m_elem_len_or_val as i16) as i64)
             },
             TlvElementType::Int32 => {
-                Ok((self.m_elem_len_or_val as u32) as i64)
+                Ok((self.m_elem_len_or_val as i32) as i64)
             },
             TlvElementType::Int64 => {
                 Ok(self.m_elem_len_or_val as i64)
@@ -1042,6 +1039,56 @@ mod test {
             let mut reader = setup_with_values(&[0x00, 0xef]);
             assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
             assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+        }
+
+        #[test]
+        fn get_u8_value_neg_42() {
+            let mut reader = setup_with_values(&[0x04, 0x2a]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_u8().inspect_err(|e| println!("get u8 err {}", e)).is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn get_i16_value_42() {
+            let mut reader = setup_with_values(&[0x01, 0x2a, 0x00]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i16().inspect_err(|e| println!("get i16 err {}", e)).is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn get_i32_value_neg_170000() {
+            let mut reader = setup_with_values(&[0x02, 0xf0, 0x67, 0xfd, 0xff]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i32().inspect_err(|e| println!("get i32 err {}", e)).is_ok_and(|v| v == -170000));
+        }
+
+        #[test]
+        fn get_i64_value_40000000000() {
+            let mut reader = setup_with_values(&[0x03 ,0x00 ,0x90 ,0x2f ,0x50 ,0x09 ,0x00 ,0x00 ,0x00]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i64().inspect_err(|e| println!("get i64 err {}", e)).is_ok_and(|v| v == 40000000000));
+        }
+
+        #[test]
+        fn get_UTF8_string_1_byte_length_hello() {
+            let mut reader = setup_with_values(&[0x0c ,0x06 ,0x48 ,0x65 ,0x6c ,0x6c ,0x6f ,0x21]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_string().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!")));
+        }
+
+        #[test]
+        fn get_octet_string_1_byte_length_0_4() {
+            let mut reader = setup_with_values(&[0x10 ,0x05 ,0x00 ,0x01 ,0x02 ,0x03 ,0x04]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_bytes().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.len() == 5 && s[0] == 0x00 && 
+                    s[1] == 0x01 && s[2] == 0x02 && s[3] == 0x03 && s[4] == 0x04 ));
+        }
+
+        #[test]
+        fn get_null() {
+            let mut reader = setup_with_values(&[0x14]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(TlvType::KtlvTypeNull, reader.get_type());
         }
     }
 }
