@@ -662,7 +662,10 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
             TlvElementType::FloatingPointNumber32 | TlvElementType::FloatingPointNumber64 => {
                 TlvType::KtlvTypeFloatingPointNumber
             },
-            TlvElementType::NotSpecified | TlvElementType::Null => {
+            TlvElementType::NotSpecified => {
+                return TlvType::from(ele_type as i16);
+            },
+            n if n >= TlvElementType::Null => {
                 return TlvType::from(ele_type as i16);
             },
             _ => {
@@ -854,7 +857,7 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
     fn enter_container(&mut self) -> Result<TlvType, ChipError> {
         let elem_type = self.get_element_type();
-        verify_or_return_error!(!tlv_types::tlv_elem_type_is_container(elem_type),
+        verify_or_return_error!(tlv_types::tlv_elem_type_is_container(elem_type),
             Err(chip_error_incorrect_state!()));
 
         let outer_container_type = self.m_container_type;
@@ -1089,6 +1092,51 @@ mod test {
             let mut reader = setup_with_values(&[0x14]);
             assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
             assert_eq!(TlvType::KtlvTypeNull, reader.get_type());
+        }
+
+        #[test]
+        fn empty_struct() {
+            let mut reader = setup_with_values(&[0x15, 0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(TlvType::KtlvTypeStructure, reader.get_type());
+            assert_eq!(0, reader.get_length());
+        }
+
+        #[test]
+        fn empty_array() {
+            let mut reader = setup_with_values(&[0x16, 0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(TlvType::KtlvTypeArray, reader.get_type());
+            assert_eq!(0, reader.get_length());
+        }
+
+        #[test]
+        fn empty_list() {
+            let mut reader = setup_with_values(&[0x17, 0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(TlvType::KtlvTypeList, reader.get_type());
+            assert_eq!(0, reader.get_length());
+        }
+
+        #[test]
+        fn structure_test_1() {
+            // Structure, two context specific tags, Signed Inte
+            //  ger, 1 octet values, {0 = 42, 1 = -17}
+            let mut reader = setup_with_values(&[0x15 ,0x20 ,0x00 ,0x2a ,0x20 ,0x01 ,0xef ,0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            // enter the structure
+            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            assert_eq!(true, outer_container.is_ok());
+            let outer_container = outer_container.unwrap();
+            // read first element
+            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            // read second element
+            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x01)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            // exit the structure
+            assert_eq!(true, reader.exit_container(outer_container).is_ok());
+
         }
     }
 }
