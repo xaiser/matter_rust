@@ -373,7 +373,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                 return Ok((tlv_tags::context_tag(buf[0]), 1));
             },
             TLVTagControl::CommonProfile2Bytes => {
-                return Ok((tlv_tags::common_tag(u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
+                return Ok((tlv_tags::common_tag(u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf")) as u32), 2));
             },
             TLVTagControl::CommonProfile4Bytes => {
                 return Ok((tlv_tags::common_tag(u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
@@ -382,7 +382,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                 if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
                     return Ok((tlv_tags::unknown_implicit_tag(), 0));
                 } else {
-                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
+                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf")) as u32), 2));
                 }
             },
             TLVTagControl::ImplicitProfile4Bytes => {
@@ -395,13 +395,13 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             TLVTagControl::FullyQualified6Bytes => {
                 let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
                 let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
-                let tag_num = u32::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf"));
+                let tag_num: u32 = u16::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf")) as u32;
                 return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
             },
             TLVTagControl::FullyQualified8Bytes => {
                 let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
                 let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
-                let tag_num = u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
+                let tag_num: u32 = u16::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf")) as u32;
                 return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
             },
             _ => {
@@ -468,6 +468,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     }
 
     fn verify_element(&self) -> ChipErrorResult {
+        chip_log_detail!(Inet, "read done 0 ");
         if self.get_element_type() == TlvElementType::EndOfContainer {
             if self.m_container_type == TlvType::KtlvTypeNotSpecified {
                 return Err(chip_error_invalid_tlv_element!());
@@ -483,6 +484,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             match self.m_container_type {
                 TlvType::KtlvTypeNotSpecified => {
                     if tlv_tags::is_context_tag(&self.m_elem_tag) {
+                        chip_log_detail!(Inet, "read done here? ");
                         return Err(chip_error_invalid_tlv_tag!());
                     }
                 },
@@ -492,7 +494,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                     }
                 },
                 TlvType::KtlvTypeArray => {
-                    if self.m_elem_tag == tlv_tags::anonymous_tag() {
+                    if self.m_elem_tag != tlv_tags::anonymous_tag() {
                         return Err(chip_error_invalid_tlv_tag!());
                     }
                 },
@@ -511,6 +513,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                 return Err(chip_error_tlv_underrun!());
             }
         }
+        chip_log_detail!(Inet, "read done 1 ");
 
         return chip_ok!();
     }
@@ -1137,6 +1140,122 @@ mod test {
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
 
+        }
+
+        #[test]
+        fn array_test_1() {
+            //Array, Signed Integer, 1-octet values, [0, 1, 2, 3, 4]
+            let mut reader = setup_with_values(&[0x16 ,0x00 ,0x00 ,0x00 ,0x01 ,0x00 ,0x02 ,0x00 ,0x03 ,0x00 ,0x04 ,0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            // enter the structure
+            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            assert_eq!(true, outer_container.is_ok());
+            let outer_container = outer_container.unwrap();
+            // read first element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 0));
+            // read second element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 1));
+            // read third element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 2));
+            // read fourth element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 3));
+            // read fifth element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 4));
+            // exit the structure
+            assert_eq!(true, reader.exit_container(outer_container).is_ok());
+
+        }
+
+        #[test]
+        fn list_test_1() {
+            // List, mix of anonymous and context tags, Signed Integer, 1 octet values, [[1, 0 = 42, 2, 3, 0 =-17]]
+            let mut reader = setup_with_values(&[0x17 ,0x00 ,0x01 ,0x20 ,0x00 ,0x2a ,0x00 ,0x02 ,0x00 ,0x03 ,0x20 ,0x00 ,0xef ,0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            // enter the structure
+            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            assert_eq!(true, outer_container.is_ok());
+            let outer_container = outer_container.unwrap();
+            // read first element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 1));
+            // read second element
+            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            // read third element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 2));
+            // read fourth element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 3));
+            // read fifth element
+            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            // exit the structure
+            assert_eq!(true, reader.exit_container(outer_container).is_ok());
+
+        }
+
+        #[test]
+        fn array_test_2() {
+            // Array, mix of element types, [42, -170000, {}, "Hello!"]
+            let mut reader = setup_with_values(&[0x16 ,0x00 ,0x2a ,0x02 ,0xf0 ,0x67 ,0xfd ,0xff ,0x15 ,0x18 ,0x0c ,0x06 ,0x48 ,0x65 ,0x6c ,0x6c ,0x6f ,0x21 ,0x18]);
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            // enter the structure
+            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            assert_eq!(true, outer_container.is_ok());
+            let outer_container = outer_container.unwrap();
+            // read first element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            // read second element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i32().inspect_err(|e| println!("get i32 err {}", e)).is_ok_and(|v| v == -170000));
+            // read third element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(TlvType::KtlvTypeStructure, reader.get_type());
+            // read fourth element
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_string().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!")));
+            // exit the structure
+            assert_eq!(true, reader.exit_container(outer_container).is_ok());
+
+        }
+
+        #[test]
+        fn get_u8_value_42() {
+            // Anonymous tag, Unsigned Integer, 1-octet value, 42U
+            let mut reader = setup_with_values(&[0x04, 0x2a]);
+            assert_eq!(true, reader.next_tag(tlv_tags::anonymous_tag()).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn get_u8_value_42_context_tag() {
+            // Context tag 1, Unsigned Integer, 1-octet value, 1 = 42U
+            // Skip this test as we have tested it in the struct test and we cannot use context tag
+            // on top level
+            assert!(true);
+        }
+
+        #[test]
+        fn get_u8_value_42_common_profile_tag_1() {
+            //Common profile tag 1, Unsigned Integer, 1-octet value, Matter::1 = 42U
+            let mut reader = setup_with_values(&[0x44 ,0x01 ,0x00 ,0x2a]);
+            assert_eq!(true, reader.next_tag(tlv_tags::common_tag(0x01)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn get_u8_value_42_common_profile_tag_100000() {
+            // Common profile tag 100000, Unsigned Integer, 1 octet value, Matter::100000 = 42U
+            let mut reader = setup_with_values(&[0x64 ,0xa0 ,0x86 ,0x01 ,0x00 ,0x2a]);
+            assert_eq!(true, reader.next_tag(tlv_tags::common_tag(100000)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
         }
     }
 }
