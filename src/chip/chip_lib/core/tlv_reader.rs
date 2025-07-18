@@ -401,7 +401,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
             TLVTagControl::FullyQualified8Bytes => {
                 let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
                 let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
-                let tag_num: u32 = u16::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf")) as u32;
+                let tag_num: u32 = u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
                 return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
             },
             _ => {
@@ -1256,6 +1256,47 @@ mod test {
             let mut reader = setup_with_values(&[0x64 ,0xa0 ,0x86 ,0x01 ,0x00 ,0x2a]);
             assert_eq!(true, reader.next_tag(tlv_tags::common_tag(100000)).inspect_err(|e| println!("next err {}", e)).is_ok());
             assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn full_qualify_tag_1() {
+            // Fully qualified tag, Vendor ID 0xFFF1/65521, profile
+            // number 0xDEED/57069, 2-octet tag 1, Unsigned
+            // Integer, 1-octet value 42, 65521::57069:1 = 42U
+            let mut reader = setup_with_values(&[0xc4 ,0xf1 ,0xff ,0xed ,0xde ,0x01 ,0x00 ,0x2a]);
+            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 1)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn full_qualify_tag_2() {
+            // Fully qualified tag, Vendor ID 0xFFF1/65521, profile
+            // number 0xDEED/57069, 4-octet tag
+            // 0xAA55FEED/2857762541, Unsigned Integer, 1-octet
+            // value 42, 65521::57069:2857762541 = 42U
+            let mut reader = setup_with_values(&[0xe4 ,0xf1 ,0xff ,0xed ,0xde ,0xed ,0xfe ,0x55 ,0xaa ,0x2a]);
+            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55FEED)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn full_qualify_tag_with_structure() {
+            // Structure with the fully qualified tag, Vendor ID
+            // 0xFFF1/65521, profile number 0xDEED/57069, 2-
+            // octet tag 1. The structure contains a single element
+            // labeled using a fully qualified tag under
+            // the same profile, with 2-octet tag 0xAA55/43605.
+            // 65521::57069:1 = {65521::57069:43605 = 42U}
+            let mut reader = setup_with_values(&[0xd5 ,0xf1 ,0xff ,0xed ,0xde ,0x01 ,0x00 ,0xc4 ,0xf1 ,0xff ,0xed ,0xde ,0x55 ,0xaa ,0x2a ,0x18]);
+            assert_eq!(true, reader.next_type_tag(TlvType::KtlvTypeStructure, tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0x01)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            // enter the structure
+            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            assert_eq!(true, outer_container.is_ok());
+            let outer_container = outer_container.unwrap();
+            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            // exit the structure
+            assert_eq!(true, reader.exit_container(outer_container).is_ok());
         }
     }
 }
