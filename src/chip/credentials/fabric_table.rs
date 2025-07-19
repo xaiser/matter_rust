@@ -1,11 +1,19 @@
 use crate::chip::{NodeId,FabricId,VendorId,ScopedNodeId,CompressedFabricId};
 use crate::chip::chip_lib::core::node_id::{KUNDEFINED_NODE_ID, is_operational_node_id};
 use crate::chip::chip_lib::core::data_model_types::{KUNDEFINED_FABRIC_ID, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX};
-use crate::chip::chip_lib::core::chip_encoding;
+use crate::chip::chip_lib::core::{
+    chip_persistent_storage_delegate::PersistentStorageDelegate,
+    chip_encoding, 
+    chip_config::CHIP_CONFIG_MAX_FABRICS};
 
 use crate::chip::chip_lib::core::data_model_types::{FabricIndex};
 
-use crate::chip::crypto::crypto_pal::{P256PublicKey,P256Keypair,P256EcdsaSignature};
+use crate::chip::crypto::{
+    self,
+    crypto_pal::{P256PublicKey,P256Keypair,P256EcdsaSignature},
+};
+
+use crate::chip::credentials;
 
 use crate::ChipErrorResult;
 use crate::chip_ok;
@@ -259,4 +267,73 @@ mod fabric_info_private {
             chip_ok!()
         }
     }
+}
+
+#[repr(u16)]
+enum StateFlags {
+    // If true, we are in the process of a fail-safe and there was at least one
+    // operation that caused partial data in the fabric table.
+    KIsPendingFabricDataPresent = (1u16 << 0),
+    KIsTrustedRootPending       = (1u16 << 1),
+    KIsUpdatePending            = (1u16 << 2),
+    KIsAddPending               = (1u16 << 3),
+
+    // Only true when `AllocatePendingOperationalKey` has been called
+    KIsOperationalKeyPending = (1u16 << 4),
+    // True if `AllocatePendingOperationalKey` was for an existing fabric
+    KIsPendingKeyForUpdateNoc = (1u16 << 5),
+
+    // True if we allow more than one fabric with same root and fabricId in the fabric table
+    // for test purposes. This disables a collision check.
+    KAreCollidingFabricsIgnored = (1u16 << 6),
+
+    // If set to true (only possible on test builds), will cause `CommitPendingFabricData()` to early
+    // return during commit, skipping clean-ups, so that we can validate commit marker fabric removal.
+    KAbortCommitForTest = (1u16 << 7),
+}
+
+#[derive(Default)]
+struct CommitMarker {
+    pub fabric_index: FabricIndex,
+    pub is_addition: bool,
+}
+
+impl CommitMarker {
+    pub fn new(fabric_index: FabricIndex, is_addition: bool) -> Self {
+        Self {
+            fabric_index,
+            is_addition
+        }
+    }
+}
+
+struct Delegate {
+    next: * mut Self,
+}
+
+pub struct FabricTable<PSD, OK,OCS>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+{
+    m_states: [FabricInfo; CHIP_CONFIG_MAX_FABRICS],
+    // Used for UpdateNOC pending fabric updates
+    m_pendingFabric: FabricInfo,
+    m_storage: * mut PSD,
+    m_operational_keystore: * mut OK,
+    m_op_cert_store: * mut OCS,
+    // FabricTable::Delegate link to first node, since FabricTable::Delegate is a form
+    // of intrusive linked-list item.
+    m_delegate_list_root: * mut Delegate,
+
+    // When mStateFlags.Has(kIsPendingFabricDataPresent) is true, this holds the index of the fabric
+    // for which there is currently pending data.
+    m_fabric_index_with_pending_state: FabricIndex,
+
+    // For when a revert occurs during init, so that more clean-up can be scheduled by caller.
+    m_deleted_fabric_index_from_init: FabricIndex,
+
+
+    create the last known good time
 }

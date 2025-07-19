@@ -959,6 +959,15 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 }
 
+struct DummyBackStore;
+impl TlvBackingStore for DummyBackStore {
+    fn get_new_buffer_will_always_fail(&self) -> bool {
+        false
+    }
+}
+
+pub type TlvContiguousBufferReader = TlvReaderBasic<DummyBackStore>;
+
 #[cfg(test)]
 mod test {
     use crate::chip::chip_lib::core::tlv_backing_store::TlvBackingStore;
@@ -969,6 +978,7 @@ mod test {
         use std::*;
         use crate::chip::chip_lib::core::tlv_writer::TlvWriter;
 
+        /*
         struct DummyBackStore;
         impl TlvBackingStore for DummyBackStore {
             fn on_init_writer<TlvWriterType: TlvWriter>(&mut self, _writer: * mut TlvWriterType, _buf: * mut * mut u8, _buf_len: * mut usize) -> ChipErrorResult {
@@ -987,6 +997,7 @@ mod test {
                 false
             }
         }
+        */
 
         type TheTlvReader = TlvReaderBasic<DummyBackStore>;
 
