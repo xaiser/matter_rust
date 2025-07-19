@@ -12,13 +12,17 @@ pub trait TlvBackingStore {
         chip_ok!()
     }
 
-    fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult;
+    fn finalize_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
+        chip_ok!()
+    }
 
     fn get_next_buffer<TlvReaderType: TlvReader>(&mut self, reader: * mut TlvReaderType, buf: * mut * const u8, buf_len: * mut usize) -> ChipErrorResult {
         chip_ok!()
     }
 
-    fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: * mut * mut u8, buf_len: &mut usize) -> ChipErrorResult;
+    fn get_new_buffer<TlvWriterType: TlvWriter>(&mut self, writer: * mut TlvWriterType, buf: * mut * mut u8, buf_len: &mut usize) -> ChipErrorResult {
+        chip_ok!()
+    }
 
     fn get_new_buffer_will_always_fail(&self) -> bool;
 }

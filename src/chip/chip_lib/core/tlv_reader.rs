@@ -468,7 +468,6 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     }
 
     fn verify_element(&self) -> ChipErrorResult {
-        chip_log_detail!(Inet, "read done 0 ");
         if self.get_element_type() == TlvElementType::EndOfContainer {
             if self.m_container_type == TlvType::KtlvTypeNotSpecified {
                 return Err(chip_error_invalid_tlv_element!());
@@ -513,7 +512,6 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                 return Err(chip_error_tlv_underrun!());
             }
         }
-        chip_log_detail!(Inet, "read done 1 ");
 
         return chip_ok!();
     }
@@ -1298,5 +1296,129 @@ mod test {
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
         }
-    }
+    } // end of no_backing test
+    mod backing {
+        use super::*;
+        use super::super::*;
+        use std::*;
+        use std::collections::VecDeque;
+        use crate::chip::chip_lib::core::tlv_reader::TlvReader;
+
+        const TMP_BUF_LEN: usize = 4;
+
+        struct VecBackingStore {
+            // assume the size of inner queue will never be bigger than TMP_BUF_LEN
+            pub m_back: VecDeque<VecDeque<u8>>,
+            pub m_current: [u8; TMP_BUF_LEN],
+            pub m_always_fail: bool,
+        }
+
+        impl VecBackingStore {
+            pub fn reset(&mut self) {
+                for row in self.m_back.iter_mut() {
+                    row.clear();
+                }
+                self.m_back.clear();
+                self.m_current.fill(0);
+            }
+        }
+
+        impl Default for VecBackingStore {
+            fn default() -> Self {
+                Self {
+                    m_back: VecDeque::new(),
+                    m_current: [0; TMP_BUF_LEN],
+                    m_always_fail: false,
+                }
+            }
+        }
+
+        impl VecBackingStore {
+            fn add_new_data(&mut self, data: &[u8]) {
+                let len = std::cmp::min(TMP_BUF_LEN, data.len());
+                self.m_back.push_back(VecDeque::from(Vec::from(&data[0..len])));
+            }
+        }
+
+        impl TlvBackingStore for VecBackingStore {
+            fn on_init_reader<TlvReaderType: TlvReader>(&mut self, reader: * mut TlvReaderType, buf: * mut * const u8, buf_len: * mut usize) -> ChipErrorResult {
+                return self.get_next_buffer(reader, buf, buf_len);
+            }
+
+            fn get_next_buffer<TlvReaderType: TlvReader>(&mut self, _reader: * mut TlvReaderType,
+                buf: * mut * const u8, buf_len: * mut usize) -> ChipErrorResult {
+
+                if let Some(queue) = self.m_back.front_mut() {
+                    // get the front queue data
+                    let len = std::cmp::min(TMP_BUF_LEN, queue.len());
+                    for i in 0..len {
+                        self.m_current[i] = queue[i];
+                    }
+                    unsafe {
+                        *buf = self.m_current.as_ptr();
+                        *buf_len = len;
+                    }
+                    // pop up from the back storage
+                    let _ = self.m_back.pop_front();
+                } else {
+                    unsafe {
+                        *buf_len = 0;
+                    }
+                }
+
+                chip_ok!()
+            }
+
+            fn get_new_buffer_will_always_fail(&self) -> bool {
+                return self.m_always_fail;
+            }
+        }
+        type TheTlvReader = TlvReaderBasic<VecBackingStore>;
+
+        fn setup(backing: * mut VecBackingStore) -> TheTlvReader {
+            let mut reader = TheTlvReader::const_default();
+            // to allow max_len > remaining_len, so we need a + 32 here
+            let _ = reader.init_backing_store(backing, (TMP_BUF_LEN  + 32) as u32);
+
+            reader
+        }
+
+        #[test]
+        fn init() {
+            let mut reader = TheTlvReader::const_default();
+            let mut backing = VecBackingStore::default();
+            assert_eq!(true, reader.init_backing_store(ptr::addr_of_mut!(backing), TMP_BUF_LEN as u32).is_ok());
+        }
+
+        #[test]
+        fn read_with_empty_queue() {
+            let mut backing = VecBackingStore::default();
+            let mut reader = setup(ptr::addr_of_mut!(backing));
+            assert_eq!(false, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+        }
+
+        #[test]
+        fn read_with_queue_size_1() {
+            let mut backing = VecBackingStore::default();
+            // Signed, 1-octet value = 42
+            backing.add_new_data(&[0x00, 0x2a]);
+            let mut reader = setup(ptr::addr_of_mut!(backing));
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+        }
+
+        #[test]
+        fn read_with_queue_size_2() {
+            let mut backing = VecBackingStore::default();
+            // Signed, 1-octet value = 42
+            backing.add_new_data(&[0x00, 0x2a]);
+            // Signed, 1-octet value = -17
+            backing.add_new_data(&[0x00, 0xef]);
+            let mut reader = setup(ptr::addr_of_mut!(backing));
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+        }
+    }// end of backing test
 }
