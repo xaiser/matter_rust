@@ -9,3 +9,6 @@ pub mod fault_injection;
 pub mod buffer_reader;
 pub mod buffer_writer;
 pub mod hsm;
+
+#[cfg(test)]
+pub mod test_persistent_storage;
