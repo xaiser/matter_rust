@@ -378,6 +378,20 @@ macro_rules! chip_error_invalid_integer_value {
 }
 
 #[macro_export]
+macro_rules! chip_error_persisted_storage_failed {
+    () => {
+        chip_core_error!(0x9f)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_persisted_storage_value_not_found {
+    () => {
+        chip_core_error!(0xa0)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_version_mismatch{
     () => {
         chip_core_error!(0xa7)
