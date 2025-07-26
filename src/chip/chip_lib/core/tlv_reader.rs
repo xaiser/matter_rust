@@ -1,46 +1,50 @@
-use super::tlv_types::{self, TlvType, TlvElementType, TLVTypeMask};
-use super::tlv_tags::{self, Tag,TlvCommonProfiles,TLVTagControl,TLVTagControlMS};
+use super::chip_encoding::little_endian;
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_common;
-use super::chip_encoding::little_endian;
-use crate::ChipErrorResult;
+use super::tlv_tags::{self, TLVTagControl, TLVTagControlMS, Tag, TlvCommonProfiles};
+use super::tlv_types::{self, TLVTypeMask, TlvElementType, TlvType};
 use crate::ChipError;
+use crate::ChipErrorResult;
 
-use crate::chip_ok;
 use crate::chip_core_error;
-use crate::chip_sdk_error;
 use crate::chip_error_internal;
 use crate::chip_no_error;
+use crate::chip_ok;
+use crate::chip_sdk_error;
 
-use crate::chip_error_wrong_tlv_type;
-use crate::chip_error_tlv_underrun;
-use crate::chip_error_invalid_integer_value;
 use crate::chip_error_buffer_too_small;
-use crate::chip_error_incorrect_state;
 use crate::chip_error_end_of_tlv;
+use crate::chip_error_incorrect_state;
+use crate::chip_error_invalid_integer_value;
 use crate::chip_error_invalid_tlv_element;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_not_implemented;
+use crate::chip_error_tlv_underrun;
 use crate::chip_error_unexpected_tlv_element;
 use crate::chip_error_unknown_implicit_tlv_tag;
+use crate::chip_error_wrong_tlv_type;
 
+use crate::verify_or_die;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
-use crate::verify_or_die;
 
-use core::str::FromStr;
-use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use core::str::FromStr;
 
-use core::{fmt,ptr};
+use core::{fmt, ptr};
 
 pub trait TlvReader {
     type BackingStoreType;
 
-    fn init(&mut self, data: * const u8, data_len: usize);
+    fn init(&mut self, data: *const u8, data_len: usize);
 
-    fn init_backing_store(&mut self, backing_store: * mut Self::BackingStoreType, max_len: u32) -> ChipErrorResult;
+    fn init_backing_store(
+        &mut self,
+        backing_store: *mut Self::BackingStoreType,
+        max_len: u32,
+    ) -> ChipErrorResult;
 
     fn next(&mut self) -> ChipErrorResult;
 
@@ -75,11 +79,11 @@ pub trait TlvReader {
 
     fn get_bytes(&mut self) -> Result<&[u8], ChipError>;
 
-    fn get_bytes_raw(&mut self, buf: * mut u8, buf_len: usize) -> ChipErrorResult;
+    fn get_bytes_raw(&mut self, buf: *mut u8, buf_len: usize) -> ChipErrorResult;
 
     fn get_string(&mut self) -> Result<Option<&str>, ChipError>;
-    
-    fn get_string_raw(&mut self, buf: * mut u8, buf_size: usize) -> ChipErrorResult;
+
+    fn get_string_raw(&mut self, buf: *mut u8, buf_size: usize) -> ChipErrorResult;
 
     fn enter_container(&mut self) -> Result<TlvType, ChipError>;
 
@@ -94,9 +98,9 @@ pub trait TlvReader {
 
     fn verify_end_of_container(&mut self) -> ChipErrorResult;
 
-    fn get_backing_store(&mut self) -> * mut Self::BackingStoreType;
+    fn get_backing_store(&mut self) -> *mut Self::BackingStoreType;
 
-    fn get_read_point(&self) -> * const u8;
+    fn get_read_point(&self) -> *const u8;
 
     fn skip(&mut self) -> ChipErrorResult;
 
@@ -104,16 +108,16 @@ pub trait TlvReader {
 }
 
 pub struct TlvReaderBasic<BackingStoreType>
-    where 
-        BackingStoreType: TlvBackingStore,
+where
+    BackingStoreType: TlvBackingStore,
 {
     pub m_implicit_profile_id: u32,
-    pub m_app_data: * mut u8,
+    pub m_app_data: *mut u8,
     m_elem_tag: Tag,
     m_elem_len_or_val: u64,
-    m_backing_store: * mut BackingStoreType,
-    m_read_point: * const u8,
-    m_buf_end: * const u8,
+    m_backing_store: *mut BackingStoreType,
+    m_read_point: *const u8,
+    m_buf_end: *const u8,
     m_len_read: usize,
     m_max_len: usize,
     m_container_type: TlvType,
@@ -122,8 +126,8 @@ pub struct TlvReaderBasic<BackingStoreType>
 }
 
 impl<BackingStoreType> Clone for TlvReaderBasic<BackingStoreType>
-    where 
-        BackingStoreType: TlvBackingStore,
+where
+    BackingStoreType: TlvBackingStore,
 {
     fn clone(&self) -> Self {
         let reader = Self {
@@ -146,8 +150,8 @@ impl<BackingStoreType> Clone for TlvReaderBasic<BackingStoreType>
 }
 
 impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
-    where 
-        BackingStoreType: TlvBackingStore,
+where
+    BackingStoreType: TlvBackingStore,
 {
     const TAG_SIZES: [u8; 8] = [0, 1, 2, 4, 2, 4, 6, 8];
 
@@ -186,9 +190,11 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         return TlvElementType::from(self.m_control_byte & (TLVTypeMask::KTLVTypeMask as u16));
     }
 
-    fn get_data_ptr(&self) -> Result<* const u8, ChipError> {
-        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
-          Err(chip_error_wrong_tlv_type!()));
+    fn get_data_ptr(&self) -> Result<*const u8, ChipError> {
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_string(self.get_element_type()),
+            Err(chip_error_wrong_tlv_type!())
+        );
 
         if self.get_length() == 0 {
             return Ok(ptr::null());
@@ -196,8 +202,10 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
 
         unsafe {
             let remaining_len = self.m_buf_end.offset_from(self.m_read_point) as usize;
-            verify_or_return_error!(remaining_len >= self.m_elem_len_or_val as usize, 
-                Err(chip_error_tlv_underrun!()));
+            verify_or_return_error!(
+                remaining_len >= self.m_elem_len_or_val as usize,
+                Err(chip_error_tlv_underrun!())
+            );
         }
 
         Ok(self.m_read_point)
@@ -205,13 +213,18 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
 
     fn ensure_data(&mut self, no_data_err: ChipError) -> ChipErrorResult {
         if self.m_read_point == self.m_buf_end {
-            verify_or_return_error!((self.m_len_read != self.m_max_len) && (!self.m_backing_store.is_null()),
-                Err(no_data_err));
+            verify_or_return_error!(
+                (self.m_len_read != self.m_max_len) && (!self.m_backing_store.is_null()),
+                Err(no_data_err)
+            );
 
             let mut buf_len: usize = 0;
             unsafe {
-                (*self.m_backing_store).get_next_buffer(self as _, ptr::addr_of_mut!(self.m_read_point),
-                    ptr::addr_of_mut!(buf_len))?;
+                (*self.m_backing_store).get_next_buffer(
+                    self as _,
+                    ptr::addr_of_mut!(self.m_read_point),
+                    ptr::addr_of_mut!(buf_len),
+                )?;
 
                 verify_or_return_error!(buf_len > 0, Err(no_data_err));
 
@@ -223,7 +236,7 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
-    fn read_data_raw(&mut self, mut buf: * mut u8, mut len: usize) -> ChipErrorResult {
+    fn read_data_raw(&mut self, mut buf: *mut u8, mut len: usize) -> ChipErrorResult {
         while len > 0 {
             self.ensure_data(chip_error_tlv_underrun!())?;
             unsafe {
@@ -268,7 +281,6 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         */
     }
 
-
     #[inline]
     fn is_container_open(&self) -> bool {
         self.m_container_open
@@ -297,7 +309,11 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                     return chip_ok!();
                 }
                 nest_level -= 1;
-                self.m_container_type = if nest_level == 0 { outer_container_type } else { TlvType::KtlvTypeUnknownContainer }
+                self.m_container_type = if nest_level == 0 {
+                    outer_container_type
+                } else {
+                    TlvType::KtlvTypeUnknownContainer
+                }
             } else if tlv_types::tlv_elem_type_is_container(elem_type) {
                 nest_level += 1;
                 self.m_container_type = TlvType::from(elem_type);
@@ -308,34 +324,57 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         }
     }
 
-    fn read_tag_raw(&mut self, tag_control: TLVTagControl, mut p: * const u8) -> Result<(Tag, usize), ChipError> {
+    fn read_tag_raw(
+        &mut self,
+        tag_control: TLVTagControl,
+        mut p: *const u8,
+    ) -> Result<(Tag, usize), ChipError> {
         unsafe {
             match tag_control {
                 TLVTagControl::ContextSpecific => {
                     return Ok((tlv_tags::context_tag(p.read()), 1));
-                },
+                }
                 TLVTagControl::CommonProfile2Bytes => {
-                    return Ok((tlv_tags::common_tag(little_endian::read_u16_raw(&mut p).into()), 2));
-                },
+                    return Ok((
+                        tlv_tags::common_tag(little_endian::read_u16_raw(&mut p).into()),
+                        2,
+                    ));
+                }
                 TLVTagControl::CommonProfile4Bytes => {
                     return Ok((tlv_tags::common_tag(little_endian::read_u32_raw(&mut p)), 4));
-                },
+                }
                 TLVTagControl::ImplicitProfile2Bytes => {
-                    if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                    if self.m_implicit_profile_id
+                        == (TlvCommonProfiles::KprofileIdNotSpecified as u32)
+                    {
                         return Ok((tlv_tags::unknown_implicit_tag(), 0));
                     } else {
                         //return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))), 2));
-                        return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, little_endian::read_u16_raw(&mut p).into()), 2));
+                        return Ok((
+                            tlv_tags::profile_tag(
+                                self.m_implicit_profile_id,
+                                little_endian::read_u16_raw(&mut p).into(),
+                            ),
+                            2,
+                        ));
                     }
-                },
+                }
                 TLVTagControl::ImplicitProfile4Bytes => {
-                    if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
+                    if self.m_implicit_profile_id
+                        == (TlvCommonProfiles::KprofileIdNotSpecified as u32)
+                    {
                         return Ok((tlv_tags::unknown_implicit_tag(), 0));
                     } else {
                         //return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
-                        return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, little_endian::read_u32_raw(&mut p)), 4));
+                        return Ok((
+                            tlv_tags::profile_tag(
+                                self.m_implicit_profile_id,
+                                little_endian::read_u32_raw(&mut p),
+                            ),
+                            4,
+                        ));
                     }
-                },
+                }
                 TLVTagControl::FullyQualified6Bytes => {
                     /*
                     let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
@@ -346,8 +385,11 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                     let vendor_id = little_endian::read_u16_raw(&mut p);
                     let profile_num = little_endian::read_u16_raw(&mut p);
                     let tag_num: u32 = little_endian::read_u16_raw(&mut p).into();
-                    return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
-                },
+                    return Ok((
+                        tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num),
+                        6,
+                    ));
+                }
                 TLVTagControl::FullyQualified8Bytes => {
                     /*
                     let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
@@ -357,75 +399,123 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                     let vendor_id = little_endian::read_u16_raw(&mut p);
                     let profile_num = little_endian::read_u16_raw(&mut p);
                     let tag_num: u32 = little_endian::read_u16_raw(&mut p).into();
-                    return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
-                },
-                _ => {
-                    Ok((tlv_tags::anonymous_tag(),0))
+                    return Ok((
+                        tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num),
+                        8,
+                    ));
                 }
+                _ => Ok((tlv_tags::anonymous_tag(), 0)),
             }
         }
     }
 
-
-    fn read_tag(&mut self, tag_control: TLVTagControl, buf: &[u8]) -> Result<(Tag, usize), ChipError> {
+    fn read_tag(
+        &mut self,
+        tag_control: TLVTagControl,
+        buf: &[u8],
+    ) -> Result<(Tag, usize), ChipError> {
         match tag_control {
             TLVTagControl::ContextSpecific => {
                 return Ok((tlv_tags::context_tag(buf[0]), 1));
-            },
-            TLVTagControl::CommonProfile2Bytes => {
-                return Ok((tlv_tags::common_tag(u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf")) as u32), 2));
-            },
-            TLVTagControl::CommonProfile4Bytes => {
-                return Ok((tlv_tags::common_tag(u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
-            },
-            TLVTagControl::ImplicitProfile2Bytes => {
-                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
-                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
-                } else {
-                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf")) as u32), 2));
-                }
-            },
-            TLVTagControl::ImplicitProfile4Bytes => {
-                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32) {
-                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
-                } else {
-                    return Ok((tlv_tags::profile_tag(self.m_implicit_profile_id, u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf"))), 4));
-                }
-            },
-            TLVTagControl::FullyQualified6Bytes => {
-                let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
-                let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
-                let tag_num: u32 = u16::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf")) as u32;
-                return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 6));
-            },
-            TLVTagControl::FullyQualified8Bytes => {
-                let vendor_id = u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
-                let profile_num = u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
-                let tag_num: u32 = u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
-                return Ok((tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num), 8));
-            },
-            _ => {
-                Ok((tlv_tags::anonymous_tag(),0))
             }
+            TLVTagControl::CommonProfile2Bytes => {
+                return Ok((
+                    tlv_tags::common_tag(u16::from_le_bytes(
+                        buf[0..2].try_into().expect("read_tag: small buf"),
+                    ) as u32),
+                    2,
+                ));
+            }
+            TLVTagControl::CommonProfile4Bytes => {
+                return Ok((
+                    tlv_tags::common_tag(u32::from_le_bytes(
+                        buf[0..4].try_into().expect("read_tag: small buf"),
+                    )),
+                    4,
+                ));
+            }
+            TLVTagControl::ImplicitProfile2Bytes => {
+                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32)
+                {
+                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                } else {
+                    return Ok((
+                        tlv_tags::profile_tag(
+                            self.m_implicit_profile_id,
+                            u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"))
+                                as u32,
+                        ),
+                        2,
+                    ));
+                }
+            }
+            TLVTagControl::ImplicitProfile4Bytes => {
+                if self.m_implicit_profile_id == (TlvCommonProfiles::KprofileIdNotSpecified as u32)
+                {
+                    return Ok((tlv_tags::unknown_implicit_tag(), 0));
+                } else {
+                    return Ok((
+                        tlv_tags::profile_tag(
+                            self.m_implicit_profile_id,
+                            u32::from_le_bytes(buf[0..4].try_into().expect("read_tag: small buf")),
+                        ),
+                        4,
+                    ));
+                }
+            }
+            TLVTagControl::FullyQualified6Bytes => {
+                let vendor_id =
+                    u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                let profile_num =
+                    u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                let tag_num: u32 =
+                    u16::from_le_bytes(buf[4..6].try_into().expect("read_tag: small buf")) as u32;
+                return Ok((
+                    tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num),
+                    6,
+                ));
+            }
+            TLVTagControl::FullyQualified8Bytes => {
+                let vendor_id =
+                    u16::from_le_bytes(buf[0..2].try_into().expect("read_tag: small buf"));
+                let profile_num =
+                    u16::from_le_bytes(buf[2..4].try_into().expect("read_tag: small buf"));
+                let tag_num: u32 =
+                    u32::from_le_bytes(buf[4..8].try_into().expect("read_tag: small buf"));
+                return Ok((
+                    tlv_tags::profile_tag_vendor_id(vendor_id, profile_num, tag_num),
+                    8,
+                ));
+            }
+            _ => Ok((tlv_tags::anonymous_tag(), 0)),
         }
     }
 
     fn read_element(&mut self) -> ChipErrorResult {
         self.ensure_data(chip_error_end_of_tlv!())?;
-        verify_or_return_error!(self.m_read_point.is_null() == false, Err(chip_error_invalid_tlv_element!()));
+        verify_or_return_error!(
+            self.m_read_point.is_null() == false,
+            Err(chip_error_invalid_tlv_element!())
+        );
 
         unsafe {
             self.m_control_byte = self.m_read_point.read() as u16;
         }
 
         let elem_type = self.get_element_type();
-        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type), Err(chip_error_invalid_tlv_element!()));
-
+        verify_or_return_error!(
+            tlv_types::is_valid_tlv_type(elem_type),
+            Err(chip_error_invalid_tlv_element!())
+        );
 
         // we have check the range in is_valid_tlv_type.
-        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8).unwrap();
+        let tag_control = TLVTagControl::try_from(
+            (self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8,
+        )
+        .unwrap();
 
-        let tag_bytes = Self::TAG_SIZES[(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
+        let tag_bytes = Self::TAG_SIZES
+            [(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
 
         let len_or_val_field_size = tlv_types::get_tlv_field_size(elem_type);
 
@@ -444,22 +534,42 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                     self.m_elem_len_or_val = 0;
                 }
                 1 => {
-                    self.m_elem_len_or_val = u8::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u8")) as u64;
-                },
+                    self.m_elem_len_or_val = u8::from_le_bytes(
+                        staging_buf[(1 + tag_size)..(1 + tag_size + (val_or_len_bytes as usize))]
+                            .try_into()
+                            .expect("read_data: cannot get u8"),
+                    ) as u64;
+                }
                 2 => {
-                    self.m_elem_len_or_val = u16::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u16")) as u64;
-                },
+                    self.m_elem_len_or_val = u16::from_le_bytes(
+                        staging_buf[(1 + tag_size)..(1 + tag_size + (val_or_len_bytes as usize))]
+                            .try_into()
+                            .expect("read_data: cannot get u16"),
+                    ) as u64;
+                }
                 4 => {
-                    self.m_elem_len_or_val = u32::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u32")) as u64;
-                },
+                    self.m_elem_len_or_val = u32::from_le_bytes(
+                        staging_buf[(1 + tag_size)..(1 + tag_size + (val_or_len_bytes as usize))]
+                            .try_into()
+                            .expect("read_data: cannot get u32"),
+                    ) as u64;
+                }
                 8 => {
-                    self.m_elem_len_or_val = u64::from_le_bytes(staging_buf[(1+tag_size)..(1+tag_size + (val_or_len_bytes as usize))].try_into().expect("read_data: cannot get u64"));
-                },
+                    self.m_elem_len_or_val = u64::from_le_bytes(
+                        staging_buf[(1 + tag_size)..(1 + tag_size + (val_or_len_bytes as usize))]
+                            .try_into()
+                            .expect("read_data: cannot get u64"),
+                    );
+                }
                 _ => {
                     return Err(chip_error_not_implemented!());
                 }
             }
-            verify_or_return_error!(!tlv_types::tlv_type_has_length(elem_type) || self.m_elem_len_or_val <= (u32::MAX as u64), Err(chip_error_not_implemented!()));
+            verify_or_return_error!(
+                !tlv_types::tlv_type_has_length(elem_type)
+                    || self.m_elem_len_or_val <= (u32::MAX as u64),
+                Err(chip_error_not_implemented!())
+            );
         } else {
             return Err(chip_error_not_implemented!());
         }
@@ -486,20 +596,20 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
                         chip_log_detail!(Inet, "read done here? ");
                         return Err(chip_error_invalid_tlv_tag!());
                     }
-                },
+                }
                 TlvType::KtlvTypeStructure => {
                     if self.m_elem_tag == tlv_tags::anonymous_tag() {
                         return Err(chip_error_invalid_tlv_tag!());
                     }
-                },
+                }
                 TlvType::KtlvTypeArray => {
                     if self.m_elem_tag != tlv_tags::anonymous_tag() {
                         return Err(chip_error_invalid_tlv_tag!());
                     }
-                },
+                }
                 TlvType::KtlvTypeUnknownContainer | TlvType::KtlvTypeList => {
                     // do nothing
-                },
+                }
                 _ => {
                     return Err(chip_error_incorrect_state!());
                 }
@@ -518,19 +628,27 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
 
     pub fn get_element_head_length(&self) -> Result<u8, ChipError> {
         let elem_type = self.get_element_type();
-        verify_or_return_error!(tlv_types::is_valid_tlv_type(elem_type),
-            Err(chip_error_invalid_tlv_element!()));
+        verify_or_return_error!(
+            tlv_types::is_valid_tlv_type(elem_type),
+            Err(chip_error_invalid_tlv_element!())
+        );
 
-        let tag_control = TLVTagControl::try_from((self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8).unwrap();
+        let tag_control = TLVTagControl::try_from(
+            (self.m_control_byte as u8) & (TLVTagControlMS::KTLVTagControlMask as u8) as u8,
+        )
+        .unwrap();
 
-        let tag_bytes = Self::TAG_SIZES[(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
+        let tag_bytes = Self::TAG_SIZES
+            [(tag_control >> (TLVTagControlMS::KTLVTagControlShift as u32)) as usize];
 
         let len_or_val_field_size = tlv_types::get_tlv_field_size(elem_type);
 
         let val_or_len_bytes = tlv_types::tlv_field_size_to_bytes(len_or_val_field_size);
 
-        verify_or_return_error!((1 + tag_bytes + val_or_len_bytes) <= u8::MAX,
-            Err(chip_error_internal!()));
+        verify_or_return_error!(
+            (1 + tag_bytes + val_or_len_bytes) <= u8::MAX,
+            Err(chip_error_internal!())
+        );
 
         return Ok((1 + tag_bytes + val_or_len_bytes) as u8);
     }
@@ -539,8 +657,10 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
         let mut reader = self.clone();
 
         while reader.next().is_ok() {
-            verify_or_return_error!(TlvType::KtlvTypeNotSpecified != reader.get_type(),
-                Err(chip_error_invalid_tlv_element!()));
+            verify_or_return_error!(
+                TlvType::KtlvTypeNotSpecified != reader.get_type(),
+                Err(chip_error_invalid_tlv_element!())
+            );
             if *tag == reader.get_tag() {
                 return Ok(reader.clone());
             }
@@ -550,8 +670,10 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     }
 
     pub fn count_remaining_in_container(&self) -> Result<isize, ChipError> {
-        verify_or_return_error!(TlvType::KtlvTypeNotSpecified != self.m_container_type,
-           Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(
+            TlvType::KtlvTypeNotSpecified != self.m_container_type,
+            Err(chip_error_incorrect_state!())
+        );
 
         let mut reader = self.clone();
         let mut count: isize = 0;
@@ -567,14 +689,13 @@ impl<BackingStoreType> TlvReaderBasic<BackingStoreType>
     }
 }
 
-
 impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
-    where 
-        BackingStoreType: TlvBackingStore
+where
+    BackingStoreType: TlvBackingStore,
 {
     type BackingStoreType = BackingStoreType;
 
-    fn init(&mut self, data: * const u8, data_len: usize) {
+    fn init(&mut self, data: *const u8, data_len: usize) {
         self.m_backing_store = ptr::null_mut();
         self.m_read_point = data;
         unsafe {
@@ -588,13 +709,21 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         self.m_implicit_profile_id = TlvCommonProfiles::KprofileIdNotSpecified as u32;
     }
 
-    fn init_backing_store(&mut self, backing_store: * mut Self::BackingStoreType, max_len: u32) -> ChipErrorResult {
+    fn init_backing_store(
+        &mut self,
+        backing_store: *mut Self::BackingStoreType,
+        max_len: u32,
+    ) -> ChipErrorResult {
         self.m_backing_store = backing_store;
         self.m_read_point = ptr::null_mut();
         let mut buf_len: usize = 0;
 
         unsafe {
-            (*self.m_backing_store).on_init_reader(self as _, ptr::addr_of_mut!(self.m_read_point), ptr::addr_of_mut!(buf_len))?;
+            (*self.m_backing_store).on_init_reader(
+                self as _,
+                ptr::addr_of_mut!(self.m_read_point),
+                ptr::addr_of_mut!(buf_len),
+            )?;
             self.m_buf_end = self.m_read_point.add(buf_len as usize);
         }
 
@@ -606,7 +735,7 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         self.m_implicit_profile_id = TlvCommonProfiles::KprofileIdNotSpecified as u32;
 
         self.m_app_data = ptr::null_mut();
-        
+
         chip_ok!()
     }
 
@@ -616,8 +745,10 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
         let elem_type = self.get_element_type();
 
-        verify_or_return_error!(elem_type != TlvElementType::EndOfContainer,
-            Err(chip_error_end_of_tlv!()));
+        verify_or_return_error!(
+            elem_type != TlvElementType::EndOfContainer,
+            Err(chip_error_end_of_tlv!())
+        );
 
         if tlv_types::tlv_type_is_string(elem_type) && self.get_length() != 0 {
             self.ensure_data(chip_error_tlv_underrun!())?;
@@ -633,10 +764,14 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn expect(&mut self, expected_tag: Tag) -> ChipErrorResult {
-        verify_or_return_error!(self.get_type() != TlvType::KtlvTypeNotSpecified,
-            Err(chip_error_wrong_tlv_type!()));
-        verify_or_return_error!(self.get_tag() == expected_tag,
-            Err(chip_error_unexpected_tlv_element!()));
+        verify_or_return_error!(
+            self.get_type() != TlvType::KtlvTypeNotSpecified,
+            Err(chip_error_wrong_tlv_type!())
+        );
+        verify_or_return_error!(
+            self.get_tag() == expected_tag,
+            Err(chip_error_unexpected_tlv_element!())
+        );
         chip_ok!()
     }
 
@@ -647,30 +782,34 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn expect_type_tag(&mut self, expected_type: TlvType, expected_tag: Tag) -> ChipErrorResult {
-        verify_or_return_error!(self.get_type() == expected_type,
-            Err(chip_error_wrong_tlv_type!()));
-        verify_or_return_error!(self.get_tag() == expected_tag,
-            Err(chip_error_unexpected_tlv_element!()));
+        verify_or_return_error!(
+            self.get_type() == expected_type,
+            Err(chip_error_wrong_tlv_type!())
+        );
+        verify_or_return_error!(
+            self.get_tag() == expected_tag,
+            Err(chip_error_unexpected_tlv_element!())
+        );
         chip_ok!()
     }
 
     fn get_type(&self) -> TlvType {
         let ele_type = self.get_element_type();
         match ele_type {
-            TlvElementType::EndOfContainer => {
-                TlvType::KtlvTypeNotSpecified
-            },
+            TlvElementType::EndOfContainer => TlvType::KtlvTypeNotSpecified,
             TlvElementType::FloatingPointNumber32 | TlvElementType::FloatingPointNumber64 => {
                 TlvType::KtlvTypeFloatingPointNumber
-            },
+            }
             TlvElementType::NotSpecified => {
                 return TlvType::from(ele_type as i16);
-            },
+            }
             n if n >= TlvElementType::Null => {
                 return TlvType::from(ele_type as i16);
-            },
+            }
             _ => {
-                return TlvType::from(((ele_type as u8) & !(TLVTypeMask::KTLVTypeSizeMask as u8)) as i16);
+                return TlvType::from(
+                    ((ele_type as u8) & !(TLVTypeMask::KTLVTypeSizeMask as u8)) as i16,
+                );
             }
         }
     }
@@ -693,15 +832,9 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     fn get_boolean(&self) -> Result<bool, ChipError> {
         let ele_type = self.get_element_type();
         match ele_type {
-            TlvElementType::BooleanFalse => {
-                Ok(false)
-            },
-            TlvElementType::BooleanTrue => {
-                Ok(true)
-            },
-            _ => {
-                Err(chip_error_wrong_tlv_type!())
-            }
+            TlvElementType::BooleanFalse => Ok(false),
+            TlvElementType::BooleanTrue => Ok(true),
+            _ => Err(chip_error_wrong_tlv_type!()),
         }
     }
 
@@ -767,32 +900,21 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
     fn get_i64(&self) -> Result<i64, ChipError> {
         match self.get_element_type() {
-            TlvElementType::Int8 => {
-                Ok((self.m_elem_len_or_val as i8) as i64)
-            },
-            TlvElementType::Int16 => {
-                Ok((self.m_elem_len_or_val as i16) as i64)
-            },
-            TlvElementType::Int32 => {
-                Ok((self.m_elem_len_or_val as i32) as i64)
-            },
-            TlvElementType::Int64 => {
-                Ok(self.m_elem_len_or_val as i64)
-            },
-            _ => {
-                Err(chip_error_wrong_tlv_type!())
-            }
+            TlvElementType::Int8 => Ok((self.m_elem_len_or_val as i8) as i64),
+            TlvElementType::Int16 => Ok((self.m_elem_len_or_val as i16) as i64),
+            TlvElementType::Int32 => Ok((self.m_elem_len_or_val as i32) as i64),
+            TlvElementType::Int64 => Ok(self.m_elem_len_or_val as i64),
+            _ => Err(chip_error_wrong_tlv_type!()),
         }
     }
 
     fn get_u64(&self) -> Result<u64, ChipError> {
         match self.get_element_type() {
-            TlvElementType::UInt8 | TlvElementType::UInt16 | TlvElementType::UInt32 | TlvElementType::UInt64 => {
-                Ok(self.m_elem_len_or_val)
-            },
-            _ => {
-                Err(chip_error_wrong_tlv_type!())
-            }
+            TlvElementType::UInt8
+            | TlvElementType::UInt16
+            | TlvElementType::UInt32
+            | TlvElementType::UInt64 => Ok(self.m_elem_len_or_val),
+            _ => Err(chip_error_wrong_tlv_type!()),
         }
     }
 
@@ -801,19 +923,22 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
 
         unsafe {
             return Ok(core::slice::from_raw_parts(val, self.get_length()));
-         }
+        }
     }
 
-    fn get_bytes_raw(&mut self, buf: * mut u8, buf_len: usize) -> ChipErrorResult {
-        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
-          Err(chip_error_wrong_tlv_type!()));
+    fn get_bytes_raw(&mut self, buf: *mut u8, buf_len: usize) -> ChipErrorResult {
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_string(self.get_element_type()),
+            Err(chip_error_wrong_tlv_type!())
+        );
 
         if self.m_elem_len_or_val > buf_len as u64 {
             return Err(chip_error_buffer_too_small!());
         }
 
         unsafe {
-            let mut buf_slice = core::slice::from_raw_parts_mut(buf, self.m_elem_len_or_val as usize);
+            let mut buf_slice =
+                core::slice::from_raw_parts_mut(buf, self.m_elem_len_or_val as usize);
 
             self.read_data(buf_slice)?;
         }
@@ -824,8 +949,10 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
     }
 
     fn get_string(&mut self) -> Result<Option<&str>, ChipError> {
-        verify_or_return_error!(tlv_types::tlv_type_is_utf8_string(self.get_element_type()),
-          Err(chip_error_wrong_tlv_type!()));
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_utf8_string(self.get_element_type()),
+            Err(chip_error_wrong_tlv_type!())
+        );
 
         let val = self.get_data_ptr()?;
 
@@ -833,18 +960,22 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
             return Ok(None);
         }
         unsafe {
-            let end = core::slice::from_raw_parts(val, self.get_length()).iter().position(|&b| b == 0x1F).
-                unwrap_or(self.get_length());
+            let end = core::slice::from_raw_parts(val, self.get_length())
+                .iter()
+                .position(|&b| b == 0x1F)
+                .unwrap_or(self.get_length());
 
             return Ok(core::str::from_utf8(core::slice::from_raw_parts(val, end)).ok());
         }
     }
 
-    fn get_string_raw(&mut self, buf: * mut u8, buf_size: usize) -> ChipErrorResult {
-        verify_or_return_error!(tlv_types::tlv_type_is_string(self.get_element_type()),
-          Err(chip_error_wrong_tlv_type!()));
+    fn get_string_raw(&mut self, buf: *mut u8, buf_size: usize) -> ChipErrorResult {
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_string(self.get_element_type()),
+            Err(chip_error_wrong_tlv_type!())
+        );
 
-        if (self.m_elem_len_or_val + 1)> buf_size as u64 {
+        if (self.m_elem_len_or_val + 1) > buf_size as u64 {
             return Err(chip_error_buffer_too_small!());
         }
 
@@ -855,11 +986,12 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         return self.get_bytes_raw(buf, buf_size - 1);
     }
 
-
     fn enter_container(&mut self) -> Result<TlvType, ChipError> {
         let elem_type = self.get_element_type();
-        verify_or_return_error!(tlv_types::tlv_elem_type_is_container(elem_type),
-            Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(
+            tlv_types::tlv_elem_type_is_container(elem_type),
+            Err(chip_error_incorrect_state!())
+        );
 
         let outer_container_type = self.m_container_type;
         self.m_container_type = TlvType::from(elem_type);
@@ -930,18 +1062,20 @@ impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
         chip_ok!()
     }
 
-    fn get_backing_store(&mut self) -> * mut Self::BackingStoreType {
+    fn get_backing_store(&mut self) -> *mut Self::BackingStoreType {
         ptr::null_mut()
     }
 
-    fn get_read_point(&self) -> * const u8 {
+    fn get_read_point(&self) -> *const u8 {
         self.m_read_point
     }
 
     fn skip(&mut self) -> ChipErrorResult {
         let elem_type = self.get_element_type();
-        verify_or_return_error!(elem_type != TlvElementType::EndOfContainer,
-            Err(chip_error_end_of_tlv!()));
+        verify_or_return_error!(
+            elem_type != TlvElementType::EndOfContainer,
+            Err(chip_error_end_of_tlv!())
+        );
 
         if tlv_types::tlv_elem_type_is_container(elem_type) {
             let mut outer_container_type = self.enter_container()?;
@@ -973,10 +1107,10 @@ mod test {
     use crate::chip::chip_lib::core::tlv_backing_store::TlvBackingStore;
 
     mod no_backing {
-        use super::*;
         use super::super::*;
-        use std::*;
+        use super::*;
         use crate::chip::chip_lib::core::tlv_writer::TlvWriter;
+        use std::*;
 
         /*
         struct DummyBackStore;
@@ -1025,91 +1159,210 @@ mod test {
         #[test]
         fn init() {
             let reader = setup();
-            assert_eq!(1,1);
+            assert_eq!(1, 1);
         }
 
         #[test]
         fn get_boolean_false() {
             let mut reader = setup_with_values(&[0x08]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_boolean().is_ok_and(|v| v == false));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_boolean().is_ok_and(|v| v == false));
         }
 
         #[test]
         fn get_boolean_true() {
             let mut reader = setup_with_values(&[0x09]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_boolean().is_ok_and(|v| v == true));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_boolean().is_ok_and(|v| v == true));
         }
 
         #[test]
         fn get_i8_value_42() {
             let mut reader = setup_with_values(&[0x00, 0x2a]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_i8().is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_i8().is_ok_and(|v| v == 42));
         }
 
         #[test]
         fn get_i8_value_neg_17() {
             let mut reader = setup_with_values(&[0x00, 0xef]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == -17)
+            );
         }
 
         #[test]
         fn get_u8_value_neg_42() {
             let mut reader = setup_with_values(&[0x04, 0x2a]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_u8().inspect_err(|e| println!("get u8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_u8()
+                    .inspect_err(|e| println!("get u8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
         }
 
         #[test]
         fn get_i16_value_42() {
             let mut reader = setup_with_values(&[0x01, 0x2a, 0x00]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i16().inspect_err(|e| println!("get i16 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i16()
+                    .inspect_err(|e| println!("get i16 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
         }
 
         #[test]
         fn get_i32_value_neg_170000() {
             let mut reader = setup_with_values(&[0x02, 0xf0, 0x67, 0xfd, 0xff]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i32().inspect_err(|e| println!("get i32 err {}", e)).is_ok_and(|v| v == -170000));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i32()
+                    .inspect_err(|e| println!("get i32 err {}", e))
+                    .is_ok_and(|v| v == -170000)
+            );
         }
 
         #[test]
         fn get_i64_value_40000000000() {
-            let mut reader = setup_with_values(&[0x03 ,0x00 ,0x90 ,0x2f ,0x50 ,0x09 ,0x00 ,0x00 ,0x00]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i64().inspect_err(|e| println!("get i64 err {}", e)).is_ok_and(|v| v == 40000000000));
+            let mut reader =
+                setup_with_values(&[0x03, 0x00, 0x90, 0x2f, 0x50, 0x09, 0x00, 0x00, 0x00]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i64()
+                    .inspect_err(|e| println!("get i64 err {}", e))
+                    .is_ok_and(|v| v == 40000000000)
+            );
         }
 
         #[test]
         fn get_UTF8_string_1_byte_length_hello() {
-            let mut reader = setup_with_values(&[0x0c ,0x06 ,0x48 ,0x65 ,0x6c ,0x6c ,0x6f ,0x21]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_string().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!")));
+            let mut reader = setup_with_values(&[0x0c, 0x06, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_string()
+                    .inspect_err(|e| println!("get string err {}", e))
+                    .is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!"))
+            );
         }
 
         #[test]
         fn get_octet_string_1_byte_length_0_4() {
-            let mut reader = setup_with_values(&[0x10 ,0x05 ,0x00 ,0x01 ,0x02 ,0x03 ,0x04]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_bytes().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.len() == 5 && s[0] == 0x00 && 
-                    s[1] == 0x01 && s[2] == 0x02 && s[3] == 0x03 && s[4] == 0x04 ));
+            let mut reader = setup_with_values(&[0x10, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_bytes()
+                    .inspect_err(|e| println!("get string err {}", e))
+                    .is_ok_and(|s| s.len() == 5
+                        && s[0] == 0x00
+                        && s[1] == 0x01
+                        && s[2] == 0x02
+                        && s[3] == 0x03
+                        && s[4] == 0x04)
+            );
         }
 
         #[test]
         fn get_null() {
             let mut reader = setup_with_values(&[0x14]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             assert_eq!(TlvType::KtlvTypeNull, reader.get_type());
         }
 
         #[test]
         fn empty_struct() {
             let mut reader = setup_with_values(&[0x15, 0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             assert_eq!(TlvType::KtlvTypeStructure, reader.get_type());
             assert_eq!(0, reader.get_length());
         }
@@ -1117,7 +1370,13 @@ mod test {
         #[test]
         fn empty_array() {
             let mut reader = setup_with_values(&[0x16, 0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             assert_eq!(TlvType::KtlvTypeArray, reader.get_type());
             assert_eq!(0, reader.get_length());
         }
@@ -1125,7 +1384,13 @@ mod test {
         #[test]
         fn empty_list() {
             let mut reader = setup_with_values(&[0x17, 0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             assert_eq!(TlvType::KtlvTypeList, reader.get_type());
             assert_eq!(0, reader.get_length());
         }
@@ -1134,113 +1399,340 @@ mod test {
         fn structure_test_1() {
             // Structure, two context specific tags, Signed Inte
             //  ger, 1 octet values, {0 = 42, 1 = -17}
-            let mut reader = setup_with_values(&[0x15 ,0x20 ,0x00 ,0x2a ,0x20 ,0x01 ,0xef ,0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            let mut reader = setup_with_values(&[0x15, 0x20, 0x00, 0x2a, 0x20, 0x01, 0xef, 0x18]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             // enter the structure
-            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            let outer_container = reader
+                .enter_container()
+                .inspect_err(|e| println!("enter container err {}", e));
             assert_eq!(true, outer_container.is_ok());
             let outer_container = outer_container.unwrap();
             // read first element
-            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::context_tag(0x00))
+                    .inspect_err(|e| println!("next_tag err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
             // read second element
-            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x01)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::context_tag(0x01))
+                    .inspect_err(|e| println!("next_tag err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == -17)
+            );
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
-
         }
 
         #[test]
         fn array_test_1() {
             //Array, Signed Integer, 1-octet values, [0, 1, 2, 3, 4]
-            let mut reader = setup_with_values(&[0x16 ,0x00 ,0x00 ,0x00 ,0x01 ,0x00 ,0x02 ,0x00 ,0x03 ,0x00 ,0x04 ,0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            let mut reader = setup_with_values(&[
+                0x16, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x18,
+            ]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             // enter the structure
-            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            let outer_container = reader
+                .enter_container()
+                .inspect_err(|e| println!("enter container err {}", e));
             assert_eq!(true, outer_container.is_ok());
             let outer_container = outer_container.unwrap();
             // read first element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 0));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 0)
+            );
             // read second element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 1));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 1)
+            );
             // read third element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 2));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 2)
+            );
             // read fourth element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 3));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 3)
+            );
             // read fifth element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 4));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 4)
+            );
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
-
         }
 
         #[test]
         fn list_test_1() {
             // List, mix of anonymous and context tags, Signed Integer, 1 octet values, [[1, 0 = 42, 2, 3, 0 =-17]]
-            let mut reader = setup_with_values(&[0x17 ,0x00 ,0x01 ,0x20 ,0x00 ,0x2a ,0x00 ,0x02 ,0x00 ,0x03 ,0x20 ,0x00 ,0xef ,0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            let mut reader = setup_with_values(&[
+                0x17, 0x00, 0x01, 0x20, 0x00, 0x2a, 0x00, 0x02, 0x00, 0x03, 0x20, 0x00, 0xef, 0x18,
+            ]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             // enter the structure
-            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            let outer_container = reader
+                .enter_container()
+                .inspect_err(|e| println!("enter container err {}", e));
             assert_eq!(true, outer_container.is_ok());
             let outer_container = outer_container.unwrap();
             // read first element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 1));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 1)
+            );
             // read second element
-            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::context_tag(0x00))
+                    .inspect_err(|e| println!("next_tag err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
             // read third element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 2));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 2)
+            );
             // read fourth element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 3));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 3)
+            );
             // read fifth element
-            assert_eq!(true, reader.next_tag(tlv_tags::context_tag(0x00)).inspect_err(|e| println!("next_tag err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::context_tag(0x00))
+                    .inspect_err(|e| println!("next_tag err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == -17)
+            );
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
-
         }
 
         #[test]
         fn array_test_2() {
             // Array, mix of element types, [42, -170000, {}, "Hello!"]
-            let mut reader = setup_with_values(&[0x16 ,0x00 ,0x2a ,0x02 ,0xf0 ,0x67 ,0xfd ,0xff ,0x15 ,0x18 ,0x0c ,0x06 ,0x48 ,0x65 ,0x6c ,0x6c ,0x6f ,0x21 ,0x18]);
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            let mut reader = setup_with_values(&[
+                0x16, 0x00, 0x2a, 0x02, 0xf0, 0x67, 0xfd, 0xff, 0x15, 0x18, 0x0c, 0x06, 0x48, 0x65,
+                0x6c, 0x6c, 0x6f, 0x21, 0x18,
+            ]);
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             // enter the structure
-            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            let outer_container = reader
+                .enter_container()
+                .inspect_err(|e| println!("enter container err {}", e));
             assert_eq!(true, outer_container.is_ok());
             let outer_container = outer_container.unwrap();
             // read first element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
             // read second element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i32().inspect_err(|e| println!("get i32 err {}", e)).is_ok_and(|v| v == -170000));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i32()
+                    .inspect_err(|e| println!("get i32 err {}", e))
+                    .is_ok_and(|v| v == -170000)
+            );
             // read third element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             assert_eq!(TlvType::KtlvTypeStructure, reader.get_type());
             // read fourth element
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_string().inspect_err(|e| println!("get string err {}", e)).is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!")));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_string()
+                    .inspect_err(|e| println!("get string err {}", e))
+                    .is_ok_and(|s| s.is_some_and(|ss| ss == "Hello!"))
+            );
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
-
         }
 
         #[test]
         fn get_u8_value_42() {
             // Anonymous tag, Unsigned Integer, 1-octet value, 42U
             let mut reader = setup_with_values(&[0x04, 0x2a]);
-            assert_eq!(true, reader.next_tag(tlv_tags::anonymous_tag()).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::anonymous_tag())
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
         }
 
         #[test]
@@ -1254,17 +1746,29 @@ mod test {
         #[test]
         fn get_u8_value_42_common_profile_tag_1() {
             //Common profile tag 1, Unsigned Integer, 1-octet value, Matter::1 = 42U
-            let mut reader = setup_with_values(&[0x44 ,0x01 ,0x00 ,0x2a]);
-            assert_eq!(true, reader.next_tag(tlv_tags::common_tag(0x01)).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            let mut reader = setup_with_values(&[0x44, 0x01, 0x00, 0x2a]);
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::common_tag(0x01))
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
         }
 
         #[test]
         fn get_u8_value_42_common_profile_tag_100000() {
             // Common profile tag 100000, Unsigned Integer, 1 octet value, Matter::100000 = 42U
-            let mut reader = setup_with_values(&[0x64 ,0xa0 ,0x86 ,0x01 ,0x00 ,0x2a]);
-            assert_eq!(true, reader.next_tag(tlv_tags::common_tag(100000)).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            let mut reader = setup_with_values(&[0x64, 0xa0, 0x86, 0x01, 0x00, 0x2a]);
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::common_tag(100000))
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
         }
 
         #[test]
@@ -1272,9 +1776,15 @@ mod test {
             // Fully qualified tag, Vendor ID 0xFFF1/65521, profile
             // number 0xDEED/57069, 2-octet tag 1, Unsigned
             // Integer, 1-octet value 42, 65521::57069:1 = 42U
-            let mut reader = setup_with_values(&[0xc4 ,0xf1 ,0xff ,0xed ,0xde ,0x01 ,0x00 ,0x2a]);
-            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 1)).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            let mut reader = setup_with_values(&[0xc4, 0xf1, 0xff, 0xed, 0xde, 0x01, 0x00, 0x2a]);
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 1))
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
         }
 
         #[test]
@@ -1283,9 +1793,16 @@ mod test {
             // number 0xDEED/57069, 4-octet tag
             // 0xAA55FEED/2857762541, Unsigned Integer, 1-octet
             // value 42, 65521::57069:2857762541 = 42U
-            let mut reader = setup_with_values(&[0xe4 ,0xf1 ,0xff ,0xed ,0xde ,0xed ,0xfe ,0x55 ,0xaa ,0x2a]);
-            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55FEED)).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            let mut reader =
+                setup_with_values(&[0xe4, 0xf1, 0xff, 0xed, 0xde, 0xed, 0xfe, 0x55, 0xaa, 0x2a]);
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55FEED))
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
         }
 
         #[test]
@@ -1296,24 +1813,44 @@ mod test {
             // labeled using a fully qualified tag under
             // the same profile, with 2-octet tag 0xAA55/43605.
             // 65521::57069:1 = {65521::57069:43605 = 42U}
-            let mut reader = setup_with_values(&[0xd5 ,0xf1 ,0xff ,0xed ,0xde ,0x01 ,0x00 ,0xc4 ,0xf1 ,0xff ,0xed ,0xde ,0x55 ,0xaa ,0x2a ,0x18]);
-            assert_eq!(true, reader.next_type_tag(TlvType::KtlvTypeStructure, tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0x01)).inspect_err(|e| println!("next err {}", e)).is_ok());
+            let mut reader = setup_with_values(&[
+                0xd5, 0xf1, 0xff, 0xed, 0xde, 0x01, 0x00, 0xc4, 0xf1, 0xff, 0xed, 0xde, 0x55, 0xaa,
+                0x2a, 0x18,
+            ]);
+            assert_eq!(
+                true,
+                reader
+                    .next_type_tag(
+                        TlvType::KtlvTypeStructure,
+                        tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0x01)
+                    )
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
             // enter the structure
-            let outer_container = reader.enter_container().inspect_err(|e| println!("enter container err {}", e));
+            let outer_container = reader
+                .enter_container()
+                .inspect_err(|e| println!("enter container err {}", e));
             assert_eq!(true, outer_container.is_ok());
             let outer_container = outer_container.unwrap();
-            assert_eq!(true, reader.next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55)).inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true,reader.get_u8().is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next_tag(tlv_tags::profile_tag_vendor_id(0xFFF1, 0xDEED, 0xAA55))
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(true, reader.get_u8().is_ok_and(|v| v == 42));
             // exit the structure
             assert_eq!(true, reader.exit_container(outer_container).is_ok());
         }
     } // end of no_backing test
     mod backing {
-        use super::*;
         use super::super::*;
-        use std::*;
-        use std::collections::VecDeque;
+        use super::*;
         use crate::chip::chip_lib::core::tlv_reader::TlvReader;
+        use std::collections::VecDeque;
+        use std::*;
 
         const TMP_BUF_LEN: usize = 4;
 
@@ -1347,18 +1884,27 @@ mod test {
         impl VecBackingStore {
             fn add_new_data(&mut self, data: &[u8]) {
                 let len = std::cmp::min(TMP_BUF_LEN, data.len());
-                self.m_back.push_back(VecDeque::from(Vec::from(&data[0..len])));
+                self.m_back
+                    .push_back(VecDeque::from(Vec::from(&data[0..len])));
             }
         }
 
         impl TlvBackingStore for VecBackingStore {
-            fn on_init_reader<TlvReaderType: TlvReader>(&mut self, reader: * mut TlvReaderType, buf: * mut * const u8, buf_len: * mut usize) -> ChipErrorResult {
+            fn on_init_reader<TlvReaderType: TlvReader>(
+                &mut self,
+                reader: *mut TlvReaderType,
+                buf: *mut *const u8,
+                buf_len: *mut usize,
+            ) -> ChipErrorResult {
                 return self.get_next_buffer(reader, buf, buf_len);
             }
 
-            fn get_next_buffer<TlvReaderType: TlvReader>(&mut self, _reader: * mut TlvReaderType,
-                buf: * mut * const u8, buf_len: * mut usize) -> ChipErrorResult {
-
+            fn get_next_buffer<TlvReaderType: TlvReader>(
+                &mut self,
+                _reader: *mut TlvReaderType,
+                buf: *mut *const u8,
+                buf_len: *mut usize,
+            ) -> ChipErrorResult {
                 if let Some(queue) = self.m_back.front_mut() {
                     // get the front queue data
                     let len = std::cmp::min(TMP_BUF_LEN, queue.len());
@@ -1386,10 +1932,10 @@ mod test {
         }
         type TheTlvReader = TlvReaderBasic<VecBackingStore>;
 
-        fn setup(backing: * mut VecBackingStore) -> TheTlvReader {
+        fn setup(backing: *mut VecBackingStore) -> TheTlvReader {
             let mut reader = TheTlvReader::const_default();
             // to allow max_len > remaining_len, so we need a + 32 here
-            let _ = reader.init_backing_store(backing, (TMP_BUF_LEN  + 32) as u32);
+            let _ = reader.init_backing_store(backing, (TMP_BUF_LEN + 32) as u32);
 
             reader
         }
@@ -1398,14 +1944,25 @@ mod test {
         fn init() {
             let mut reader = TheTlvReader::const_default();
             let mut backing = VecBackingStore::default();
-            assert_eq!(true, reader.init_backing_store(ptr::addr_of_mut!(backing), TMP_BUF_LEN as u32).is_ok());
+            assert_eq!(
+                true,
+                reader
+                    .init_backing_store(ptr::addr_of_mut!(backing), TMP_BUF_LEN as u32)
+                    .is_ok()
+            );
         }
 
         #[test]
         fn read_with_empty_queue() {
             let mut backing = VecBackingStore::default();
             let mut reader = setup(ptr::addr_of_mut!(backing));
-            assert_eq!(false, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
+            assert_eq!(
+                false,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -1414,8 +1971,20 @@ mod test {
             // Signed, 1-octet value = 42
             backing.add_new_data(&[0x00, 0x2a]);
             let mut reader = setup(ptr::addr_of_mut!(backing));
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
         }
 
         #[test]
@@ -1426,10 +1995,34 @@ mod test {
             // Signed, 1-octet value = -17
             backing.add_new_data(&[0x00, 0xef]);
             let mut reader = setup(ptr::addr_of_mut!(backing));
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == 42));
-            assert_eq!(true, reader.next().inspect_err(|e| println!("next err {}", e)).is_ok());
-            assert_eq!(true, reader.get_i8().inspect_err(|e| println!("get i8 err {}", e)).is_ok_and(|v| v == -17));
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == 42)
+            );
+            assert_eq!(
+                true,
+                reader
+                    .next()
+                    .inspect_err(|e| println!("next err {}", e))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                reader
+                    .get_i8()
+                    .inspect_err(|e| println!("get i8 err {}", e))
+                    .is_ok_and(|v| v == -17)
+            );
         }
-    }// end of backing test
+    } // end of backing test
 }

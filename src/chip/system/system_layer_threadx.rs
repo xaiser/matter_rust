@@ -1,12 +1,12 @@
-use crate::ChipError;
 use super::system_layer::Layer;
 use crate::chip::chip_lib::support::object_life_cycle::ObjectLifeCycle;
+use crate::chip_core_error;
+use crate::chip_error_incorrect_state;
+use crate::chip_no_error;
+use crate::chip_sdk_error;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
-use crate::chip_no_error;
-use crate::chip_core_error;
-use crate::chip_sdk_error;
-use crate::chip_error_incorrect_state;
+use crate::ChipError;
 
 pub type LayerImpl = LayerImplThreadX;
 
@@ -24,8 +24,14 @@ impl LayerImplThreadX {
 
 impl Layer for LayerImplThreadX {
     fn init(&mut self) -> ChipError {
-        verify_or_return_error!(self.m_layer_state.set_initializing(), chip_error_incorrect_state!());
-        verify_or_return_error!(self.m_layer_state.set_initialized(), chip_error_incorrect_state!());
+        verify_or_return_error!(
+            self.m_layer_state.set_initializing(),
+            chip_error_incorrect_state!()
+        );
+        verify_or_return_error!(
+            self.m_layer_state.set_initialized(),
+            chip_error_incorrect_state!()
+        );
 
         return chip_no_error!();
     }
@@ -47,32 +53,31 @@ impl Drop for LayerImplThreadX {
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
+    use super::*;
+    use std::*;
 
-  mod new {
-      use super::super::*;
-      use std::*;
+    mod new {
+        use super::super::*;
+        use std::*;
 
-      fn set_up() {
-      }
+        fn set_up() {}
 
-      #[test]
-      fn new_layer() {
-          set_up();
-          let l = LayerImpl::default();
+        #[test]
+        fn new_layer() {
+            set_up();
+            let l = LayerImpl::default();
 
-          assert_eq!(false, l.is_initialized());
-      }
+            assert_eq!(false, l.is_initialized());
+        }
 
-      #[test]
-      fn init() {
-          set_up();
-          let mut l = LayerImpl::default();
+        #[test]
+        fn init() {
+            set_up();
+            let mut l = LayerImpl::default();
 
-          l.init();
+            l.init();
 
-          assert_eq!(true, l.is_initialized());
-      }
-  }
+            assert_eq!(true, l.is_initialized());
+        }
+    }
 }

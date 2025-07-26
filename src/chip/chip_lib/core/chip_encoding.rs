@@ -243,42 +243,42 @@ pub mod little_endian {
 
     #[inline]
     pub fn put_u8(p: &mut [u8], v: u8) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_u16(p: &mut [u8], v: u16) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_u32(p: &mut [u8], v: u32) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_u64(p: &mut [u8], v: u64) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_i8(p: &mut [u8], v: i8) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_i16(p: &mut [u8], v: i16) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_i32(p: &mut [u8], v: i32) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     #[inline]
     pub fn put_i64(p: &mut [u8], v: i64) {
-            p.copy_from_slice(&v.to_le_bytes());
+        p.copy_from_slice(&v.to_le_bytes());
     }
 
     macro_rules! define_write_raw {
@@ -306,10 +306,12 @@ pub mod little_endian {
     macro_rules! define_read_raw {
         ($name:ident, $ty:ty) => {
             #[inline]
-            pub fn $name(p: &mut * const u8) -> $ty {
+            pub fn $name(p: &mut *const u8) -> $ty {
                 unsafe {
                     let size = core::mem::size_of::<$ty>();
-                    let v = <$ty>::from_le_bytes(core::slice::from_raw_parts(*p, size).try_into().unwrap());
+                    let v = <$ty>::from_le_bytes(
+                        core::slice::from_raw_parts(*p, size).try_into().unwrap(),
+                    );
                     *p = (*p).add(size);
                     return v;
                 }
@@ -400,42 +402,42 @@ pub mod big_endian {
 
     #[inline]
     pub fn put_u8(p: &mut [u8], v: u8) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_u16(p: &mut [u8], v: u16) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_u32(p: &mut [u8], v: u32) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_u64(p: &mut [u8], v: u64) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_i8(p: &mut [u8], v: i8) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_i16(p: &mut [u8], v: i16) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_i32(p: &mut [u8], v: i32) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     #[inline]
     pub fn put_i64(p: &mut [u8], v: i64) {
-            p.copy_from_slice(&v.to_be_bytes());
+        p.copy_from_slice(&v.to_be_bytes());
     }
 
     macro_rules! define_write_raw {
@@ -463,10 +465,12 @@ pub mod big_endian {
     macro_rules! define_read_raw {
         ($name:ident, $ty:ty) => {
             #[inline]
-            pub fn $name(p: &mut * const u8) -> $ty {
+            pub fn $name(p: &mut *const u8) -> $ty {
                 unsafe {
                     let size = core::mem::size_of::<$ty>();
-                    let v = <$ty>::from_be_bytes(core::slice::from_raw_parts(*p, size).try_into().unwrap());
+                    let v = <$ty>::from_be_bytes(
+                        core::slice::from_raw_parts(*p, size).try_into().unwrap(),
+                    );
                     *p = (*p).add(size);
                     return v;
                 }

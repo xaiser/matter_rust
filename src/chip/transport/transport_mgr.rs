@@ -1,29 +1,34 @@
-use crate::chip::transport::PeerAddress;
-use crate::chip::system::system_packet_buffer::{PacketBufferHandle, PacketBuffer};
-use super::raw::base::{Base,Init,MessageTransportContext,RawTransportDelegate};
+use super::raw::base::{Base, Init, MessageTransportContext, RawTransportDelegate};
 use super::raw::tuple::Tuple;
 use super::transport_mgr_base::TransportMgrBase;
+use crate::chip::system::system_packet_buffer::{PacketBuffer, PacketBufferHandle};
+use crate::chip::transport::PeerAddress;
 
-use core::str::FromStr;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use crate::chip_log_error;
+use core::str::FromStr;
 
-use crate::ChipErrorResult;
 use crate::chip_ok;
+use crate::ChipErrorResult;
 
 use core::ptr;
 
 pub trait TransportMgrDelegate {
-    fn on_message_received(&mut self, source: PeerAddress, msg_buf: PacketBufferHandle, ctext: * const MessageTransportContext);
+    fn on_message_received(
+        &mut self,
+        source: PeerAddress,
+        msg_buf: PacketBufferHandle,
+        ctext: *const MessageTransportContext,
+    );
 }
 
 struct TransportMgrReceiver<SessionMgrType>
 where
     SessionMgrType: TransportMgrDelegate,
 {
-    pub m_session_mgr: * mut SessionMgrType,
+    pub m_session_mgr: *mut SessionMgrType,
 }
 
 impl<SessionMgrType> Default for TransportMgrReceiver<SessionMgrType>
@@ -41,11 +46,14 @@ impl<SessionMgrType> RawTransportDelegate for TransportMgrReceiver<SessionMgrTyp
 where
     SessionMgrType: TransportMgrDelegate,
 {
-    fn handle_message_received(&self, peer_address: PeerAddress, msg: PacketBufferHandle,
-        ctxt: * const MessageTransportContext)
-    {
+    fn handle_message_received(
+        &self,
+        peer_address: PeerAddress,
+        msg: PacketBufferHandle,
+        ctxt: *const MessageTransportContext,
+    ) {
         unsafe {
-            let pb: * mut PacketBuffer = msg.get_raw();
+            let pb: *mut PacketBuffer = msg.get_raw();
             if (*pb).has_chained_buffer() {
                 chip_log_error!(Inet, "message from {} dropped due to lower layers not ensuring a single packet buffer", peer_address);
                 return;
@@ -54,7 +62,11 @@ where
             if self.m_session_mgr.is_null() == false {
                 (*self.m_session_mgr).on_message_received(peer_address, msg, ctxt);
             } else {
-                chip_log_error!(Inet, "message from {} is drooped since no handler set", peer_address);
+                chip_log_error!(
+                    Inet,
+                    "message from {} is drooped since no handler set",
+                    peer_address
+                );
             }
         }
     }
@@ -78,7 +90,7 @@ macro_rules! impl_for_transport_mgr {
             #[allow(dead_code)]
             pub fn init(&mut self, ps: ($(<$type as Init>::InitParamType,)+)) -> ChipErrorResult {
                 let err = self.m_transports.init(
-                    ($(ptr::addr_of_mut!(self.m_receiver) as * mut <$type as Base>::DelegateType,)+), 
+                    ($(ptr::addr_of_mut!(self.m_receiver) as * mut <$type as Base>::DelegateType,)+),
                     ps);
                 if err.is_success() == false {
                     return Err(err);
@@ -154,81 +166,103 @@ macro_rules! impl_transport_mgr_base_for_transport_mgr {
     };
 }
 
-
 impl_for_transport_mgr!(Type0);
-impl_for_transport_mgr!(Type0,Type1);
-impl_for_transport_mgr!(Type0,Type1,Type2);
+impl_for_transport_mgr!(Type0, Type1);
+impl_for_transport_mgr!(Type0, Type1, Type2);
 
 impl_default_for_transport_mgr!(Type0);
-impl_default_for_transport_mgr!(Type0,Type1);
-impl_default_for_transport_mgr!(Type0,Type1,Type2);
+impl_default_for_transport_mgr!(Type0, Type1);
+impl_default_for_transport_mgr!(Type0, Type1, Type2);
 
 impl_transport_mgr_base_for_transport_mgr!(Type0);
-impl_transport_mgr_base_for_transport_mgr!(Type0,Type1);
-impl_transport_mgr_base_for_transport_mgr!(Type0,Type1,Type2);
+impl_transport_mgr_base_for_transport_mgr!(Type0, Type1);
+impl_transport_mgr_base_for_transport_mgr!(Type0, Type1, Type2);
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
-  use crate::chip::transport::raw::test::{Test, TestListenParameter};
-  use crate::chip::inet::test_end_point::TestEndPointManager;
-  use crate::chip::inet::inet_layer::EndPointManager;
-  use crate::chip::platform::global::system_layer;
-  use crate::chip::system::system_layer::Layer;
-  use crate::chip::transport::raw::tuple::Tuple;
-  use crate::chip::inet::end_point_basis::DefaultWithMgr;
+    use super::*;
+    use crate::chip::inet::end_point_basis::DefaultWithMgr;
+    use crate::chip::inet::inet_layer::EndPointManager;
+    use crate::chip::inet::test_end_point::TestEndPointManager;
+    use crate::chip::platform::global::system_layer;
+    use crate::chip::system::system_layer::Layer;
+    use crate::chip::transport::raw::test::{Test, TestListenParameter};
+    use crate::chip::transport::raw::tuple::Tuple;
+    use std::*;
 
-  static mut END_POINT_MANAGER: TestEndPointManager = TestEndPointManager::default();
-  static mut TEST_PARAMS_1: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
-  static mut TEST_PARAMS_2: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> = mem::MaybeUninit::uninit();
+    static mut END_POINT_MANAGER: TestEndPointManager = TestEndPointManager::default();
+    static mut TEST_PARAMS_1: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> =
+        mem::MaybeUninit::uninit();
+    static mut TEST_PARAMS_2: mem::MaybeUninit<TestListenParameter<TestEndPointManager>> =
+        mem::MaybeUninit::uninit();
 
-  pub struct SessionMgrStub
-  {}
+    pub struct SessionMgrStub {}
 
-  impl SessionMgrStub {
-      pub const fn const_default() -> Self {
-          Self {}
-      }
-  }
+    impl SessionMgrStub {
+        pub const fn const_default() -> Self {
+            Self {}
+        }
+    }
 
-  impl TransportMgrDelegate for SessionMgrStub {
-    fn on_message_received(&mut self, _source: PeerAddress, _msg_buf: PacketBufferHandle, _ctext: * const MessageTransportContext)
-    {}
-  }
+    impl TransportMgrDelegate for SessionMgrStub {
+        fn on_message_received(
+            &mut self,
+            _source: PeerAddress,
+            _msg_buf: PacketBufferHandle,
+            _ctext: *const MessageTransportContext,
+        ) {
+        }
+    }
 
-  //type TransType = Test<TransportMgrReceiver<SessionMgrStub>>;
-  type MgrType = TransportMgr<(Test<TransportMgrReceiver<SessionMgrStub>>,Test<TransportMgrReceiver<SessionMgrStub>>), SessionMgrStub>;
-  static mut TRANS_MGR: mem::MaybeUninit<MgrType> = mem::MaybeUninit::uninit();
-  static mut SESSION_MGR: SessionMgrStub = SessionMgrStub::const_default();
+    //type TransType = Test<TransportMgrReceiver<SessionMgrStub>>;
+    type MgrType = TransportMgr<
+        (
+            Test<TransportMgrReceiver<SessionMgrStub>>,
+            Test<TransportMgrReceiver<SessionMgrStub>>,
+        ),
+        SessionMgrStub,
+    >;
+    static mut TRANS_MGR: mem::MaybeUninit<MgrType> = mem::MaybeUninit::uninit();
+    static mut SESSION_MGR: SessionMgrStub = SessionMgrStub::const_default();
 
-  fn set_up() {
-      unsafe {
-          /* reinit system layer */
-          let sl = system_layer();
-          (*sl).init();
+    fn set_up() {
+        unsafe {
+            /* reinit system layer */
+            let sl = system_layer();
+            (*sl).init();
 
-          /* reinit end point manager */
-          END_POINT_MANAGER = TestEndPointManager::default();
-          END_POINT_MANAGER.init(system_layer());
+            /* reinit end point manager */
+            END_POINT_MANAGER = TestEndPointManager::default();
+            END_POINT_MANAGER.init(system_layer());
 
-          /* reinit the test transport */
-          TEST_PARAMS_1.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
-          TEST_PARAMS_2.write(TestListenParameter::default(ptr::addr_of_mut!(END_POINT_MANAGER)));
+            /* reinit the test transport */
+            TEST_PARAMS_1.write(TestListenParameter::default(ptr::addr_of_mut!(
+                END_POINT_MANAGER
+            )));
+            TEST_PARAMS_2.write(TestListenParameter::default(ptr::addr_of_mut!(
+                END_POINT_MANAGER
+            )));
 
-          /* reinit the transport manager */
-          TRANS_MGR.write(MgrType::default());
-          SESSION_MGR = SessionMgrStub::const_default();
-      }
-  }
+            /* reinit the transport manager */
+            TRANS_MGR.write(MgrType::default());
+            SESSION_MGR = SessionMgrStub::const_default();
+        }
+    }
 
-  #[test]
-  fn init() {
-      unsafe {
-          set_up();
-          let tm = TRANS_MGR.assume_init_mut();
-          tm.m_receiver.m_session_mgr = ptr::addr_of_mut!(SESSION_MGR);
-          assert_eq!(true, tm.init((TEST_PARAMS_1.assume_init_mut().clone(), TEST_PARAMS_2.assume_init_mut().clone())).is_ok());
-      }
-  }
+    #[test]
+    fn init() {
+        unsafe {
+            set_up();
+            let tm = TRANS_MGR.assume_init_mut();
+            tm.m_receiver.m_session_mgr = ptr::addr_of_mut!(SESSION_MGR);
+            assert_eq!(
+                true,
+                tm.init((
+                    TEST_PARAMS_1.assume_init_mut().clone(),
+                    TEST_PARAMS_2.assume_init_mut().clone()
+                ))
+                .is_ok()
+            );
+        }
+    }
 }

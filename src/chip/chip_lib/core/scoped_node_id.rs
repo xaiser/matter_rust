@@ -1,7 +1,6 @@
-use crate::chip::{NodeId, FabricIndex};
-use crate::chip::chip_lib::core::node_id::{KUNDEFINED_NODE_ID, is_operational_node_id};
 use crate::chip::chip_lib::core::data_model_types::KUNDEFINED_FABRIC_INDEX;
-
+use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
+use crate::chip::{FabricIndex, NodeId};
 
 #[derive(PartialEq)]
 pub struct ScopedNodeId {
@@ -26,7 +25,7 @@ impl ScopedNodeId {
     pub fn default_with_ids(node_id: NodeId, fabric_index: FabricIndex) -> Self {
         Self {
             m_node_id: node_id,
-            m_fabric_index: fabric_index
+            m_fabric_index: fabric_index,
         }
     }
 
@@ -39,7 +38,7 @@ impl ScopedNodeId {
     }
 
     pub fn is_operational(&self) -> bool {
-        return (self.m_fabric_index != KUNDEFINED_FABRIC_INDEX) && is_operational_node_id(self.m_node_id);
+        return (self.m_fabric_index != KUNDEFINED_FABRIC_INDEX)
+            && is_operational_node_id(self.m_node_id);
     }
 }
-

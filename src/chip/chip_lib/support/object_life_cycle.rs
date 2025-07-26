@@ -2,11 +2,11 @@
 #[derive(PartialEq, Clone)]
 pub enum State {
     Uninitialized = 0, // Pre-initialized state.
-    Initializing  = 1, // State during intialization.
-    Initialized   = 2, // Initialized (active) state.
-    ShuttingDown  = 3, // State during shutdown.
-    Shutdown      = 4, // Post-shutdown state.
-    Destroyed     = 5, // Post-destructor state.
+    Initializing = 1,  // State during intialization.
+    Initialized = 2,   // Initialized (active) state.
+    ShuttingDown = 3,  // State during shutdown.
+    Shutdown = 4,      // Post-shutdown state.
+    Destroyed = 5,     // Post-destructor state.
 }
 
 pub struct ObjectLifeCycle {

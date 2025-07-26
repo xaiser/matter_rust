@@ -1,15 +1,12 @@
-pub use super::common::{State, ROOT_IDX, IdType};
+pub use super::common::{IdType, State, ROOT_IDX};
 
-pub struct HierarchyStateMachine<'a, E: Copy + 'a, const N:usize>
-{
+pub struct HierarchyStateMachine<'a, E: Copy + 'a, const N: usize> {
     m_states: [&'a dyn State<Event = E>; N],
     m_current_state: usize,
 }
 
-impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N>
-{
-    pub fn run(&mut self, event: E)
-    {
+impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N> {
+    pub fn run(&mut self, event: E) {
         if self.m_current_state >= self.m_states.len() {
             // TODO: Some error log
             return;
@@ -18,7 +15,8 @@ impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N>
         let mut next_event = Some(event);
         while next_event.is_some() {
             let mut next_state;
-            (next_event, next_state) = self.m_states[self.m_current_state].handle(next_event.take().unwrap());
+            (next_event, next_state) =
+                self.m_states[self.m_current_state].handle(next_event.take().unwrap());
 
             if let Some(new_state) = self.find(next_state) {
                 self.m_current_state = self.transition(self.m_current_state, new_state);
@@ -49,7 +47,7 @@ impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N>
         if let Some(common_parent) = self.find_common_parent(current, next) {
             // run exits from current -> common_parent(but not parent)
             let mut current_exit = Some(current);
-            while current_exit.is_some_and(|e| e !=  common_parent && e < self.m_states.len()) {
+            while current_exit.is_some_and(|e| e != common_parent && e < self.m_states.len()) {
                 let e = current_exit.take().unwrap();
                 self.m_states[e].exit();
                 current_exit = self.find(self.m_states[e].parent());
@@ -112,7 +110,7 @@ mod test {
     use super::*;
     use std::*;
 
-    mod init{
+    mod init {
         use super::super::*;
         pub struct DummyState;
 
@@ -127,7 +125,9 @@ mod test {
                 None
             }
 
-            fn id(&self) -> IdType { 0 }
+            fn id(&self) -> IdType {
+                0
+            }
         }
 
         pub struct DummyState1;
@@ -143,7 +143,9 @@ mod test {
                 None
             }
 
-            fn id(&self) -> IdType { 0 }
+            fn id(&self) -> IdType {
+                0
+            }
         }
 
         static STATIC_STATE: DummyState = DummyState;
@@ -158,14 +160,14 @@ mod test {
         fn init_state_machine() {
             let s = HierarchyStateMachine::<u8, 2> {
                 m_states: [&STATIC_STATE, &STATIC_STATE_1],
-                m_current_state: 0
+                m_current_state: 0,
             };
         }
     }
 
     mod find_parent {
         use super::super::*;
-        
+
         pub struct DummyState {
             id: IdType,
             parent: Option<IdType>,
@@ -182,7 +184,9 @@ mod test {
                 self.parent.clone()
             }
 
-            fn id(&self) -> IdType { self.id }
+            fn id(&self) -> IdType {
+                self.id
+            }
         }
 
         impl DummyState {
@@ -198,7 +202,7 @@ mod test {
         fn empty_hsm() {
             let s = HierarchyStateMachine::<u8, 0> {
                 m_states: [],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(None, s.find_common_parent(0, 0));
@@ -209,7 +213,7 @@ mod test {
             let s0 = DummyState::new(0, None);
             let s = HierarchyStateMachine::<u8, 1> {
                 m_states: [&s0],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(ROOT_IDX, s.find_common_parent(0, 0).unwrap());
@@ -220,7 +224,7 @@ mod test {
             let s0 = DummyState::new(0, None);
             let s = HierarchyStateMachine::<u8, 1> {
                 m_states: [&s0],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(None, s.find_common_parent(0, 1));
@@ -231,7 +235,7 @@ mod test {
             let s0 = DummyState::new(0, None);
             let s = HierarchyStateMachine::<u8, 1> {
                 m_states: [&s0],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(None, s.find_common_parent(1, 0));
@@ -243,7 +247,7 @@ mod test {
             let s1 = DummyState::new(1, Some(0));
             let s = HierarchyStateMachine::<u8, 2> {
                 m_states: [&s0, &s1],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(0, s.find_common_parent(0, 1).unwrap());
@@ -259,7 +263,7 @@ mod test {
             let s2 = DummyState::new(2, Some(1));
             let s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(0, s.find_common_parent(0, 2).unwrap());
@@ -272,7 +276,7 @@ mod test {
             let s2 = DummyState::new(2, Some(0));
             let s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(0, s.find_common_parent(1, 2).unwrap());
@@ -289,7 +293,7 @@ mod test {
             let s6 = DummyState::new(6, Some(4));
             let s = HierarchyStateMachine::<u8, 7> {
                 m_states: [&s0, &s1, &s2, &s3, &s4, &s5, &s6],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(0, s.find_common_parent(3, 6).unwrap());
@@ -301,13 +305,13 @@ mod test {
         use std::cell::RefCell;
 
         #[derive(Debug, PartialEq)]
-        enum Ex{
+        enum Ex {
             Entry,
             Exit,
         }
 
         static mut ORDER: Vec<(Ex, IdType)> = Vec::new();
-        
+
         pub struct DummyState {
             id: IdType,
             entry: RefCell<bool>,
@@ -340,7 +344,9 @@ mod test {
                 }
             }
 
-            fn id(&self) -> IdType { self.id }
+            fn id(&self) -> IdType {
+                self.id
+            }
         }
 
         impl DummyState {
@@ -365,7 +371,7 @@ mod test {
             setup();
             let mut s = HierarchyStateMachine::<u8, 0> {
                 m_states: [],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(0, s.transition(0, 1));
@@ -392,7 +398,7 @@ mod test {
             let s2 = DummyState::new(2, Some(0));
             let mut s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(1, s.transition(1, 1));
@@ -408,7 +414,7 @@ mod test {
             let s2 = DummyState::new(2, Some(1));
             let mut s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(1, s.transition(2, 1));
@@ -429,7 +435,7 @@ mod test {
             let s2 = DummyState::new(2, Some(1));
             let mut s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(2, s.transition(1, 2));
@@ -451,7 +457,7 @@ mod test {
             let s2 = DummyState::new(2, Some(0));
             let mut s = HierarchyStateMachine::<u8, 3> {
                 m_states: [&s0, &s1, &s2],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(2, s.transition(1, 2));
@@ -478,7 +484,7 @@ mod test {
             let s6 = DummyState::new(6, Some(4));
             let mut s = HierarchyStateMachine::<u8, 7> {
                 m_states: [&s0, &s1, &s2, &s3, &s4, &s5, &s6],
-                m_current_state: 0
+                m_current_state: 0,
             };
 
             assert_eq!(6, s.transition(3, 6));

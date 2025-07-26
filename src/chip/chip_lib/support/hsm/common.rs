@@ -2,7 +2,7 @@ pub type IdType = u8;
 
 pub const ROOT_IDX: usize = 0;
 
-pub trait State { 
+pub trait State {
     type Event;
 
     fn handle(&self, event: Self::Event) -> (Option<Self::Event>, Option<IdType>);

@@ -1,18 +1,20 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use crate::chip_static_assert;
-use crate::chip::chip_lib::core::chip_config::{CHIP_CONFIG_SHA256_CONTEXT_SIZE, CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE};
+use crate::chip::chip_lib::core::chip_config::{
+    CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,
+};
 use crate::chip::chip_lib::support::buffer_reader as encoding;
-use crate::chip::VendorId;
 use crate::chip::CryptoRng;
+use crate::chip::VendorId;
+use crate::chip_static_assert;
 
-use crate::ChipErrorResult;
-use crate::chip_ok;
 use crate::chip_core_error;
-use crate::chip_sdk_error;
-use crate::chip_error_invalid_argument;
 use crate::chip_error_internal;
+use crate::chip_error_invalid_argument;
+use crate::chip_ok;
+use crate::chip_sdk_error;
+use crate::ChipErrorResult;
 
 /*
 use core::str::FromStr;
@@ -21,12 +23,12 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 */
 
-use p256::ecdsa::{Signature,VerifyingKey,SigningKey,signature::Signer};
+use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
-use p256::ecdh::{EphemeralSecret};
-use sha2::{Sha256, Digest};
+use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::{PublicKey};
+use p256::PublicKey;
+use sha2::{Digest, Sha256};
 
 use core::slice;
 
@@ -101,7 +103,6 @@ pub const K_PID_PREFIX_FOR_CN_ENCODING: &str = "Mpid:";
 pub const K_VID_AND_PID_HEX_LENGTH: usize = core::mem::size_of::<u16>() * 2;
 pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
 
-
 /*
  * Overhead to encode a raw ECDSA signature in X9.62 format in ASN.1 DER
  *
@@ -119,11 +120,17 @@ pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
  * There is 1 sequence of 2 integers. Overhead is SEQ_OVERHEAD + (2 * INT_OVERHEAD) = 3 + (2 * 3) = 9.
  */
 pub const K_MAX_ECDSA_X9DOT62_ASN1_OVERHEAD: usize = 9;
-pub const K_MAX_ECDSA_SIGNATURE_LENGTH_DER: usize = K_MAX_ECDSA_SIGNATURE_LENGTH + K_MAX_ECDSA_X9DOT62_ASN1_OVERHEAD;
+pub const K_MAX_ECDSA_SIGNATURE_LENGTH_DER: usize =
+    K_MAX_ECDSA_SIGNATURE_LENGTH + K_MAX_ECDSA_X9DOT62_ASN1_OVERHEAD;
 
-chip_static_assert!(K_MAX_ECDH_SECRET_LENGTH >= K_P256_FE_LENGTH, "ECDH shared secret is too short for crypto suite");
-chip_static_assert!(K_MAX_ECDSA_SIGNATURE_LENGTH >= K_P256_ECDSA_SIGNATURE_LENGTH_RAW,
-              "ECDSA signature buffer length is too short for crypto suite");
+chip_static_assert!(
+    K_MAX_ECDH_SECRET_LENGTH >= K_P256_FE_LENGTH,
+    "ECDH shared secret is too short for crypto suite"
+);
+chip_static_assert!(
+    K_MAX_ECDSA_SIGNATURE_LENGTH >= K_P256_ECDSA_SIGNATURE_LENGTH_RAW,
+    "ECDSA signature buffer length is too short for crypto suite"
+);
 
 pub const K_COMPRESSED_FABRIC_IDENTIFIER_SIZE: usize = 8;
 
@@ -166,14 +173,13 @@ pub enum SupportedECPKeyTypes {
 
 #[repr(u8)]
 pub enum ECPKeyTarget {
-    Ecdh  = 0,
+    Ecdh = 0,
     Ecdsa = 1,
 }
 
-pub fn clear_secret_data(buf: &mut [u8])
-{}
+pub fn clear_secret_data(buf: &mut [u8]) {}
 
-pub fn clear_secret_data_with_raw(buf: * mut u8, len: usize) {
+pub fn clear_secret_data_with_raw(buf: *mut u8, len: usize) {
     unsafe {
         clear_secret_data(slice::from_raw_parts_mut(buf, len));
     }
@@ -183,12 +189,17 @@ pub fn is_buffer_content_equal_constant_time(a: &[u8], b: &[u8], n: usize) -> bo
     false
 }
 
-pub fn is_buffer_content_equal_constant_time_with_raw(a: * const u8, b: * const u8, n: usize) -> bool {
+pub fn is_buffer_content_equal_constant_time_with_raw(
+    a: *const u8,
+    b: *const u8,
+    n: usize,
+) -> bool {
     unsafe {
         return is_buffer_content_equal_constant_time(
             slice::from_raw_parts(a, n),
             slice::from_raw_parts(b, n),
-            n);
+            n,
+        );
     }
 }
 
@@ -199,27 +210,43 @@ pub trait ECPKey {
     fn length(&self) -> usize;
     fn is_uncompressed(&self) -> bool;
     //fn raw(&mut self) -> * mut u8;
-    fn const_bytes_raw(&self) -> * const u8;
-    fn bytes_raw(&mut self) -> * mut u8;
+    fn const_bytes_raw(&self) -> *const u8;
+    fn bytes_raw(&mut self) -> *mut u8;
     fn const_bytes(&self) -> &[u8];
     fn bytes(&mut self) -> &mut [u8];
 
     fn matches(&self, other: &Self) -> bool {
-        return (self.length() == other.length()) && (is_buffer_content_equal_constant_time_with_raw(
-                self.const_bytes_raw(), other.const_bytes_raw(), self.length()));
+        return (self.length() == other.length())
+            && (is_buffer_content_equal_constant_time_with_raw(
+                self.const_bytes_raw(),
+                other.const_bytes_raw(),
+                self.length(),
+            ));
     }
 
     fn ecdsa_validate_msg_signature(&self, msg: &[u8], signature: &Self::Sig) -> ChipErrorResult;
-    fn ecdsa_validate_msg_signature_with_raw(&self, msg: * const u8, msg_length: usize, signature: &Self::Sig) -> ChipErrorResult {
+    fn ecdsa_validate_msg_signature_with_raw(
+        &self,
+        msg: *const u8,
+        msg_length: usize,
+        signature: &Self::Sig,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.ecdsa_validate_msg_signature(slice::from_raw_parts(msg, msg_length), signature);
+            return self
+                .ecdsa_validate_msg_signature(slice::from_raw_parts(msg, msg_length), signature);
         }
     }
 
     fn ecdsa_validate_hash_signature(&self, hash: &[u8], signature: &Self::Sig) -> ChipErrorResult;
-    fn ecdsa_validate_hash_signature_with_raw(&self,hash: * const u8, hash_length: usize, signature: &Self::Sig) -> ChipErrorResult {
+    fn ecdsa_validate_hash_signature_with_raw(
+        &self,
+        hash: *const u8,
+        hash_length: usize,
+        signature: &Self::Sig,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
+            return self
+                .ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
         }
     }
 }
@@ -257,7 +284,7 @@ impl<const KCAPACITY: usize> SensitiveDataBuffer<KCAPACITY> {
         return &mut self.m_bytes[..];
     }
 
-    pub fn bytes_raw(&mut self) -> * mut u8 {
+    pub fn bytes_raw(&mut self) -> *mut u8 {
         return self.m_bytes[..].as_mut_ptr();
     }
 
@@ -265,11 +292,13 @@ impl<const KCAPACITY: usize> SensitiveDataBuffer<KCAPACITY> {
         return &self.m_bytes[..];
     }
 
-    pub fn const_bytes_raw(&self) -> * const u8 {
+    pub fn const_bytes_raw(&self) -> *const u8 {
         return self.m_bytes.as_ptr();
     }
 
-    pub const fn capacity() -> usize { KCAPACITY }
+    pub const fn capacity() -> usize {
+        KCAPACITY
+    }
 }
 
 impl<const KCAPACITY: usize> Drop for SensitiveDataBuffer<KCAPACITY> {
@@ -314,7 +343,7 @@ impl<const KCAPACITY: usize> SensitiveDataFixedBuffer<KCAPACITY> {
         return &mut self.m_bytes[..];
     }
 
-    pub fn bytes_raw(&mut self) -> * mut u8 {
+    pub fn bytes_raw(&mut self) -> *mut u8 {
         return self.m_bytes[..].as_mut_ptr();
     }
 
@@ -322,11 +351,13 @@ impl<const KCAPACITY: usize> SensitiveDataFixedBuffer<KCAPACITY> {
         return &self.m_bytes[..];
     }
 
-    pub fn const_bytes_raw(&self) -> * const u8 {
+    pub fn const_bytes_raw(&self) -> *const u8 {
         return self.m_bytes.as_ptr();
     }
 
-    pub const fn capacity() -> usize { KCAPACITY }
+    pub const fn capacity() -> usize {
+        KCAPACITY
+    }
 }
 
 impl<const KCAPACITY: usize> Drop for SensitiveDataFixedBuffer<KCAPACITY> {
@@ -391,14 +422,15 @@ impl ECPKey for P256PublicKey {
 
         // SEC1 definition of an uncompressed point is (0x04 || X || Y) where X and Y are
         // raw zero-padded big-endian large integers of the group size.
-        return (self.length() == (K_P256_FE_LENGTH * 2 + 1)) && (self.const_bytes()[0] == K_UNCOMPRESSED_POINT_MARKER);
+        return (self.length() == (K_P256_FE_LENGTH * 2 + 1))
+            && (self.const_bytes()[0] == K_UNCOMPRESSED_POINT_MARKER);
     }
 
-    fn const_bytes_raw(&self) -> * const u8 {
+    fn const_bytes_raw(&self) -> *const u8 {
         return self.m_bytes.as_ptr();
     }
 
-    fn bytes_raw(&mut self) -> * mut u8 {
+    fn bytes_raw(&mut self) -> *mut u8 {
         return self.m_bytes.as_mut_ptr();
     }
 
@@ -411,8 +443,12 @@ impl ECPKey for P256PublicKey {
     }
 
     fn matches(&self, other: &Self) -> bool {
-        return (self.length() == other.length()) && (is_buffer_content_equal_constant_time_with_raw(
-                self.const_bytes_raw(), other.const_bytes_raw(), self.length()));
+        return (self.length() == other.length())
+            && (is_buffer_content_equal_constant_time_with_raw(
+                self.const_bytes_raw(),
+                other.const_bytes_raw(),
+                self.length(),
+            ));
     }
 
     fn ecdsa_validate_msg_signature(&self, msg: &[u8], signature: &Self::Sig) -> ChipErrorResult {
@@ -427,9 +463,15 @@ impl ECPKey for P256PublicKey {
 
         return self.ecdsa_validate_hash_signature(result.as_slice(), signature);
     }
-    fn ecdsa_validate_msg_signature_with_raw(&self, msg: * const u8, msg_length: usize, signature: &Self::Sig) -> ChipErrorResult {
+    fn ecdsa_validate_msg_signature_with_raw(
+        &self,
+        msg: *const u8,
+        msg_length: usize,
+        signature: &Self::Sig,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.ecdsa_validate_msg_signature(slice::from_raw_parts(msg, msg_length), signature);
+            return self
+                .ecdsa_validate_msg_signature(slice::from_raw_parts(msg, msg_length), signature);
         }
     }
 
@@ -454,20 +496,29 @@ impl ECPKey for P256PublicKey {
         chip_ok!()
     }
 
-    fn ecdsa_validate_hash_signature_with_raw(&self,hash: * const u8, hash_length: usize, signature: &Self::Sig) -> ChipErrorResult {
+    fn ecdsa_validate_hash_signature_with_raw(
+        &self,
+        hash: *const u8,
+        hash_length: usize,
+        signature: &Self::Sig,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
+            return self
+                .ecdsa_validate_msg_signature(slice::from_raw_parts(hash, hash_length), signature);
         }
     }
 }
 
 pub trait ECPKeypair<PK, Secret, Sig> {
-
     fn new_certificate_signing_request(&self, csr: &mut [u8]) -> ChipErrorResult;
 
-    fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut Sig) ->  ChipErrorResult;
+    fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut Sig) -> ChipErrorResult;
 
-    fn ecdh_derive_secret(&self, remote_public_key: &PK, out_secret: &mut Secret) ->  ChipErrorResult;
+    fn ecdh_derive_secret(
+        &self,
+        remote_public_key: &PK,
+        out_secret: &mut Secret,
+    ) -> ChipErrorResult;
 
     fn ecdsa_pubkey(&self) -> &PK;
 
@@ -493,11 +544,11 @@ impl Default for P256KeypairContext {
     }
 }
 
+pub type P256SerializedKeypair =
+    SensitiveDataBuffer<{ K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH }>;
 
-
-pub type P256SerializedKeypair = SensitiveDataBuffer<{K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH}>;
-
-pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
+pub trait P256KeypairBase:
+    ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
 {
     fn initialize(&mut self, key_target: ECPKeyTarget) -> ChipErrorResult;
 
@@ -506,8 +557,7 @@ pub trait P256KeypairBase: ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256E
     fn deserialize(&self, input: &mut P256SerializedKeypair) -> ChipErrorResult;
 }
 
-pub struct P256Keypair
-{
+pub struct P256Keypair {
     m_ecdsa_public_key: P256PublicKey,
     m_ecdh_public_key: P256PublicKey,
     m_ecdsa_keypair: SigningKey,
@@ -531,18 +581,28 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         return Err(chip_error_internal!());
     }
 
-    fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut P256EcdsaSignature) ->  ChipErrorResult {
+    fn ecdsa_sign_msg(
+        &self,
+        msg: &[u8],
+        out_signature: &mut P256EcdsaSignature,
+    ) -> ChipErrorResult {
         let mut hasher = Sha256::new();
         hasher.update(&msg[..]);
         let hash_result = hasher.finalize();
 
         let sig: Signature = self.m_ecdsa_keypair.sign(hash_result.as_slice());
-        out_signature.bytes().copy_from_slice(sig.to_bytes().as_slice());
+        out_signature
+            .bytes()
+            .copy_from_slice(sig.to_bytes().as_slice());
         out_signature.set_length(sig.to_bytes().as_slice().len())?;
         chip_ok!()
     }
 
-    fn ecdh_derive_secret(&self, remote_public_key: &P256PublicKey, out_secret: &mut P256EcdhDeriveSecret) ->  ChipErrorResult {
+    fn ecdh_derive_secret(
+        &self,
+        remote_public_key: &P256PublicKey,
+        out_secret: &mut P256EcdhDeriveSecret,
+    ) -> ChipErrorResult {
         let pk = PublicKey::from_sec1_bytes(remote_public_key.const_bytes());
         if pk.is_err() {
             return Err(chip_error_internal!());
@@ -550,9 +610,11 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         let pk = pk.unwrap();
         let secret = self.m_ecdh_keypair.diffie_hellman(&pk);
 
-        out_secret.bytes().copy_from_slice(secret.raw_secret_bytes());
+        out_secret
+            .bytes()
+            .copy_from_slice(secret.raw_secret_bytes());
         out_secret.set_length(secret.raw_secret_bytes().len())?;
-        
+
         chip_ok!()
     }
 
@@ -587,10 +649,17 @@ impl P256KeypairBase for P256Keypair {
             //let mut rand = CryptoRng::default();
             let mut rand = CryptoRng::default_with_seed(TEST);
             self.m_ecdh_keypair = EphemeralSecret::random(&mut rand);
-            self.m_ecdh_public_key = P256PublicKey::default_with_raw_value(self.m_ecdh_keypair.public_key().to_encoded_point(false).as_bytes());
+            self.m_ecdh_public_key = P256PublicKey::default_with_raw_value(
+                self.m_ecdh_keypair
+                    .public_key()
+                    .to_encoded_point(false)
+                    .as_bytes(),
+            );
             self.m_ecdsa_keypair = SigningKey::random(&mut rand);
             let verifying_key = VerifyingKey::from(&self.m_ecdsa_keypair);
-            self.m_ecdsa_public_key = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
+            self.m_ecdsa_public_key = P256PublicKey::default_with_raw_value(
+                verifying_key.to_encoded_point(false).as_bytes(),
+            );
             self.m_initialized = true;
         }
         chip_ok!()
@@ -631,7 +700,7 @@ struct OpaqueContext<const CONTEXT_SIZE: usize> {
     pub m_opaque: [u8; CONTEXT_SIZE],
 }
 
-impl<const CONTEXT_SIZE: usize>  Default for OpaqueContext<CONTEXT_SIZE> {
+impl<const CONTEXT_SIZE: usize> Default for OpaqueContext<CONTEXT_SIZE> {
     fn default() -> Self {
         Self {
             m_opaque: [0; CONTEXT_SIZE],
@@ -649,39 +718,78 @@ pub type Hmac128KeyHandle = Symmetric128BitsKeyHandle;
 
 pub type HkdfKeyHandle = SymmetricKeyHandle<CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE>;
 
-pub fn ecdsa_raw_signature_to_asn1(fe_legnth_bytes: usize, raw_sig: &[u8], out_asn1_sig: &mut [u8]) -> ChipErrorResult {
+pub fn ecdsa_raw_signature_to_asn1(
+    fe_legnth_bytes: usize,
+    raw_sig: &[u8],
+    out_asn1_sig: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn ecdsa_asn1_signature_to_raw(fe_length_bytes: usize, asn1_sig: &[u8], out_raw_sig: &mut [u8]) -> ChipErrorResult {
+pub fn ecdsa_asn1_signature_to_raw(
+    fe_length_bytes: usize,
+    asn1_sig: &[u8],
+    out_raw_sig: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn read_der_length(reader: &encoding::little_endian::Reader, length: &mut usize) -> ChipErrorResult {
+pub fn read_der_length(
+    reader: &encoding::little_endian::Reader,
+    length: &mut usize,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn convert_integer_raw_to_der(raw_integer: &[u8], out_der_integer: &mut [u8]) -> ChipErrorResult {
+pub fn convert_integer_raw_to_der(
+    raw_integer: &[u8],
+    out_der_integer: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn convert_integer_raw_to_der_without_tag(raw_integer: &[u8], out_der_integer: &mut [u8]) -> ChipErrorResult {
+pub fn convert_integer_raw_to_der_without_tag(
+    raw_integer: &[u8],
+    out_der_integer: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn aes_ccm_encrypt(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], ciphertext: &mut [u8], tag: &mut [u8]) -> ChipErrorResult {
+pub fn aes_ccm_encrypt(
+    plaintext: &[u8],
+    aad: &[u8],
+    key: &Aes128KeyHandle,
+    nonce: &[u8],
+    ciphertext: &mut [u8],
+    tag: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn aes_ccm_decrypt(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> ChipErrorResult {
+pub fn aes_ccm_decrypt(
+    ciphertext: &[u8],
+    aad: &[u8],
+    tag: &[u8],
+    key: &Aes128KeyHandle,
+    nonce: &[u8],
+    plaintext: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn aes_ctr_crypt(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+pub fn aes_ctr_crypt(
+    input: &[u8],
+    key: &Aes128KeyHandle,
+    nonce: &[u8],
+    output: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn generate_certificate_signing_request(keypair: &P256Keypair, csr: &mut [u8]) -> ChipErrorResult{
+pub fn generate_certificate_signing_request(
+    keypair: &P256Keypair,
+    csr: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -689,7 +797,10 @@ pub fn verify_certificate_signing_request_format(csr: &[u8]) -> ChipErrorResult 
     chip_ok!()
 }
 
-pub fn verify_certificate_signing_request(csr: &[u8], pubkey: &mut P256PublicKey) -> ChipErrorResult {
+pub fn verify_certificate_signing_request(
+    csr: &[u8],
+    pubkey: &mut P256PublicKey,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -701,7 +812,7 @@ pub fn hash_sha1(data: &[u8], out_buffer: &mut [u8]) -> ChipErrorResult {
     chip_ok!()
 }
 
-#[cfg(feature="chip_config_sha256_context_align_8")]
+#[cfg(feature = "chip_config_sha256_context_align_8")]
 #[repr(align(8))]
 pub struct HashSHA256OpaqueContext {
     pub m_opaque: [u8; K_MAX_HASH_SHA256_CONTEXT_SIZE],
@@ -760,9 +871,13 @@ pub fn drbg_get_bytes(out_buffer: &mut [u8]) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub type EntropySource = fn(data: * mut u8, output: &mut [u8], olen: &mut usize) -> i32;
+pub type EntropySource = fn(data: *mut u8, output: &mut [u8], olen: &mut usize) -> i32;
 
-pub fn add_entropy_source(fn_source: EntropySource, p_source: * mut u8, threashold: usize) -> ChipErrorResult {
+pub fn add_entropy_source(
+    fn_source: EntropySource,
+    p_source: *mut u8,
+    threashold: usize,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -775,13 +890,25 @@ pub trait Spake2p {
 
     fn clear(&mut self);
 
-    fn begin_verifier(&mut self, my_identity: &[u8], peer_identity: &[u8], w0in: &[u8], lin: &[u8]) -> ChipErrorResult;
+    fn begin_verifier(
+        &mut self,
+        my_identity: &[u8],
+        peer_identity: &[u8],
+        w0in: &[u8],
+        lin: &[u8],
+    ) -> ChipErrorResult;
 
-    fn begin_prover(&mut self, my_identity: &[u8], peer_identity: &[u8], w0sin: &[u8], s1sin: &[u8]) -> ChipErrorResult;
+    fn begin_prover(
+        &mut self,
+        my_identity: &[u8],
+        peer_identity: &[u8],
+        w0sin: &[u8],
+        s1sin: &[u8],
+    ) -> ChipErrorResult;
 
     fn compute_round_one(&mut self, pab: &[u8], out: &mut [u8]) -> ChipErrorResult;
 
-    fn compute_round_two(&mut self, input: &[u8], out: &mut[u8]) -> ChipErrorResult;
+    fn compute_round_two(&mut self, input: &[u8], out: &mut [u8]) -> ChipErrorResult;
 
     fn key_cofirm(&mut self, input: &[u8]) -> ChipErrorResult;
 
@@ -793,27 +920,34 @@ pub trait Spake2p {
 
     fn generate_keys(&mut self) -> ChipErrorResult;
 
-    fn fe_load(&mut self, input: &[u8], fe: * mut ()) -> ChipErrorResult;
+    fn fe_load(&mut self, input: &[u8], fe: *mut ()) -> ChipErrorResult;
 
-    fn fe_write(&mut self, fe: * mut (), out: &mut [u8]) -> ChipErrorResult;
+    fn fe_write(&mut self, fe: *mut (), out: &mut [u8]) -> ChipErrorResult;
 
-    fn fe_generate(&mut self, fe: * mut ()) -> ChipErrorResult;
+    fn fe_generate(&mut self, fe: *mut ()) -> ChipErrorResult;
 
-    fn fe_mul(&mut self, fer: * mut (), fe1: * const (), fe2: * const ()) -> ChipErrorResult;
+    fn fe_mul(&mut self, fer: *mut (), fe1: *const (), fe2: *const ()) -> ChipErrorResult;
 
-    fn point_load(&mut self, input: &[u8], r: * mut ()) -> ChipErrorResult;
+    fn point_load(&mut self, input: &[u8], r: *mut ()) -> ChipErrorResult;
 
-    fn point_write(&mut self, r: * const (), out: &mut [u8]) -> ChipErrorResult;
+    fn point_write(&mut self, r: *const (), out: &mut [u8]) -> ChipErrorResult;
 
-    fn point_mut(&mut self, r: * mut (), p1: * const (), p2: * const ()) -> ChipErrorResult;
+    fn point_mut(&mut self, r: *mut (), p1: *const (), p2: *const ()) -> ChipErrorResult;
 
-    fn point_add_mut(&mut self, r: * mut (), p1: * const (), fe1: * const (), p2: * const (), fe2: * const ()) -> ChipErrorResult;
+    fn point_add_mut(
+        &mut self,
+        r: *mut (),
+        p1: *const (),
+        fe1: *const (),
+        p2: *const (),
+        fe2: *const (),
+    ) -> ChipErrorResult;
 
-    fn point_invert(&mut self, r: * mut ()) -> ChipErrorResult;
+    fn point_invert(&mut self, r: *mut ()) -> ChipErrorResult;
 
-    fn point_cofactor_mut(&mut self, r: * mut ()) -> ChipErrorResult;
+    fn point_cofactor_mut(&mut self, r: *mut ()) -> ChipErrorResult;
 
-    fn point_is_valid(&self, r: * mut ()) -> ChipErrorResult;
+    fn point_is_valid(&self, r: *mut ()) -> ChipErrorResult;
 
     fn compute_w0(&mut self, w0out: &mut [u8], w0sin: &[u8]) -> ChipErrorResult;
 
@@ -821,29 +955,29 @@ pub trait Spake2p {
 }
 
 pub struct Spake2pP256Sha256HKDFHMAC {
-    pub m: * mut (),
-    pub n: * mut (),
-    pub g: * const (),
-    pub x: * mut (),
-    pub y: * mut (),
-    pub l: * mut (),
-    pub z: * mut (),
-    pub v: * mut (),
-    pub w0: * mut (),
-    pub w1: * mut (),
-    pub xy: * mut (),
-    pub order: * mut (),
-    pub tempbn: * mut (),
+    pub m: *mut (),
+    pub n: *mut (),
+    pub g: *const (),
+    pub x: *mut (),
+    pub y: *mut (),
+    pub l: *mut (),
+    pub z: *mut (),
+    pub v: *mut (),
+    pub w0: *mut (),
+    pub w1: *mut (),
+    pub xy: *mut (),
+    pub order: *mut (),
+    pub tempbn: *mut (),
 
     fe_size: usize,
     hash_size: usize,
     point_size: usize,
     k_cab: [u8; K_MAX_HASH_LENGTH],
     k_ae: [u8; K_MAX_HASH_LENGTH],
-    k_ca: * mut u8,
-    k_cb: * mut u8,
-    k_a: * mut u8,
-    k_e: * mut u8,
+    k_ca: *mut u8,
+    k_cb: *mut u8,
+    k_a: *mut u8,
+    k_e: *mut u8,
 
     m_sha256_hash_ctx: HashSHA256Stream,
     m_spake2p_context: Spake2pOpaqueContext,
@@ -851,24 +985,32 @@ pub struct Spake2pP256Sha256HKDFHMAC {
 
 pub type Spake2pVerifierSerialized = [u8; K_SPAKE2P_VERIFIER_SERIALIZED_LENGTH];
 
-pub fn generate_compressed_fabric_id(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut [u8]) -> ChipErrorResult {
+pub fn generate_compressed_fabric_id(
+    root_public_key: &P256PublicKey,
+    fabrid_id: u64,
+    out_compressed_fabrid_id: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn generate_compressed_fabric_id_u64(root_public_key: &P256PublicKey, fabrid_id: u64, out_compressed_fabrid_id: &mut u64) -> ChipErrorResult {
+pub fn generate_compressed_fabric_id_u64(
+    root_public_key: &P256PublicKey,
+    fabrid_id: u64,
+    out_compressed_fabrid_id: &mut u64,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
 pub enum CertificateChainValidationResult {
     KSuccess = 0,
 
-    KRootFormatInvalid   = 100,
+    KRootFormatInvalid = 100,
     KRootArgumentInvalid = 101,
 
-    KICAFormatInvalid   = 200,
+    KICAFormatInvalid = 200,
     KICAArgumentInvalid = 201,
 
-    KLeafFormatInvalid   = 300,
+    KLeafFormatInvalid = 300,
     KLeafArgumentInvalid = 301,
 
     KChainInvalid = 400,
@@ -878,7 +1020,12 @@ pub enum CertificateChainValidationResult {
     KInternalFrameworkError = 600,
 }
 
-pub fn validate_certificate_chain(root_certificate: &[u8], ca_certificate: &[u8], leaf_certificate: &[u8], result: &mut CertificateChainValidationResult) -> ChipErrorResult {
+pub fn validate_certificate_chain(
+    root_certificate: &[u8],
+    ca_certificate: &[u8],
+    leaf_certificate: &[u8],
+    result: &mut CertificateChainValidationResult,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -888,11 +1035,17 @@ pub enum AttestationCertType {
     KDAC = 2,
 }
 
-pub fn verify_attestaction_certification_format(cert: &[u8], cert_type: AttestationCertType) -> ChipErrorResult {
+pub fn verify_attestaction_certification_format(
+    cert: &[u8],
+    cert_type: AttestationCertType,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn is_certificate_valid_at_issuance(candiate_certificate: &[u8], issuer_certificate: &[u8]) -> ChipErrorResult {
+pub fn is_certificate_valid_at_issuance(
+    candiate_certificate: &[u8],
+    issuer_certificate: &[u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -905,7 +1058,10 @@ fn is_certificate_valid_at_current_time(certificate: &[u8]) -> ChipErrorResult {
     chip_ok!()
 }
 
-fn extract_pubkey_from_x509_cert(certificate: &[u8], pubkey: &mut P256PublicKey) -> ChipErrorResult {
+fn extract_pubkey_from_x509_cert(
+    certificate: &[u8],
+    pubkey: &mut P256PublicKey,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -917,15 +1073,24 @@ fn extract_akid_from_x509_cert(certificate: &[u8], akid: &mut [u8]) -> ChipError
     chip_ok!()
 }
 
-fn extract_crl_distribution_point_uri_from_x509_cert(certificate: &[u8], cdpurl: &mut [u8]) -> ChipErrorResult {
+fn extract_crl_distribution_point_uri_from_x509_cert(
+    certificate: &[u8],
+    cdpurl: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-fn extract_cdp_extension_crl_issuer_from_x509_cert(certificate: &[u8], crl_issuer: &mut [u8]) -> ChipErrorResult {
+fn extract_cdp_extension_crl_issuer_from_x509_cert(
+    certificate: &[u8],
+    crl_issuer: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-fn extract_serial_number_from_x509_cert(certificate: &[u8], serial_number: &mut [u8]) -> ChipErrorResult {
+fn extract_serial_number_from_x509_cert(
+    certificate: &[u8],
+    serial_number: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -937,15 +1102,19 @@ fn extract_issuer_from_x509_cert(certificate: &[u8], issuer: &mut [u8]) -> ChipE
     chip_ok!()
 }
 
-fn replace_cert_if_resigned_cert_found(reference_certificate: &[u8], candiate_certifiace: &[&[u8]], out_certificate: &mut [u8]) -> ChipErrorResult {
+fn replace_cert_if_resigned_cert_found(
+    reference_certificate: &[u8],
+    candiate_certifiace: &[&[u8]],
+    out_certificate: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
 pub enum DNAttrType {
     KUnspecified = 0,
-    KCommonName  = 1,
-    KMatterVID   = 2,
-    KMatterPID   = 3,
+    KCommonName = 1,
+    KMatterVID = 2,
+    KMatterPID = 3,
 }
 
 pub struct AttestationCertVidPid {
@@ -959,11 +1128,19 @@ impl AttestationCertVidPid {
     }
 }
 
-pub fn extract_vid_pid_from_attribute_setting(arrt_type: DNAttrType, attr: &[u8], vid_pid_from_matter_attr: &mut AttestationCertVidPid, vid_pid_from_cn_attr: &mut AttestationCertVidPid) -> ChipErrorResult {
+pub fn extract_vid_pid_from_attribute_setting(
+    arrt_type: DNAttrType,
+    attr: &[u8],
+    vid_pid_from_matter_attr: &mut AttestationCertVidPid,
+    vid_pid_from_cn_attr: &mut AttestationCertVidPid,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
-pub fn extract_vid_pid_from_x509_cert(x509_cert: &[u8], vid_pid: &mut AttestationCertVidPid) -> ChipErrorResult {
+pub fn extract_vid_pid_from_x509_cert(
+    x509_cert: &[u8],
+    vid_pid: &mut AttestationCertVidPid,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -974,7 +1151,11 @@ pub struct GroupOperationalCredentials {
     pub m_private_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
 }
 
-pub fn derive_group_operation_key(epoch_key: &[u8], compressed_fabric_id: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
+pub fn derive_group_operation_key(
+    epoch_key: &[u8],
+    compressed_fabric_id: &[u8],
+    out_key: &mut [u8],
+) -> ChipErrorResult {
     chip_ok!()
 }
 
@@ -986,113 +1167,122 @@ pub fn derive_group_private(epoch_key: &[u8], out_key: &mut [u8]) -> ChipErrorRe
     chip_ok!()
 }
 
-pub fn derive_group_operational_credentials(epoch_key: &[u8], compressed_fabrc_id: &[u8], operational_credentials: &mut GroupOperationalCredentials) -> ChipErrorResult {
+pub fn derive_group_operational_credentials(
+    epoch_key: &[u8],
+    compressed_fabrc_id: &[u8],
+    operational_credentials: &mut GroupOperationalCredentials,
+) -> ChipErrorResult {
     chip_ok!()
 }
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
+    use super::*;
+    use std::*;
 
-  mod test_sensitive_data_buffer {
-      use super::*;
-      use super::super::*;
-      use std::*;
+    mod test_sensitive_data_buffer {
+        use super::super::*;
+        use super::*;
+        use std::*;
 
-      #[test]
-      fn new_one() {
-          let buf: SensitiveDataBuffer<10> = SensitiveDataBuffer::<10>::default();
-          assert_eq!(0, buf.length());
-          assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
-      }
+        #[test]
+        fn new_one() {
+            let buf: SensitiveDataBuffer<10> = SensitiveDataBuffer::<10>::default();
+            assert_eq!(0, buf.length());
+            assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
+        }
 
-      #[test]
-      fn new_fix_one() {
-          let buf: SensitiveDataFixedBuffer<10> = SensitiveDataFixedBuffer::<10>::default();
-          assert_eq!(10, buf.length());
-          assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
-      }
-  }
+        #[test]
+        fn new_fix_one() {
+            let buf: SensitiveDataFixedBuffer<10> = SensitiveDataFixedBuffer::<10>::default();
+            assert_eq!(10, buf.length());
+            assert_eq!(10, SensitiveDataBuffer::<10>::capacity());
+        }
+    }
 
-  mod test_p256_public_key {
-      use super::*;
-      use super::super::*;
-      use std::*;
+    mod test_p256_public_key {
+        use super::super::*;
+        use super::*;
+        use std::*;
 
-      use p256::{
-          ecdsa::{SigningKey, VerifyingKey, signature::Signer, signature::Verifier, Signature},
-          SecretKey, EncodedPoint,
-      };
+        use p256::{
+            ecdsa::{signature::Signer, signature::Verifier, Signature, SigningKey, VerifyingKey},
+            EncodedPoint, SecretKey,
+        };
 
-      #[test]
-      fn verify() {
-          let private_key_bytes: [u8; 32] = [
-              0x1f, 0x2d, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f,
-              0x9a, 0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x12,
-              0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
-              0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x02
-          ];
+        #[test]
+        fn verify() {
+            let private_key_bytes: [u8; 32] = [
+                0x1f, 0x2d, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e, 0x8f, 0x9a, 0xab, 0xbc, 0xcd, 0xde, 0xef,
+                0xf0, 0x12, 0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a, 0xab, 0xbc, 0xcd, 0xde,
+                0xef, 0xf0, 0x01, 0x02,
+            ];
 
-          let secret_key = SecretKey::from_bytes(&private_key_bytes.into()).expect("Valid private key");
-          let signing_key = SigningKey::from(secret_key);
-          let verifying_key = VerifyingKey::from(&signing_key);
-          let pk = P256PublicKey::default_with_raw_value(verifying_key.to_encoded_point(false).as_bytes());
+            let secret_key =
+                SecretKey::from_bytes(&private_key_bytes.into()).expect("Valid private key");
+            let signing_key = SigningKey::from(secret_key);
+            let verifying_key = VerifyingKey::from(&signing_key);
+            let pk = P256PublicKey::default_with_raw_value(
+                verifying_key.to_encoded_point(false).as_bytes(),
+            );
 
-          let message = b"Fixed key signing test";
-          // hash the message
-          let mut hasher = Sha256::new();
-          hasher.update(&message[..]);
-          let result = hasher.finalize();
-          // sign the hash
-          let signature: Signature = signing_key.sign(result.as_slice());
-          let mut sig = P256EcdsaSignature::default();
-          sig.bytes().copy_from_slice(signature.to_bytes().as_slice());
-          let _ = sig.set_length(signature.to_bytes().as_slice().len());
+            let message = b"Fixed key signing test";
+            // hash the message
+            let mut hasher = Sha256::new();
+            hasher.update(&message[..]);
+            let result = hasher.finalize();
+            // sign the hash
+            let signature: Signature = signing_key.sign(result.as_slice());
+            let mut sig = P256EcdsaSignature::default();
+            sig.bytes().copy_from_slice(signature.to_bytes().as_slice());
+            let _ = sig.set_length(signature.to_bytes().as_slice().len());
 
-          assert_eq!(true, pk.ecdsa_validate_msg_signature(&message[..], &sig).is_ok());
-      }
-  }
+            assert_eq!(
+                true,
+                pk.ecdsa_validate_msg_signature(&message[..], &sig).is_ok()
+            );
+        }
+    }
 
-  mod test_p256_keypair {
-      use super::*;
-      use super::super::*;
-      use std::*;
+    mod test_p256_keypair {
+        use super::super::*;
+        use super::*;
+        use std::*;
 
-      use p256::{
-          ecdsa::{SigningKey, VerifyingKey, signature::Signer, signature::Verifier, Signature},
-          SecretKey, EncodedPoint,
-      };
+        use p256::{
+            ecdsa::{signature::Signer, signature::Verifier, Signature, SigningKey, VerifyingKey},
+            EncodedPoint, SecretKey,
+        };
 
-      #[test]
-      fn init() {
-          let mut kp = P256Keypair::default();
-          assert_eq!(true, kp.initialize(ECPKeyTarget::Ecdh).is_ok());
-      }
+        #[test]
+        fn init() {
+            let mut kp = P256Keypair::default();
+            assert_eq!(true, kp.initialize(ECPKeyTarget::Ecdh).is_ok());
+        }
 
-      #[test]
-      fn sign_message() {
-          let mut kp = P256Keypair::default();
-          let _ = kp.initialize(ECPKeyTarget::Ecdh);
+        #[test]
+        fn sign_message() {
+            let mut kp = P256Keypair::default();
+            let _ = kp.initialize(ECPKeyTarget::Ecdh);
 
-          let mut sig: P256EcdsaSignature = P256EcdsaSignature::default();
-          let message = b"plain text";
-          assert_eq!(true, kp.ecdsa_sign_msg(&message[..], &mut sig).is_ok());
-      }
+            let mut sig: P256EcdsaSignature = P256EcdsaSignature::default();
+            let message = b"plain text";
+            assert_eq!(true, kp.ecdsa_sign_msg(&message[..], &mut sig).is_ok());
+        }
 
-      #[test]
-      fn drive_secret() {
-          let mut alice = P256Keypair::default();
-          let _ = alice.initialize(ECPKeyTarget::Ecdh);
-          let mut bob = P256Keypair::default();
-          let _ = bob.initialize(ECPKeyTarget::Ecdh);
-          let alice_pub_key = alice.ecdh_pubkey();
-          let bob_pub_key = bob.ecdh_pubkey();
-          let mut s1: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
-          let mut s2: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
-          assert_eq!(true, alice.ecdh_derive_secret(bob_pub_key, &mut s1).is_ok());
-          assert_eq!(true, bob.ecdh_derive_secret(alice_pub_key, &mut s2).is_ok());
-          assert_eq!(s1.const_bytes(), s2.const_bytes());
-      }
-  }
+        #[test]
+        fn drive_secret() {
+            let mut alice = P256Keypair::default();
+            let _ = alice.initialize(ECPKeyTarget::Ecdh);
+            let mut bob = P256Keypair::default();
+            let _ = bob.initialize(ECPKeyTarget::Ecdh);
+            let alice_pub_key = alice.ecdh_pubkey();
+            let bob_pub_key = bob.ecdh_pubkey();
+            let mut s1: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
+            let mut s2: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
+            assert_eq!(true, alice.ecdh_derive_secret(bob_pub_key, &mut s1).is_ok());
+            assert_eq!(true, bob.ecdh_derive_secret(alice_pub_key, &mut s2).is_ok());
+            assert_eq!(s1.const_bytes(), s2.const_bytes());
+        }
+    }
 }

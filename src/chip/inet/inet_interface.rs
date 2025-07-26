@@ -1,7 +1,6 @@
 use core::fmt;
 
-pub enum InterfaceType
-{
+pub enum InterfaceType {
     Unknown,
     Wifi,
     Ethernet,
@@ -9,13 +8,10 @@ pub enum InterfaceType
     Thread,
 }
 
-#[derive(Debug,Default, Clone, Copy)]
-pub struct InterfaceId
-{
-}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InterfaceId {}
 
-impl InterfaceId
-{
+impl InterfaceId {
     pub const K_MAX_IF_NAME_LENGTH: u32 = 13;
 }
 

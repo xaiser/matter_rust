@@ -15,8 +15,8 @@ pub const KTLVCONTROL_BYTE_NOT_SPECIFIED: u16 = 0xFFFF;
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::*;
     use crate::tlv_estimate_struct_overhead;
+    use std::*;
 
     #[test]
     fn one_size() {
@@ -25,6 +25,6 @@ mod test {
 
     #[test]
     fn two_size() {
-        assert_eq!((1+4+2+4+2), tlv_estimate_struct_overhead!(1,2));
+        assert_eq!((1 + 4 + 2 + 4 + 2), tlv_estimate_struct_overhead!(1, 2));
     }
 }

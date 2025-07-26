@@ -5,5 +5,3 @@ pub trait Layer {
     fn shutdown(&mut self);
     fn is_initialized(&self) -> bool;
 }
-
-

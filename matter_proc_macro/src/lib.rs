@@ -1,8 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
 use syn::spanned::Spanned;
-
+use syn::{parse_macro_input, DeriveInput};
 
 /*
  * This macro will inerst the init impl for each field. Fro example:
@@ -12,7 +11,7 @@ use syn::spanned::Spanned;
  *     m_a: u32,
  *     m_b: (bool, i32),
  *  }
- *  
+ *
  *  Result:
  * impl<T> Tu<T> {
  * pub fn init(
@@ -43,8 +42,8 @@ pub fn tuple_init_macro(input: TokenStream) -> TokenStream {
         panic!("Init can only be derived for structs");
     };
 
-    let mut param_defs = Vec::new();     
-    let mut init_calls = Vec::new(); 
+    let mut param_defs = Vec::new();
+    let mut init_calls = Vec::new();
     for (field_idx, field) in fields.iter().enumerate() {
         let field_name = field.ident.as_ref().map(|f| quote! { #f });
         let ty = &field.ty;
@@ -52,8 +51,10 @@ pub fn tuple_init_macro(input: TokenStream) -> TokenStream {
         match ty {
             syn::Type::Tuple(tuple) => {
                 for (idx, elem) in tuple.elems.iter().enumerate() {
-                    let param_name = syn::Ident::new(&format!("p{}_{}", field_idx, idx), field.ty.span());
-                    param_defs.push(quote! { #param_name: <#elem as super::base::Init>::InitParamType });
+                    let param_name =
+                        syn::Ident::new(&format!("p{}_{}", field_idx, idx), field.ty.span());
+                    param_defs
+                        .push(quote! { #param_name: <#elem as super::base::Init>::InitParamType });
 
                     if let Some(field_name) = &field_name {
                         init_calls.push(quote! { self.#field_name.#idx.init(#param_name); });

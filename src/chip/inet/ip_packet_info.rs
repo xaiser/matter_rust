@@ -1,24 +1,22 @@
-use super::ip_address::IPAddress;
 use super::inet_interface::InterfaceId;
+use super::ip_address::IPAddress;
 
-pub struct IPPacketInfo
-{
+pub struct IPPacketInfo {
     pub src_address: IPAddress,
     pub dest_address: IPAddress,
     pub interface: Option<InterfaceId>,
     pub src_port: u16,
-    pub dest_port: u16
+    pub dest_port: u16,
 }
 
-impl IPPacketInfo
-{
+impl IPPacketInfo {
     pub fn default() -> Self {
         IPPacketInfo {
-            src_address : IPAddress::ANY,
-            dest_address : IPAddress::ANY,
-            interface : None,
-            src_port : 0,
-            dest_port : 0,
+            src_address: IPAddress::ANY,
+            dest_address: IPAddress::ANY,
+            interface: None,
+            src_port: 0,
+            dest_port: 0,
         }
     }
 

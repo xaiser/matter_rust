@@ -1,48 +1,56 @@
 // allow for never used before we implement all features
 #![allow(dead_code)]
-use crate::chip::system::system_config::CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE;
-use crate::chip::system::system_packet_buffer::{PacketBufferHandle, PacketBuffer};
-use crate::chip::crypto::crypto_pal::CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES;
-use crate::chip::{NodeId,GroupId};
+use crate::chip::chip_lib::core::chip_encoding::little_endian;
 use crate::chip::chip_lib::support::buffer_reader::little_endian::Reader;
 use crate::chip::chip_lib::support::buffer_reader::BufferReader;
+use crate::chip::crypto::crypto_pal::CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES;
 use crate::chip::protocols::protocols;
+use crate::chip::system::system_config::CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE;
+use crate::chip::system::system_packet_buffer::{PacketBuffer, PacketBufferHandle};
 use crate::chip::VendorId;
-use crate::chip::chip_lib::core::chip_encoding::little_endian;
+use crate::chip::{GroupId, NodeId};
 
-use crate::ChipErrorResult;
-use crate::chip_ok;
 use crate::chip_core_error;
-use crate::chip_sdk_error;
-use crate::chip_error_version_mismatch;
 use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_no_memory;
+use crate::chip_error_version_mismatch;
 use crate::chip_error_wrong_encryption_type_from_peer;
+use crate::chip_ok;
+use crate::chip_sdk_error;
+use crate::ChipErrorResult;
 
 use crate::chip_static_assert;
-use crate::verify_or_return_value;
 use crate::verify_or_return_error;
+use crate::verify_or_return_value;
 
 use core::mem::size_of;
 use core::slice;
 
-use bitflags::{Flags};
+use bitflags::Flags;
 
 // Figure out the max size of a packet we can allocate, including all headers.
 const KMAX_IP_PACKET_SIZE_BYTES: usize = 1280;
 const KMAX_UDP_AND_IP_HEADER_SIZE_BYTES: usize = 48;
 
 // Max space we have for our Application Payload and MIC, per spec.
-const KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize = 
-KMAX_IP_PACKET_SIZE_BYTES - KMAX_UDP_AND_IP_HEADER_SIZE_BYTES + CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE as usize;
+const KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize = KMAX_IP_PACKET_SIZE_BYTES
+    - KMAX_UDP_AND_IP_HEADER_SIZE_BYTES
+    + CHIP_SYSTEM_CONFIG_HEADER_RESERVE_SIZE as usize;
 
 // Max space we have for our Application Payload and MIC in our actual packet
 // buffers.  This is the size _excluding_ the header reserve.
-const KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize = crate::chip::system::system_packet_buffer::PacketBuffer::KMAX_SIZE as usize;
+const KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize =
+    crate::chip::system::system_packet_buffer::PacketBuffer::KMAX_SIZE as usize;
 
-const KMAX_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize = 
-if KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES < KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES {KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES} else {KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES};
+const KMAX_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize =
+    if KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES
+        < KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES
+    {
+        KMAX_PER_SPEC_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES
+    } else {
+        KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES
+    };
 
 const KMAX_TAG_LEN: usize = 16;
 
@@ -57,10 +65,12 @@ const KMAX_TCP_AND_IP_HEADER_SIZE_BYTES: usize = 60;
 
 // Max space for the Application Payload and MIC for large packet buffers
 // This is the size _excluding_ the header reserve.
-const KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize = 
-crate::chip::system::system_packet_buffer::PacketBuffer::KLARGE_BUF_MAX_SIZE as usize - KMAX_TCP_AND_IP_HEADER_SIZE_BYTES;
+const KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize =
+    crate::chip::system::system_packet_buffer::PacketBuffer::KLARGE_BUF_MAX_SIZE as usize
+        - KMAX_TCP_AND_IP_HEADER_SIZE_BYTES;
 
-const KMAX_LARGE_APP_MESSAGE_LEN: usize = KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES - KMAX_TAG_LEN;
+const KMAX_LARGE_APP_MESSAGE_LEN: usize =
+    KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES - KMAX_TAG_LEN;
 
 pub type PacketHeaderFlags = i32;
 
@@ -212,15 +222,18 @@ impl PacketHeader {
     }
 
     pub fn has_privacy_flag(&self) -> bool {
-        self.m_sec_flags.contains(header::SecFlagValues::KPrivacyFlag)
+        self.m_sec_flags
+            .contains(header::SecFlagValues::KPrivacyFlag)
     }
 
     pub fn has_source_node_id(&self) -> bool {
-        self.m_msg_flags.contains(header::MsgFlagValues::KSourceNodeIdPresent)
+        self.m_msg_flags
+            .contains(header::MsgFlagValues::KSourceNodeIdPresent)
     }
 
     pub fn has_destination_node_id(&self) -> bool {
-        self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent)
+        self.m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationNodeIdPresent)
     }
 
     pub fn set_message_flags(&mut self, flags: header::MsgFlags) {
@@ -237,7 +250,8 @@ impl PacketHeader {
 
     pub fn set_security_flags_raw(&mut self, bits: <header::SecFlags as Flags>::Bits) {
         self.m_sec_flags = header::SecFlags::from_bits_retain(bits);
-        self.m_session_type = header::SessionType::from(self.m_sec_flags.bits() & header::KSESSION_TYPE_MASK);
+        self.m_session_type =
+            header::SessionType::from(self.m_sec_flags.bits() & header::KSESSION_TYPE_MASK);
     }
 
     pub fn is_group_session(&self) -> bool {
@@ -256,15 +270,22 @@ impl PacketHeader {
     }
 
     pub fn is_valid_group_msg(&self) -> bool {
-        return self.is_group_session() && self.has_source_node_id() && self.has_destination_node_id() && !self.is_secure_session_control_msg();
+        return self.is_group_session()
+            && self.has_source_node_id()
+            && self.has_destination_node_id()
+            && !self.is_secure_session_control_msg();
     }
 
     pub fn is_valid_mcsp_msg(&self) -> bool {
-        return self.is_group_session() && self.has_source_node_id() && self.has_destination_node_id() && self.is_secure_session_control_msg();
+        return self.is_group_session()
+            && self.has_source_node_id()
+            && self.has_destination_node_id()
+            && self.is_secure_session_control_msg();
     }
 
     pub fn is_encrypted(&self) -> bool {
-        return !((self.m_sessino_id == KMSG_UNICAST_SESSION_ID_UNSECURED) && self.is_unicast_session());
+        return !((self.m_sessino_id == KMSG_UNICAST_SESSION_ID_UNSECURED)
+            && self.is_unicast_session());
     }
 
     pub fn mic_tag_length(&self) -> u16 {
@@ -276,54 +297,67 @@ impl PacketHeader {
     }
 
     pub fn is_secure_session_control_msg(&self) -> bool {
-        return self.m_sec_flags.contains(header::SecFlagValues::KControlMsgFlag);
+        return self
+            .m_sec_flags
+            .contains(header::SecFlagValues::KControlMsgFlag);
     }
 
     pub fn set_secure_session_control_msg(mut self, value: bool) -> Self {
-        self.m_sec_flags.set(header::SecFlagValues::KControlMsgFlag, value);
+        self.m_sec_flags
+            .set(header::SecFlagValues::KControlMsgFlag, value);
         self
     }
 
     pub fn set_source_node_id(mut self, id: NodeId) -> Self {
         self.m_source_node_id = Some(id);
-        self.m_msg_flags.insert(header::MsgFlagValues::KSourceNodeIdPresent);
+        self.m_msg_flags
+            .insert(header::MsgFlagValues::KSourceNodeIdPresent);
         self
     }
 
     pub fn set_source_node_id_option(mut self, id: Option<NodeId>) -> Self {
         self.m_source_node_id = id;
-        self.m_msg_flags.set(header::MsgFlagValues::KSourceNodeIdPresent, id.is_some());
+        self.m_msg_flags
+            .set(header::MsgFlagValues::KSourceNodeIdPresent, id.is_some());
         self
     }
 
     pub fn clear_source_node_id(mut self) -> Self {
         self.m_source_node_id = None;
-        self.m_msg_flags.remove(header::MsgFlagValues::KSourceNodeIdPresent);
+        self.m_msg_flags
+            .remove(header::MsgFlagValues::KSourceNodeIdPresent);
         self
     }
 
     pub fn set_destination_node_id(mut self, id: NodeId) -> Self {
         self.m_destination_node_id = Some(id);
-        self.m_msg_flags.insert(header::MsgFlagValues::KDestinationNodeIdPresent);
+        self.m_msg_flags
+            .insert(header::MsgFlagValues::KDestinationNodeIdPresent);
         self
     }
 
     pub fn set_destination_node_id_option(mut self, id: Option<NodeId>) -> Self {
         self.m_destination_node_id = id;
-        self.m_msg_flags.set(header::MsgFlagValues::KDestinationNodeIdPresent, id.is_some());
+        self.m_msg_flags.set(
+            header::MsgFlagValues::KDestinationNodeIdPresent,
+            id.is_some(),
+        );
         self
     }
 
     pub fn clear_destination_node_id(mut self) -> Self {
         self.m_destination_node_id = None;
-        self.m_msg_flags.remove(header::MsgFlagValues::KDestinationNodeIdPresent);
+        self.m_msg_flags
+            .remove(header::MsgFlagValues::KDestinationNodeIdPresent);
         self
     }
 
     pub fn set_session_type(mut self, the_type: header::SessionType) -> Self {
         self.m_session_type = the_type;
         let type_mask: u8 = header::KSESSION_TYPE_MASK as u8;
-        self.m_sec_flags = header::SecFlags::from_bits_retain((self.m_sec_flags.bits() & !type_mask) | (the_type as u8 & type_mask));
+        self.m_sec_flags = header::SecFlags::from_bits_retain(
+            (self.m_sec_flags.bits() & !type_mask) | (the_type as u8 & type_mask),
+        );
         self
     }
 
@@ -343,19 +377,28 @@ impl PacketHeader {
         self
     }
 
-    pub fn privacy_header(msg_buf: * mut u8) -> * mut u8 {
+    pub fn privacy_header(msg_buf: *mut u8) -> *mut u8 {
         msg_buf.wrapping_add(Self::KPRIVACY_HEADER_OFFSET)
     }
 
     pub fn privacy_header_length(&self) -> usize {
         let mut len: usize = Self::KPRIVACY_HEADER_MIN_LENGTH;
-        if self.m_msg_flags.contains(header::MsgFlagValues::KSourceNodeIdPresent) {
+        if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KSourceNodeIdPresent)
+        {
             len += size_of::<NodeId>();
         }
-        if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent) {
+        if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationNodeIdPresent)
+        {
             len += size_of::<NodeId>();
         }
-        if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationGroupIdPresent) {
+        if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationGroupIdPresent)
+        {
             len += size_of::<GroupId>();
         }
 
@@ -389,7 +432,12 @@ impl PacketHeader {
             size += internal::KGROUP_ID_SIZE_BYTES;
         }
 
-        chip_static_assert!(internal::KFIXED_UNENCRYPTED_HEADER_SIZE_BYTES + internal::KNODE_ID_SIZE_BYTES + internal::KNODE_ID_SIZE_BYTES <= (u16::MAX as usize));
+        chip_static_assert!(
+            internal::KFIXED_UNENCRYPTED_HEADER_SIZE_BYTES
+                + internal::KNODE_ID_SIZE_BYTES
+                + internal::KNODE_ID_SIZE_BYTES
+                <= (u16::MAX as usize)
+        );
 
         return size as u16;
     }
@@ -405,7 +453,7 @@ impl PacketHeader {
      *    CHIP_ERROR_VERSION_MISMATCH if header version is not supported.
      */
     pub fn decode_fixed(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
-        let pb: * mut PacketBuffer = buf.get_raw();
+        let pb: *mut PacketBuffer = buf.get_raw();
         unsafe {
             let mut reader = Reader::default_with_raw((*pb).start(), (*pb).data_len() as usize);
             return self.decode_fixed_common(&mut reader);
@@ -433,7 +481,10 @@ impl PacketHeader {
 
         reader.read_u32(&mut self.m_message_counter).status()?;
 
-        if self.m_msg_flags.contains(header::MsgFlagValues::KSourceNodeIdPresent) {
+        if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KSourceNodeIdPresent)
+        {
             let mut source_node_id: u64 = 0;
             reader.read_u64(&mut source_node_id).status()?;
             self.m_source_node_id = Some(source_node_id);
@@ -445,14 +496,23 @@ impl PacketHeader {
             return Err(chip_error_internal!());
         }
 
-        if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent | header::MsgFlagValues::KDestinationGroupIdPresent) {
+        if self.m_msg_flags.contains(
+            header::MsgFlagValues::KDestinationNodeIdPresent
+                | header::MsgFlagValues::KDestinationGroupIdPresent,
+        ) {
             return Err(chip_error_internal!());
-        } else if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationNodeIdPresent) {
+        } else if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationNodeIdPresent)
+        {
             let mut destination_node_id: u64 = 0;
             reader.read_u64(&mut destination_node_id).status()?;
             self.m_destination_node_id = Some(destination_node_id);
             self.m_destination_group_id = None;
-        } else if self.m_msg_flags.contains(header::MsgFlagValues::KDestinationGroupIdPresent) {
+        } else if self
+            .m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationGroupIdPresent)
+        {
             if self.m_session_type != header::SessionType::KGroupSession {
                 return Err(chip_error_internal!());
             }
@@ -466,10 +526,17 @@ impl PacketHeader {
         }
         let mut err = chip_ok!();
 
-        if self.m_sec_flags.contains(header::SecFlagValues::KMsgExtensionFlag) {
+        if self
+            .m_sec_flags
+            .contains(header::SecFlagValues::KMsgExtensionFlag)
+        {
             let mut mx_length: u16 = 0;
             reader.read_u16(&mut mx_length).status()?;
-            verify_or_return_error!(usize::from(mx_length) <= reader.remaining(), err, err = Err(chip_error_internal!()));
+            verify_or_return_error!(
+                usize::from(mx_length) <= reader.remaining(),
+                err,
+                err = Err(chip_error_internal!())
+            );
             reader.skip(mx_length.into());
         }
 
@@ -479,7 +546,12 @@ impl PacketHeader {
         err
     }
 
-    pub fn decode_with_raw(&mut self, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
+    pub fn decode_with_raw(
+        &mut self,
+        data: *const u8,
+        size: usize,
+        decode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
             return self.decode(slice::from_raw_parts(data, size), decode_size);
         }
@@ -490,10 +562,14 @@ impl PacketHeader {
      * consumes the bytes we decoded from.
      */
     pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
-        let packet_buffer: * mut PacketBuffer = buf.get_raw();
+        let packet_buffer: *mut PacketBuffer = buf.get_raw();
         let mut header_size: u16 = 0;
         unsafe {
-            self.decode_with_raw((*packet_buffer).start(), (*packet_buffer).data_len().try_into().unwrap(), &mut header_size)?;
+            self.decode_with_raw(
+                (*packet_buffer).start(),
+                (*packet_buffer).data_len().try_into().unwrap(),
+                &mut header_size,
+            )?;
             (*packet_buffer).consume_head(header_size.try_into().unwrap());
         }
         chip_ok!()
@@ -512,16 +588,32 @@ impl PacketHeader {
      *    CHIP_ERROR_INVALID_ARGUMENT on insufficient buffer size
      */
     pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
-        verify_or_return_error!(data.len() >= self.encode_size_bytes().into(), Err(chip_error_invalid_argument!()));
-        verify_or_return_error!(!(self.m_destination_node_id.is_some() && self.m_destination_group_id.is_some()), Err(chip_error_internal!()));
+        verify_or_return_error!(
+            data.len() >= self.encode_size_bytes().into(),
+            Err(chip_error_invalid_argument!())
+        );
+        verify_or_return_error!(
+            !(self.m_destination_node_id.is_some() && self.m_destination_group_id.is_some()),
+            Err(chip_error_internal!())
+        );
         verify_or_return_error!(self.is_session_type_valid(), Err(chip_error_internal!()));
         let mut message_flags: header::MsgFlags = self.m_msg_flags.clone();
-        message_flags.set(header::MsgFlagValues::KSourceNodeIdPresent, self.m_source_node_id.is_some());
-        message_flags.set(header::MsgFlagValues::KDestinationNodeIdPresent, self.m_destination_node_id.is_some());
-        message_flags.set(header::MsgFlagValues::KDestinationGroupIdPresent, self.m_destination_group_id.is_some());
+        message_flags.set(
+            header::MsgFlagValues::KSourceNodeIdPresent,
+            self.m_source_node_id.is_some(),
+        );
+        message_flags.set(
+            header::MsgFlagValues::KDestinationNodeIdPresent,
+            self.m_destination_node_id.is_some(),
+        );
+        message_flags.set(
+            header::MsgFlagValues::KDestinationGroupIdPresent,
+            self.m_destination_group_id.is_some(),
+        );
 
-        let msg_flags: u8 = ((Self::KMSG_HEADER_VERSION << internal::KVERSION_SHIFT) as u8) | (message_flags.bits() & internal::KMSG_FLAGS_MASK);
-        let mut p: * mut u8 = data.as_mut_ptr();
+        let msg_flags: u8 = ((Self::KMSG_HEADER_VERSION << internal::KVERSION_SHIFT) as u8)
+            | (message_flags.bits() & internal::KMSG_FLAGS_MASK);
+        let mut p: *mut u8 = data.as_mut_ptr();
         little_endian::write_u8_raw(&mut p, msg_flags);
         little_endian::write_u16_raw(&mut p, self.m_sessino_id);
         little_endian::write_u8_raw(&mut p, self.m_sec_flags.bits());
@@ -538,7 +630,10 @@ impl PacketHeader {
         }
 
         unsafe {
-            verify_or_return_error!(p.offset_from(data.as_ptr()) == (self.encode_size_bytes().try_into().unwrap()), Err(chip_error_internal!()));
+            verify_or_return_error!(
+                p.offset_from(data.as_ptr()) == (self.encode_size_bytes().try_into().unwrap()),
+                Err(chip_error_internal!())
+            );
             *encode_size = p.offset_from(data.as_ptr()).try_into().unwrap();
         }
 
@@ -547,20 +642,36 @@ impl PacketHeader {
 
     pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
         let header_size: u16 = self.encode_size_bytes();
-        let pb: * mut PacketBuffer = buf.get_raw();
+        let pb: *mut PacketBuffer = buf.get_raw();
         unsafe {
-            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_no_memory!()));
+            verify_or_return_error!(
+                (*pb).ensure_reserved_size(header_size),
+                Err(chip_error_no_memory!())
+            );
             (*pb).set_start((*pb).start().sub(header_size as usize));
         }
         let mut actual_encoded_header_size: u16 = 0;
         self.encode_at_start(buf, &mut actual_encoded_header_size)?;
-        verify_or_return_error!(actual_encoded_header_size == header_size, Err(chip_error_internal!()));
+        verify_or_return_error!(
+            actual_encoded_header_size == header_size,
+            Err(chip_error_internal!())
+        );
         chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode_at_start(
+        &self,
+        buf: &PacketBufferHandle,
+        encode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.encode(slice::from_raw_parts_mut((*(buf.get_raw())).start(), (*(buf.get_raw())).data_len() as usize), encode_size);
+            return self.encode(
+                slice::from_raw_parts_mut(
+                    (*(buf.get_raw())).start(),
+                    (*(buf.get_raw())).data_len() as usize,
+                ),
+                encode_size,
+            );
         }
     }
 
@@ -569,8 +680,13 @@ impl PacketHeader {
         let mut msg_flags: u8 = 0;
 
         reader.read_u8(&mut msg_flags).status()?;
-        let version: usize = ((msg_flags as usize) & (internal::KVERSION_MASK as usize)) >> internal::KVERSION_SHIFT;
-        verify_or_return_error!(version == Self::KMSG_HEADER_VERSION, err, err = Err(chip_error_version_mismatch!()));
+        let version: usize =
+            ((msg_flags as usize) & (internal::KVERSION_MASK as usize)) >> internal::KVERSION_SHIFT;
+        verify_or_return_error!(
+            version == Self::KMSG_HEADER_VERSION,
+            err,
+            err = Err(chip_error_version_mismatch!())
+        );
         self.set_message_flags_raw(msg_flags);
 
         reader.read_u16(&mut self.m_sessino_id).status()?;
@@ -647,37 +763,44 @@ impl PayloadHeader {
     }
 
     pub fn set_initiator(mut self, initiator: bool) -> Self {
-        self.m_exchange_flags.set(header::ExFlags::KExchangeFlagInitiator, initiator);
+        self.m_exchange_flags
+            .set(header::ExFlags::KExchangeFlagInitiator, initiator);
         self
     }
 
     pub fn set_ack_message_counter(mut self, counter: u32) -> Self {
         self.m_ack_message_counter = Some(counter);
-        self.m_exchange_flags.insert(header::ExFlags::KExchangeFlagAckMsg);
+        self.m_exchange_flags
+            .insert(header::ExFlags::KExchangeFlagAckMsg);
         self
     }
 
     pub fn set_ack_message_counter_option(mut self, counter: Option<u32>) -> Self {
         self.m_ack_message_counter = counter;
-        self.m_exchange_flags.set(header::ExFlags::KExchangeFlagAckMsg, counter.is_some());
+        self.m_exchange_flags
+            .set(header::ExFlags::KExchangeFlagAckMsg, counter.is_some());
         self
     }
 
     pub fn set_needs_ack(mut self, needs_ack: bool) -> Self {
-        self.m_exchange_flags.set(header::ExFlags::KExchangeFlagNeedsAck, needs_ack);
+        self.m_exchange_flags
+            .set(header::ExFlags::KExchangeFlagNeedsAck, needs_ack);
         self
     }
 
     pub fn is_initiator(&self) -> bool {
-        self.m_exchange_flags.contains(header::ExFlags::KExchangeFlagInitiator)
+        self.m_exchange_flags
+            .contains(header::ExFlags::KExchangeFlagInitiator)
     }
 
     pub fn is_ack_msg(&self) -> bool {
-        self.m_exchange_flags.contains(header::ExFlags::KExchangeFlagAckMsg)
+        self.m_exchange_flags
+            .contains(header::ExFlags::KExchangeFlagAckMsg)
     }
 
     pub fn is_needs_ack(&self) -> bool {
-        self.m_exchange_flags.contains(header::ExFlags::KExchangeFlagNeedsAck)
+        self.m_exchange_flags
+            .contains(header::ExFlags::KExchangeFlagNeedsAck)
     }
 
     pub fn encode_size_bytes(&self) -> u16 {
@@ -691,12 +814,22 @@ impl PayloadHeader {
             size += internal::KACK_MESSGE_COUNTER_SIZE_BYTES;
         }
 
-        chip_static_assert!(internal::KENCRYPTED_HEADER_SIZE_BYTES + internal::KVENDOR_ID_SIZE_BYTES + internal::KACK_MESSGE_COUNTER_SIZE_BYTES <= (u16::MAX as usize));
+        chip_static_assert!(
+            internal::KENCRYPTED_HEADER_SIZE_BYTES
+                + internal::KVENDOR_ID_SIZE_BYTES
+                + internal::KACK_MESSGE_COUNTER_SIZE_BYTES
+                <= (u16::MAX as usize)
+        );
 
         return size as u16;
     }
 
-    pub fn decode_with_raw(&mut self, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
+    pub fn decode_with_raw(
+        &mut self,
+        data: *const u8,
+        size: usize,
+        decode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
             return self.decode(slice::from_raw_parts(data, size), decode_size);
         }
@@ -706,7 +839,11 @@ impl PayloadHeader {
         let mut reader = Reader::default(data);
         let mut header: u8 = 0;
 
-        reader.read_u8(&mut header).read_u8(&mut self.m_message_type).read_u16(&mut self.m_exchange_id).status()?;
+        reader
+            .read_u8(&mut header)
+            .read_u8(&mut self.m_message_type)
+            .read_u16(&mut self.m_exchange_id)
+            .status()?;
 
         self.m_exchange_flags = header::ExFlags::from_bits_retain(header);
 
@@ -725,7 +862,10 @@ impl PayloadHeader {
 
         self.m_protocol_id = protocols::Id::default(vendor_id, protocol_id);
 
-        if self.m_exchange_flags.contains(header::ExFlagValues::KExchangeFlagAckMsg) {
+        if self
+            .m_exchange_flags
+            .contains(header::ExFlagValues::KExchangeFlagAckMsg)
+        {
             let mut ack_message_counter: u32 = 0;
             reader.read_u32(&mut ack_message_counter).status()?;
             self.m_ack_message_counter = Some(ack_message_counter);
@@ -734,10 +874,17 @@ impl PayloadHeader {
         }
 
         let mut err = chip_ok!();
-        if self.m_exchange_flags.contains(header::ExFlagValues::KExchangeFlagSecuredExtension) {
+        if self
+            .m_exchange_flags
+            .contains(header::ExFlagValues::KExchangeFlagSecuredExtension)
+        {
             let mut sx_length: u16 = 0;
             reader.read_u16(&mut sx_length).status()?;
-            verify_or_return_error!(usize::from(sx_length) <= reader.remaining(), err, err = Err(chip_error_internal!()));
+            verify_or_return_error!(
+                usize::from(sx_length) <= reader.remaining(),
+                err,
+                err = Err(chip_error_internal!())
+            );
             reader.skip(sx_length.into());
         }
 
@@ -748,24 +895,36 @@ impl PayloadHeader {
     }
 
     pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
-        let packet_buffer: * mut PacketBuffer = buf.get_raw();
+        let packet_buffer: *mut PacketBuffer = buf.get_raw();
         let mut header_size: u16 = 0;
         unsafe {
-            self.decode_with_raw((*packet_buffer).start(), (*packet_buffer).data_len().try_into().unwrap(), &mut header_size)?;
+            self.decode_with_raw(
+                (*packet_buffer).start(),
+                (*packet_buffer).data_len().try_into().unwrap(),
+                &mut header_size,
+            )?;
             (*packet_buffer).consume_head(header_size.try_into().unwrap());
         }
         chip_ok!()
     }
 
-    pub fn encode_with_raw(&mut self, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode_with_raw(
+        &mut self,
+        data: *mut u8,
+        size: usize,
+        encode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
             return self.encode(slice::from_raw_parts_mut(data, size), encode_size);
         }
     }
 
     pub fn encode(&self, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
-        verify_or_return_error!(data.len() >= self.encode_size_bytes().into(), Err(chip_error_invalid_argument!()));
-        let mut p: * mut u8 = data.as_mut_ptr();
+        verify_or_return_error!(
+            data.len() >= self.encode_size_bytes().into(),
+            Err(chip_error_invalid_argument!())
+        );
+        let mut p: *mut u8 = data.as_mut_ptr();
         let header: u8 = self.m_exchange_flags.bits();
 
         little_endian::write_u8_raw(&mut p, header);
@@ -781,7 +940,10 @@ impl PayloadHeader {
             little_endian::write_u32_raw(&mut p, self.m_ack_message_counter.clone().unwrap());
         }
         unsafe {
-            verify_or_return_error!(p.offset_from(data.as_ptr()) == (self.encode_size_bytes() as isize), Err(chip_error_internal!()));
+            verify_or_return_error!(
+                p.offset_from(data.as_ptr()) == (self.encode_size_bytes() as isize),
+                Err(chip_error_internal!())
+            );
             *encode_size = p.offset_from(data.as_ptr()) as u16;
         }
 
@@ -790,31 +952,48 @@ impl PayloadHeader {
 
     pub fn encode_before_data(&self, buf: &PacketBufferHandle) -> ChipErrorResult {
         let header_size: u16 = self.encode_size_bytes();
-        let pb: * mut PacketBuffer = buf.get_raw();
+        let pb: *mut PacketBuffer = buf.get_raw();
         unsafe {
-            verify_or_return_error!((*pb).ensure_reserved_size(header_size), Err(chip_error_no_memory!()));
+            verify_or_return_error!(
+                (*pb).ensure_reserved_size(header_size),
+                Err(chip_error_no_memory!())
+            );
             (*pb).set_start((*pb).start().sub(header_size as usize));
         }
         let mut actual_encoded_header_size: u16 = 0;
         self.encode_at_start(buf, &mut actual_encoded_header_size)?;
-        verify_or_return_error!(actual_encoded_header_size == header_size, Err(chip_error_internal!()));
+        verify_or_return_error!(
+            actual_encoded_header_size == header_size,
+            Err(chip_error_internal!())
+        );
         chip_ok!()
     }
 
-    pub fn encode_at_start(&self, buf: &PacketBufferHandle, encode_size: &mut u16) -> ChipErrorResult {
-        let pb: * mut PacketBuffer = buf.get_raw();
+    pub fn encode_at_start(
+        &self,
+        buf: &PacketBufferHandle,
+        encode_size: &mut u16,
+    ) -> ChipErrorResult {
+        let pb: *mut PacketBuffer = buf.get_raw();
         unsafe {
-            return self.encode(slice::from_raw_parts_mut((*pb).start(), (*pb).data_len() as usize), encode_size);
+            return self.encode(
+                slice::from_raw_parts_mut((*pb).start(), (*pb).data_len() as usize),
+                encode_size,
+            );
         }
     }
 
     fn set_protocol(&mut self, protocol: protocols::Id) {
-        self.m_exchange_flags.set(header::ExFlags::KExchangeFlagVendorIdPresent, protocol.get_vendor_id() != VendorId::Common);
+        self.m_exchange_flags.set(
+            header::ExFlags::KExchangeFlagVendorIdPresent,
+            protocol.get_vendor_id() != VendorId::Common,
+        );
         self.m_protocol_id = protocol;
     }
 
     fn have_vendor_id(&self) -> bool {
-        self.m_exchange_flags.contains(header::ExFlags::KExchangeFlagVendorIdPresent)
+        self.m_exchange_flags
+            .contains(header::ExFlags::KExchangeFlagVendorIdPresent)
     }
 }
 
@@ -828,7 +1007,7 @@ impl MessageAuthenticationCode {
         return &self.m_tag[..];
     }
 
-    pub fn get_tag_raw(&self) -> * const u8 {
+    pub fn get_tag_raw(&self) -> *const u8 {
         self.m_tag.as_ptr()
     }
 
@@ -841,17 +1020,28 @@ impl MessageAuthenticationCode {
         self
     }
 
-    pub fn set_tag_with_raw(self, tag: * const u8, len: usize) -> Self {
+    pub fn set_tag_with_raw(self, tag: *const u8, len: usize) -> Self {
         unsafe {
             return self.set_tag(slice::from_raw_parts(tag, len));
         }
     }
 
-    pub fn decode(&mut self, packet_header: &PacketHeader, data: &[u8], decode_size: &mut u16) -> ChipErrorResult {
+    pub fn decode(
+        &mut self,
+        packet_header: &PacketHeader,
+        data: &[u8],
+        decode_size: &mut u16,
+    ) -> ChipErrorResult {
         let tag_len: u16 = packet_header.mic_tag_length();
 
-        verify_or_return_error!(tag_len != 0, Err(chip_error_wrong_encryption_type_from_peer!()));
-        verify_or_return_error!(data.len() >= (tag_len as usize), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(
+            tag_len != 0,
+            Err(chip_error_wrong_encryption_type_from_peer!())
+        );
+        verify_or_return_error!(
+            data.len() >= (tag_len as usize),
+            Err(chip_error_invalid_argument!())
+        );
 
         self.m_tag.copy_from_slice(&data[..(tag_len as usize)]);
 
@@ -860,17 +1050,38 @@ impl MessageAuthenticationCode {
         chip_ok!()
     }
 
-    pub fn decode_with_raw(&mut self, packet_header: &PacketHeader, data: * const u8, size: usize, decode_size: &mut u16) -> ChipErrorResult {
+    pub fn decode_with_raw(
+        &mut self,
+        packet_header: &PacketHeader,
+        data: *const u8,
+        size: usize,
+        decode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.decode(packet_header, slice::from_raw_parts(data, size), decode_size);
+            return self.decode(
+                packet_header,
+                slice::from_raw_parts(data, size),
+                decode_size,
+            );
         }
     }
 
-    pub fn encode(&self, packet_header: &PacketHeader, data: &mut [u8], encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode(
+        &self,
+        packet_header: &PacketHeader,
+        data: &mut [u8],
+        encode_size: &mut u16,
+    ) -> ChipErrorResult {
         let tag_len: u16 = packet_header.mic_tag_length();
 
-        verify_or_return_error!(tag_len != 0, Err(chip_error_wrong_encryption_type_from_peer!()));
-        verify_or_return_error!(data.len() >= (tag_len as usize), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(
+            tag_len != 0,
+            Err(chip_error_wrong_encryption_type_from_peer!())
+        );
+        verify_or_return_error!(
+            data.len() >= (tag_len as usize),
+            Err(chip_error_invalid_argument!())
+        );
 
         data.copy_from_slice(&self.m_tag[..(tag_len as usize)]);
 
@@ -879,277 +1090,285 @@ impl MessageAuthenticationCode {
         chip_ok!()
     }
 
-    pub fn encode_with_raw(&self, packet_header: &PacketHeader, data: * mut u8, size: usize, encode_size: &mut u16) -> ChipErrorResult {
+    pub fn encode_with_raw(
+        &self,
+        packet_header: &PacketHeader,
+        data: *mut u8,
+        size: usize,
+        encode_size: &mut u16,
+    ) -> ChipErrorResult {
         unsafe {
-            return self.encode(packet_header, slice::from_raw_parts_mut(data, size), encode_size);
+            return self.encode(
+                packet_header,
+                slice::from_raw_parts_mut(data, size),
+                encode_size,
+            );
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-  mod test_packet_header {
-      use super::super::*;
-      use std::*;
+    mod test_packet_header {
+        use super::super::*;
+        use std::*;
 
-      #[test]
-      fn create_default() {
-          let ph: PacketHeader = PacketHeader::default();
-          assert_eq!(0, ph.get_message_counter());
-      }
+        #[test]
+        fn create_default() {
+            let ph: PacketHeader = PacketHeader::default();
+            assert_eq!(0, ph.get_message_counter());
+        }
 
-      #[test]
-      fn set_source_id() {
-          let ph: PacketHeader = PacketHeader::default().set_source_node_id(0x11);
-          assert_eq!(true, ph.get_source_node_id().is_some());
-          assert_eq!(0x11, ph.get_source_node_id().clone().unwrap());
-      }
+        #[test]
+        fn set_source_id() {
+            let ph: PacketHeader = PacketHeader::default().set_source_node_id(0x11);
+            assert_eq!(true, ph.get_source_node_id().is_some());
+            assert_eq!(0x11, ph.get_source_node_id().clone().unwrap());
+        }
 
-      #[test]
-      fn decode_with_source_and_destination_id_successfully() {
-          let mut ph: PacketHeader = PacketHeader::default();
-          let raw: [u8; 28] = 
-              [
-              0x05,   // with sourid and destination id
-              0x12, 0x34,  
-              0x20,  // with MX(flag for extension) set and session type = 0
-              0x56, 0x34, 0x12, 0x00,
-              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
-              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
-              0x02, 0x00,  
-              0xDE, 0xAD  
-              ];
-          let mut decode_size: u16 = 0;
+        #[test]
+        fn decode_with_source_and_destination_id_successfully() {
+            let mut ph: PacketHeader = PacketHeader::default();
+            let raw: [u8; 28] = [
+                0x05, // with sourid and destination id
+                0x12, 0x34, 0x20, // with MX(flag for extension) set and session type = 0
+                0x56, 0x34, 0x12, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x99, 0x88,
+                0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x02, 0x00, 0xDE, 0xAD,
+            ];
+            let mut decode_size: u16 = 0;
 
-          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
-          assert_eq!(28, decode_size);
-          assert_eq!(0x3412, ph.get_session_id());
-          assert_eq!(0x00123456, ph.m_message_counter);
-          assert_eq!(0x1122334455667788, ph.get_source_node_id().unwrap());
-          assert_eq!(0x2233445566778899, ph.get_destination_node_id().unwrap());
-      }
+            assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+            assert_eq!(28, decode_size);
+            assert_eq!(0x3412, ph.get_session_id());
+            assert_eq!(0x00123456, ph.m_message_counter);
+            assert_eq!(0x1122334455667788, ph.get_source_node_id().unwrap());
+            assert_eq!(0x2233445566778899, ph.get_destination_node_id().unwrap());
+        }
 
-      #[test]
-      fn decode_with_source_and_destination_group_id_successfully() {
-          let mut ph: PacketHeader = PacketHeader::default();
-          let raw: [u8; 22] = 
-              [
-              0x06,   // with sourid and destination group id
-              0x12, 0x34,  
-              0x21,  // with MX(flag for extension) set and session type = 1(group)
-              0x56, 0x34, 0x12, 0x00,
-              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
-              0x99, 0x88,
-              0x02, 0x00,  
-              0xDE, 0xAD  
-              ];
-          let mut decode_size: u16 = 0;
+        #[test]
+        fn decode_with_source_and_destination_group_id_successfully() {
+            let mut ph: PacketHeader = PacketHeader::default();
+            let raw: [u8; 22] = [
+                0x06, // with sourid and destination group id
+                0x12, 0x34,
+                0x21, // with MX(flag for extension) set and session type = 1(group)
+                0x56, 0x34, 0x12, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x99, 0x88,
+                0x02, 0x00, 0xDE, 0xAD,
+            ];
+            let mut decode_size: u16 = 0;
 
-          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
-          assert_eq!(22, decode_size);
-      }
+            assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+            assert_eq!(22, decode_size);
+        }
 
-      #[test]
-      fn decode_with_source_and_no_destination_successfully() {
-          let mut ph: PacketHeader = PacketHeader::default();
-          let raw: [u8; 20] = 
-              [
-              0x04,   // with sourid and destination group id
-              0x12, 0x34,  
-              0x20,  // with MX(flag for extension) set and session type = 1(group)
-              0x56, 0x34, 0x12, 0x00,
-              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
-              0x02, 0x00,  
-              0xDE, 0xAD  
-              ];
-          let mut decode_size: u16 = 0;
+        #[test]
+        fn decode_with_source_and_no_destination_successfully() {
+            let mut ph: PacketHeader = PacketHeader::default();
+            let raw: [u8; 20] = [
+                0x04, // with sourid and destination group id
+                0x12, 0x34,
+                0x20, // with MX(flag for extension) set and session type = 1(group)
+                0x56, 0x34, 0x12, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x02, 0x00,
+                0xDE, 0xAD,
+            ];
+            let mut decode_size: u16 = 0;
 
-          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
-          assert_eq!(20, decode_size);
-      }
+            assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+            assert_eq!(20, decode_size);
+        }
 
-      #[test]
-      fn decode_with_no_source_and_no_destination_id_successfully() {
-          let mut ph: PacketHeader = PacketHeader::default();
-          let raw: [u8; 12] = 
-              [
-              0x00,   // with no sourid and no destination id
-              0x12, 0x34,  
-              0x20,  // with MX(flag for extension) set and session type = 0
-              0x56, 0x34, 0x12, 0x00,
-              0x02, 0x00,  
-              0xDE, 0xAD  
-              ];
-          let mut decode_size: u16 = 0;
+        #[test]
+        fn decode_with_no_source_and_no_destination_id_successfully() {
+            let mut ph: PacketHeader = PacketHeader::default();
+            let raw: [u8; 12] = [
+                0x00, // with no sourid and no destination id
+                0x12, 0x34, 0x20, // with MX(flag for extension) set and session type = 0
+                0x56, 0x34, 0x12, 0x00, 0x02, 0x00, 0xDE, 0xAD,
+            ];
+            let mut decode_size: u16 = 0;
 
-          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
-          assert_eq!(12, decode_size);
-      }
+            assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+            assert_eq!(12, decode_size);
+        }
 
-      #[test]
-      fn encode_with_source_and_destination_id_successfully() {
-          let mut ph: PacketHeader = PacketHeader::default().set_session_id(0x3412).set_message_counter(0x00123456).set_source_node_id(0x1122334455667788).set_destination_node_id(0x2233445566778899);
-          const PACKET_LEN: usize = 24;
-          let expected_packet: [u8; PACKET_LEN] = 
-              [
-              0x05,   // with sourid and destination id
-              0x12, 0x34,  
-              0x00,  // with session type = 0
-              0x56, 0x34, 0x12, 0x00,
-              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
-              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
-              ];
-          let mut output: [u8; PACKET_LEN] = [0; PACKET_LEN];
-          let mut encode_size: u16 = 0;
+        #[test]
+        fn encode_with_source_and_destination_id_successfully() {
+            let mut ph: PacketHeader = PacketHeader::default()
+                .set_session_id(0x3412)
+                .set_message_counter(0x00123456)
+                .set_source_node_id(0x1122334455667788)
+                .set_destination_node_id(0x2233445566778899);
+            const PACKET_LEN: usize = 24;
+            let expected_packet: [u8; PACKET_LEN] = [
+                0x05, // with sourid and destination id
+                0x12, 0x34, 0x00, // with session type = 0
+                0x56, 0x34, 0x12, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x99, 0x88,
+                0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+            ];
+            let mut output: [u8; PACKET_LEN] = [0; PACKET_LEN];
+            let mut encode_size: u16 = 0;
 
-          ph.set_message_flags_raw(0x05);
-          ph.set_security_flags_raw(0x00);
+            ph.set_message_flags_raw(0x05);
+            ph.set_security_flags_raw(0x00);
 
-          assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
-          assert_eq!(PACKET_LEN, encode_size.into());
-          for i in 0..PACKET_LEN {
-              assert_eq!(expected_packet[i], output[i]);
-          }
-      }
+            assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
+            assert_eq!(PACKET_LEN, encode_size.into());
+            for i in 0..PACKET_LEN {
+                assert_eq!(expected_packet[i], output[i]);
+            }
+        }
 
-      #[test]
-      fn encode_before_data() {
-          let mut ph: PacketHeader = PacketHeader::default().set_session_id(0x3412).set_message_counter(0x00123456).set_source_node_id(0x1122334455667788).set_destination_node_id(0x2233445566778899);
-          const PACKET_LEN: usize = 24;
-          let expected_packet: [u8; PACKET_LEN] = 
-              [
-              0x05,   // with sourid and destination id
-              0x12, 0x34,  
-              0x00,  // with session type = 0
-              0x56, 0x34, 0x12, 0x00,
-              0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,  
-              0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,  
-              ];
-          let output: [u8; PACKET_LEN] = [0; PACKET_LEN];
+        #[test]
+        fn encode_before_data() {
+            let mut ph: PacketHeader = PacketHeader::default()
+                .set_session_id(0x3412)
+                .set_message_counter(0x00123456)
+                .set_source_node_id(0x1122334455667788)
+                .set_destination_node_id(0x2233445566778899);
+            const PACKET_LEN: usize = 24;
+            let expected_packet: [u8; PACKET_LEN] = [
+                0x05, // with sourid and destination id
+                0x12, 0x34, 0x00, // with session type = 0
+                0x56, 0x34, 0x12, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x99, 0x88,
+                0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+            ];
+            let output: [u8; PACKET_LEN] = [0; PACKET_LEN];
 
-          ph.set_message_flags_raw(0x05);
-          ph.set_security_flags_raw(0x00);
+            ph.set_message_flags_raw(0x05);
+            ph.set_security_flags_raw(0x00);
 
-          let pbh = PacketBufferHandle::new_with_data(&output[..],0,0).unwrap();
+            let pbh = PacketBufferHandle::new_with_data(&output[..], 0, 0).unwrap();
 
-          assert_eq!(true, ph.encode_before_data(&pbh).is_ok());
-          unsafe {
-              let buf = pbh.get_raw();
-              for i in 0..PACKET_LEN {
-                  assert_eq!(expected_packet[i], *(*buf).start().add(i));
-              }
-          }
-      }
+            assert_eq!(true, ph.encode_before_data(&pbh).is_ok());
+            unsafe {
+                let buf = pbh.get_raw();
+                for i in 0..PACKET_LEN {
+                    assert_eq!(expected_packet[i], *(*buf).start().add(i));
+                }
+            }
+        }
+    }
 
-  }
+    mod test_payload_header {
+        use super::super::*;
+        use std::*;
 
-  mod test_payload_header {
-      use super::super::*;
-      use std::*;
+        #[test]
+        fn create_default() {
+            let ph: PayloadHeader = PayloadHeader::default();
+            assert_eq!(0, ph.get_message_type());
+        }
 
-      #[test]
-      fn create_default() {
-          let ph: PayloadHeader = PayloadHeader::default();
-          assert_eq!(0, ph.get_message_type());
-      }
+        #[test]
+        fn set_exchange_id() {
+            let ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0x11);
+            assert_eq!(0x11, ph.get_exchange_id());
+        }
 
-      #[test]
-      fn set_exchange_id() {
-          let ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0x11);
-          assert_eq!(0x11, ph.get_exchange_id());
-      }
+        #[test]
+        fn decode_with_vendor_id_and_ack_message_counter_successfully() {
+            let mut ph: PayloadHeader = PayloadHeader::default();
+            let raw: [u8; 16] = [
+                0x1A, // with security extenstion and vendor id and a ack message
+                0x12, // message type(op code)
+                0xAA, 0xBB, // Exchange ID
+                0xF1, 0xFF, // Vendor Test 1
+                0x11, 0x22, // protocol ID
+                0x99, 0x88, 0x77, 0x66, // Ack Message Counter
+                0x02, 0x00, 0xDE, 0xAD,
+            ];
+            let mut decode_size: u16 = 0;
 
-      #[test]
-      fn decode_with_vendor_id_and_ack_message_counter_successfully() {
-          let mut ph: PayloadHeader = PayloadHeader::default();
-          let raw: [u8; 16] = 
-              [
-              0x1A, // with security extenstion and vendor id and a ack message
-              0x12, // message type(op code)
-              0xAA, 0xBB,  // Exchange ID
-              0xF1, 0xFF, // Vendor Test 1
-              0x11, 0x22, // protocol ID
-              0x99, 0x88, 0x77, 0x66, // Ack Message Counter
-              0x02, 0x00,  
-              0xDE, 0xAD  
-              ];
-          let mut decode_size: u16 = 0;
+            assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
+            assert_eq!(16, decode_size);
+            assert_eq!(0xBBAA, ph.get_exchange_id());
+            assert_eq!(
+                protocols::Id::const_default(0xFFF1.into(), 0x2211),
+                ph.get_protocol_id()
+            );
+            assert_eq!(0x66778899, ph.get_ack_message_counter().unwrap());
+        }
 
-          assert_eq!(true, ph.decode(&raw[..], &mut decode_size).is_ok());
-          assert_eq!(16, decode_size);
-          assert_eq!(0xBBAA, ph.get_exchange_id());
-          assert_eq!(protocols::Id::const_default(0xFFF1.into(), 0x2211), ph.get_protocol_id());
-          assert_eq!(0x66778899, ph.get_ack_message_counter().unwrap());
-      }
+        #[test]
+        fn encode_with_vendor_id_and_ack_message_counter_successfully() {
+            let ph: PayloadHeader = PayloadHeader::default()
+                .set_exchange_id(0xBBAA)
+                .set_ack_message_counter(0x66778899)
+                .set_message_type(protocols::Id::default(VendorId::TestVendor1, 0x2211), 0x12);
+            const PAYLOAD_LENGTH: usize = 12;
+            let expected_output: [u8; PAYLOAD_LENGTH] = [
+                0x12, // with vendor id and a ack message
+                0x12, // message type(op code)
+                0xAA, 0xBB, // Exchange ID
+                0xF1, 0xFF, // Vendor Test 1
+                0x11, 0x22, // protocol ID
+                0x99, 0x88, 0x77, 0x66, // Ack Message Counter
+            ];
+            let mut output: [u8; PAYLOAD_LENGTH] = [0; PAYLOAD_LENGTH];
+            let mut encode_size: u16 = 0;
 
-      #[test]
-      fn encode_with_vendor_id_and_ack_message_counter_successfully() {
-          let ph: PayloadHeader = PayloadHeader::default().set_exchange_id(0xBBAA).set_ack_message_counter(0x66778899).set_message_type(protocols::Id::default(VendorId::TestVendor1, 0x2211), 0x12);
-          const PAYLOAD_LENGTH: usize = 12;
-          let expected_output: [u8; PAYLOAD_LENGTH] = 
-              [
-              0x12, // with vendor id and a ack message
-              0x12, // message type(op code)
-              0xAA, 0xBB,  // Exchange ID
-              0xF1, 0xFF, // Vendor Test 1
-              0x11, 0x22, // protocol ID
-              0x99, 0x88, 0x77, 0x66, // Ack Message Counter
-              ];
-          let mut output: [u8; PAYLOAD_LENGTH] = [0; PAYLOAD_LENGTH];
-          let mut encode_size: u16 = 0;
+            //ph.set_message_type(protocols::Id{ m_vendor_id: VendorId::TestVendor1, m_protocol_id: 0x2211}, 0x12);
+            //ph.set_exchange_id(0xBBAA);
+            //ph.set_ack_message_counter(0x66778899);
 
-          //ph.set_message_type(protocols::Id{ m_vendor_id: VendorId::TestVendor1, m_protocol_id: 0x2211}, 0x12);
-          //ph.set_exchange_id(0xBBAA);
-          //ph.set_ack_message_counter(0x66778899);
+            assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
+            assert_eq!(PAYLOAD_LENGTH, encode_size.into());
+            for i in 0..PAYLOAD_LENGTH {
+                assert_eq!(expected_output[i], output[i]);
+            }
+        }
+    }
 
-          assert_eq!(true, ph.encode(&mut output[..], &mut encode_size).is_ok());
-          assert_eq!(PAYLOAD_LENGTH, encode_size.into());
-          for i in 0..PAYLOAD_LENGTH {
-              assert_eq!(expected_output[i], output[i]);
-          }
-      }
-  }
+    mod test_authentication_code {
+        use super::super::*;
+        use std::*;
 
-  mod test_authentication_code {
-      use super::super::*;
-      use std::*;
+        #[test]
+        fn create_default() {
+            let mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
+            assert_eq!(KMAX_TAG_LEN, mac.get_tag().len());
+        }
 
-      #[test]
-      fn create_default() {
-          let mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
-          assert_eq!(KMAX_TAG_LEN, mac.get_tag().len());
-      }
+        #[test]
+        fn decode() {
+            // create an encrypted header by giving a session id other than UNSECURED id
+            let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
+            let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] =
+                std::array::from_fn(|i| i as u8);
+            let mut mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
+            let mut decode_size: u16 = 0;
+            assert_eq!(
+                true,
+                mac.decode(&ph, &expected[..], &mut decode_size).is_ok()
+            );
+            assert_eq!(ph.mic_tag_length(), decode_size);
 
-      #[test]
-      fn decode() {
-          // create an encrypted header by giving a session id other than UNSECURED id
-          let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
-          let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = std::array::from_fn(|i| i as u8);
-          let mut mac: MessageAuthenticationCode = MessageAuthenticationCode::default();
-          let mut decode_size: u16 = 0;
-          assert_eq!(true, mac.decode(&ph, &expected[..], &mut decode_size).is_ok());
-          assert_eq!(ph.mic_tag_length(), decode_size);
+            let output: &[u8] = mac.get_tag();
+            for i in 0..ph.mic_tag_length() as usize {
+                assert_eq!(expected[i], output[i]);
+            }
+        }
 
-          let output: &[u8] = mac.get_tag();
-          for i in 0..ph.mic_tag_length() as usize {
-              assert_eq!(expected[i], output[i]);
-          }
-      }
+        #[test]
+        fn encode() {
+            // create an encrypted header by giving a session id other than UNSECURED id
+            let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
+            let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] =
+                std::array::from_fn(|i| i as u8);
+            let mut output: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] =
+                [0; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES];
+            let mac: MessageAuthenticationCode =
+                MessageAuthenticationCode::default().set_tag(&expected[..]);
+            let mut encode_size: u16 = 0;
+            assert_eq!(
+                true,
+                mac.encode(&ph, &mut output[..], &mut encode_size).is_ok()
+            );
+            assert_eq!(ph.mic_tag_length(), encode_size);
 
-      #[test]
-      fn encode() {
-          // create an encrypted header by giving a session id other than UNSECURED id
-          let ph: PacketHeader = PacketHeader::default().set_session_id(0x01);
-          let expected: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = std::array::from_fn(|i| i as u8);
-          let mut output: [u8; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES] = [0; CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES];
-          let mac: MessageAuthenticationCode = MessageAuthenticationCode::default().set_tag(&expected[..]);
-          let mut encode_size: u16 = 0;
-          assert_eq!(true, mac.encode(&ph, &mut output[..], &mut encode_size).is_ok());
-          assert_eq!(ph.mic_tag_length(), encode_size);
-
-          for i in 0..ph.mic_tag_length() as usize {
-              assert_eq!(expected[i], output[i]);
-          }
-      }
-  }
+            for i in 0..ph.mic_tag_length() as usize {
+                assert_eq!(expected[i], output[i]);
+            }
+        }
+    }
 }

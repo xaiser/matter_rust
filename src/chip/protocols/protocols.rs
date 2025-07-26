@@ -1,6 +1,6 @@
 use crate::chip::VendorId;
 
-#[derive(Debug,PartialEq,Copy,Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Id {
     m_vendor_id: VendorId,
     m_protocol_id: u16,
@@ -62,14 +62,14 @@ pub const NOT_SPECIFIED: Id = Id::const_not_specified();
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
+    use super::*;
+    use std::*;
 
-  /*
-  #[test]
-  fn to_uint32() {
-      let pid = Id::default(VendorId::Common, 0);
-      assert_eq!(0, pid.to_uint32());
-  }
-  */
+    /*
+    #[test]
+    fn to_uint32() {
+        let pid = Id::default(VendorId::Common, 0);
+        assert_eq!(0, pid.to_uint32());
+    }
+    */
 }

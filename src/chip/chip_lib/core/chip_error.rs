@@ -8,28 +8,26 @@ pub type FormatType = StorageType;
 pub type ChipErrorResult = Result<(), ChipError>;
 
 #[repr(u8)]
-pub enum Range
-{
-    KSdk        = 0x0, //< CHIP SDK errors.
-    KOs         = 0x1, //< Encapsulated OS errors, other than POSIX errno.
-    KPosix      = 0x2, //< Encapsulated POSIX errno values.
-    KLwIP       = 0x3, //< Encapsulated LwIP errors.
+pub enum Range {
+    KSdk = 0x0,        //< CHIP SDK errors.
+    KOs = 0x1,         //< Encapsulated OS errors, other than POSIX errno.
+    KPosix = 0x2,      //< Encapsulated POSIX errno values.
+    KLwIP = 0x3,       //< Encapsulated LwIP errors.
     KOpenThread = 0x4, //< Encapsulated OpenThread errors.
-    KPlatform   = 0x5, //< Platform-defined encapsulation.
-    KLastRange  = 0x6
+    KPlatform = 0x5,   //< Platform-defined encapsulation.
+    KLastRange = 0x6,
 }
 
 #[repr(u8)]
-pub enum SdkPart
-{
-    KCore            = 0, //< SDK core errors.
-    KInet            = 1, //< Inet layer errors; see <inet/InetError.h>.
-    KDevice          = 2, //< Device layer errors; see <platform/CHIPDeviceError.h>.
-    KASN1            = 3, //< ASN1 errors; see <asn1/ASN1Error.h>.
-    KBLE             = 4, //< BLE layer errors; see <ble/BleError.h>.
-    KIMGlobalStatus  = 5, //< Interaction Model global status code.
+pub enum SdkPart {
+    KCore = 0,            //< SDK core errors.
+    KInet = 1,            //< Inet layer errors; see <inet/InetError.h>.
+    KDevice = 2,          //< Device layer errors; see <platform/CHIPDeviceError.h>.
+    KASN1 = 3,            //< ASN1 errors; see <asn1/ASN1Error.h>.
+    KBLE = 4,             //< BLE layer errors; see <ble/BleError.h>.
+    KIMGlobalStatus = 5,  //< Interaction Model global status code.
     KIMClusterStatus = 6, //< Interaction Model cluster-specific status code.
-    KApplication     = 7, //< Application-defined errors; see CHIP_APPLICATION_ERROR
+    KApplication = 7,     //< Application-defined errors; see CHIP_APPLICATION_ERROR
 }
 
 #[cfg(feature = "chip_config_error_source")]
@@ -53,9 +51,12 @@ macro_rules! chip_ok {
 macro_rules! chip_sdk_error {
     ($part:expr, $code:expr) => {
         crate::chip::chip_lib::core::chip_error::ChipError::new_error_error_source(
-            crate::chip::chip_lib::core::chip_error::ChipError::make_integer_with_part_code($part, $code),
+            crate::chip::chip_lib::core::chip_error::ChipError::make_integer_with_part_code(
+                $part, $code,
+            ),
             file!(),
-            line!())
+            line!(),
+        )
     };
 }
 
@@ -73,9 +74,7 @@ macro_rules! chip_no_error {
 #[cfg(not(feature = "chip_config_error_source"))]
 macro_rules! chip_initialize_error_source {
     ($e:expr, $_f:expr, $_l:expr) => {
-        Self {
-            m_error: $e,
-        }
+        Self { m_error: $e }
     };
 }
 
@@ -84,7 +83,9 @@ macro_rules! chip_initialize_error_source {
 macro_rules! chip_sdk_error {
     ($part:expr, $code:expr) => {
         crate::chip::chip_lib::core::chip_error::ChipError::new_error(
-            crate::chip::chip_lib::core::chip_error::ChipError::make_integer_with_part_code($part, $code)
+            crate::chip::chip_lib::core::chip_error::ChipError::make_integer_with_part_code(
+                $part, $code,
+            ),
         )
     };
 }
@@ -98,27 +99,28 @@ macro_rules! chip_no_error {
 }
 
 #[macro_export]
-macro_rules! chip_core_error{
+macro_rules! chip_core_error {
     ($e:expr) => {
-        chip_sdk_error!(crate::chip::chip_lib::core::chip_error::SdkPart::KCore, ($e))
+        chip_sdk_error!(
+            crate::chip::chip_lib::core::chip_error::SdkPart::KCore,
+            ($e)
+        )
     };
 }
 
-
 #[derive(Debug, Copy, Clone)]
-pub struct ChipError 
-{
+pub struct ChipError {
     m_error: StorageType,
-#[cfg(feature = "chip_config_error_source")]
+    #[cfg(feature = "chip_config_error_source")]
     m_file: &'static str,
-#[cfg(feature = "chip_config_error_source")]
+    #[cfg(feature = "chip_config_error_source")]
     m_line: u32,
 }
 
 impl fmt::Display for ChipError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ChipError ( error: {}", self.m_error)?;
-#[cfg(feature = "chip_config_error_source")]
+        #[cfg(feature = "chip_config_error_source")]
         {
             write!(f, ", file: {}", self.m_file)?;
             write!(f, ", line: {}", self.m_line)?;
@@ -164,8 +166,7 @@ impl<const PART: u8, const SCODE: StorageType> SdkErrorConstant<PART, SCODE>
 }
 */
 
-impl ChipError
-{
+impl ChipError {
     const K_RANGE_START: i32 = 24;
     //const K_RANGE_LENGTH: i32 = 8;
     const K_VALUE_START: i32 = 0;
@@ -189,13 +190,15 @@ impl ChipError
     }
 
     const fn make_integer_with_range_value(range: Range, value: StorageType) -> StorageType {
-        return ChipError::make_field(Self::K_RANGE_START as u32, range as StorageType) | 
-            ChipError::make_field(Self::K_VALUE_START as u32, value as StorageType);
+        return ChipError::make_field(Self::K_RANGE_START as u32, range as StorageType)
+            | ChipError::make_field(Self::K_VALUE_START as u32, value as StorageType);
     }
 
     pub const fn make_integer_with_part_code(part: SdkPart, code: u8) -> StorageType {
-        return Self::make_integer_with_range_value(Range::KSdk, Self::make_field(Self::K_SDKPART_START as u32, part as StorageType)) | 
-            Self::make_field(Self::K_SDKCODE_START as u32, code as StorageType);
+        return Self::make_integer_with_range_value(
+            Range::KSdk,
+            Self::make_field(Self::K_SDKPART_START as u32, part as StorageType),
+        ) | Self::make_field(Self::K_SDKCODE_START as u32, code as StorageType);
     }
 
     pub const fn new_range_value(range: Range, value: ValueType) -> Self {
@@ -203,9 +206,20 @@ impl ChipError
     }
 
     #[allow(unused_variables)]
-    pub const fn new_range_value_error_source(range: Range, value: ValueType, file: &'static str, line: u32) -> Self {
-        chip_initialize_error_source!(Self::make_integer_with_range_value(range, value & Self::make_mask(0, Self::K_VALUE_LENGTH as u32)), 
-            file, line)
+    pub const fn new_range_value_error_source(
+        range: Range,
+        value: ValueType,
+        file: &'static str,
+        line: u32,
+    ) -> Self {
+        chip_initialize_error_source!(
+            Self::make_integer_with_range_value(
+                range,
+                value & Self::make_mask(0, Self::K_VALUE_LENGTH as u32)
+            ),
+            file,
+            line
+        )
     }
 
     pub const fn new_part_code(part: SdkPart, code: u8) -> Self {
@@ -213,7 +227,12 @@ impl ChipError
     }
 
     #[allow(unused_variables)]
-    pub const fn new_part_code_error_source(part: SdkPart, code: u8, file: &'static str, line: u32) -> Self {
+    pub const fn new_part_code_error_source(
+        part: SdkPart,
+        code: u8,
+        file: &'static str,
+        line: u32,
+    ) -> Self {
         chip_initialize_error_source!(Self::make_integer_with_part_code(part, code), file, line)
     }
 
@@ -226,8 +245,7 @@ impl ChipError
         chip_initialize_error_source!(error, file, line)
     }
 
-    pub const fn as_integer(&self) -> StorageType
-    {
+    pub const fn as_integer(&self) -> StorageType {
         return self.m_error;
     }
 
@@ -238,55 +256,54 @@ impl ChipError
     pub const fn format(&self) -> FormatType {
         return self.m_error;
     }
-
 }
 
 // start to create all the error code
 
 #[macro_export]
-macro_rules! chip_error_sending_blocked{
+macro_rules! chip_error_sending_blocked {
     () => {
         chip_core_error!(0x01)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_incorrect_state{
+macro_rules! chip_error_incorrect_state {
     () => {
         chip_core_error!(0x03)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_message_too_long{
+macro_rules! chip_error_message_too_long {
     () => {
         chip_core_error!(0x04)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_no_memory{
+macro_rules! chip_error_no_memory {
     () => {
         chip_core_error!(0x0b)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_no_message_handler{
+macro_rules! chip_error_no_message_handler {
     () => {
         chip_core_error!(0x0c)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_buffer_too_small{
+macro_rules! chip_error_buffer_too_small {
     () => {
         chip_core_error!(0x19)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_end_of_tlv{
+macro_rules! chip_error_end_of_tlv {
     () => {
         chip_core_error!(0x21)
     };
@@ -294,77 +311,77 @@ macro_rules! chip_error_end_of_tlv{
 
 // another name
 #[macro_export]
-macro_rules! chip_end_of_tlv{
+macro_rules! chip_end_of_tlv {
     () => {
         chip_core_error!(0x21)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_tlv_underrun{
+macro_rules! chip_error_tlv_underrun {
     () => {
         chip_core_error!(0x22)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_invalid_tlv_element{
+macro_rules! chip_error_invalid_tlv_element {
     () => {
         chip_core_error!(0x23)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_invalid_tlv_tag{
+macro_rules! chip_error_invalid_tlv_tag {
     () => {
         chip_core_error!(0x24)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_unknown_implicit_tlv_tag{
+macro_rules! chip_error_unknown_implicit_tlv_tag {
     () => {
         chip_core_error!(0x25)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_wrong_tlv_type{
+macro_rules! chip_error_wrong_tlv_type {
     () => {
         chip_core_error!(0x26)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_tlv_container_open{
+macro_rules! chip_error_tlv_container_open {
     () => {
         chip_core_error!(0x27)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_unexpected_tlv_element{
+macro_rules! chip_error_unexpected_tlv_element {
     () => {
         chip_core_error!(0x2b)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_not_implemented{
+macro_rules! chip_error_not_implemented {
     () => {
         chip_core_error!(0x2d)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_invalid_argument{
+macro_rules! chip_error_invalid_argument {
     () => {
         chip_core_error!(0x2f)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_wrong_encryption_type_from_peer{
+macro_rules! chip_error_wrong_encryption_type_from_peer {
     () => {
         chip_core_error!(0x80)
     };
@@ -392,28 +409,28 @@ macro_rules! chip_error_persisted_storage_value_not_found {
 }
 
 #[macro_export]
-macro_rules! chip_error_version_mismatch{
+macro_rules! chip_error_version_mismatch {
     () => {
         chip_core_error!(0xa7)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_internal{
+macro_rules! chip_error_internal {
     () => {
         chip_core_error!(0xac)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_end_point_pool_full{
+macro_rules! chip_error_end_point_pool_full {
     () => {
         chip_core_error!(0xc1)
     };
 }
 
 #[macro_export]
-macro_rules! chip_error_inbound_message_too_big{
+macro_rules! chip_error_inbound_message_too_big {
     () => {
         chip_core_error!(0xc2)
     };
@@ -421,40 +438,40 @@ macro_rules! chip_error_inbound_message_too_big{
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
+    use super::*;
+    use std::*;
 
-  mod new {
-      use super::super::*;
-      use std::*;
+    mod new {
+        use super::super::*;
+        use std::*;
 
-      fn set_up() {}
+        fn set_up() {}
 
-      #[test]
-      fn new_no_error() {
-          set_up();
-          let s1 = chip_no_error!();
-          let s2 = chip_no_error!();
+        #[test]
+        fn new_no_error() {
+            set_up();
+            let s1 = chip_no_error!();
+            let s2 = chip_no_error!();
 
-          assert_eq!(true, s1 == s2);
-      }
+            assert_eq!(true, s1 == s2);
+        }
 
-      #[test]
-      fn new_one_error() {
-          set_up();
-          let s1 = chip_error_sending_blocked!();
-          let s2 = chip_error_sending_blocked!();
+        #[test]
+        fn new_one_error() {
+            set_up();
+            let s1 = chip_error_sending_blocked!();
+            let s2 = chip_error_sending_blocked!();
 
-          assert_eq!(true, s1 == s2);
-      }
+            assert_eq!(true, s1 == s2);
+        }
 
-      #[test]
-      fn new_crate_error_type() {
-          set_up();
-          let s1: crate::ChipError = chip_error_sending_blocked!();
-          let s2: crate::ChipError = chip_error_sending_blocked!();
+        #[test]
+        fn new_crate_error_type() {
+            set_up();
+            let s1: crate::ChipError = chip_error_sending_blocked!();
+            let s2: crate::ChipError = chip_error_sending_blocked!();
 
-          assert_eq!(true, s1 == s2);
-      }
-  }
+            assert_eq!(true, s1 == s2);
+        }
+    }
 }

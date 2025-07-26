@@ -4,14 +4,14 @@ use crate::chip::platform::log_v;
 
 use core::fmt;
 
-/* 
+/*
  * Macros
  */
 #[macro_export]
 macro_rules! chip_internal_log {
     ($mod:ident, $cat:ident, $msg: expr $(, $args: expr)*) => {
-        chip_internal_log_impl!($mod, 
-            crate::chip::logging::LogCategory::from_str(concat!(stringify!(KLogCategory), stringify!($cat))).unwrap(), 
+        chip_internal_log_impl!($mod,
+            crate::chip::logging::LogCategory::from_str(concat!(stringify!(KLogCategory), stringify!($cat))).unwrap(),
             $msg $(, $args)*)
     };
 }
@@ -21,7 +21,7 @@ macro_rules! chip_internal_log_impl {
     ($mod:ident, $cat:expr, $msg: expr $(, $args: expr)*) => {
         if crate::chip::logging::is_category_enabled($cat) {
             crate::chip::logging::log(
-                crate::chip::logging::LogModule::from_str(concat!(stringify!(KLogModule), stringify!($mod))).unwrap(), 
+                crate::chip::logging::LogModule::from_str(concat!(stringify!(KLogModule), stringify!($mod))).unwrap(),
                 $cat,
                 format_args!($msg $(, $args)*));
         }
@@ -39,8 +39,7 @@ macro_rules! chip_log_error {
 #[cfg(not(feature = "chip_error_logging"))]
 #[macro_export]
 macro_rules! chip_log_error {
-    ($mod:ident, $msg: expr $(, $args: expr)*) => {
-    };
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {};
 }
 
 #[cfg(feature = "chip_progress_logging")]
@@ -54,8 +53,7 @@ macro_rules! chip_log_progress {
 #[cfg(not(feature = "chip_progress_logging"))]
 #[macro_export]
 macro_rules! chip_log_progress {
-    ($mod:ident, $msg: expr $(, $args: expr)*) => {
-    };
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {};
 }
 
 #[cfg(feature = "chip_detail_logging")]
@@ -69,8 +67,7 @@ macro_rules! chip_log_detail {
 #[cfg(not(feature = "chip_detail_logging"))]
 #[macro_export]
 macro_rules! chip_log_detail {
-    ($mod:ident, $msg: expr $(, $args: expr)*) => {
-    };
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {};
 }
 
 #[cfg(feature = "chip_automation_logging")]
@@ -84,10 +81,8 @@ macro_rules! chip_log_automation {
 #[cfg(not(feature = "chip_automation_logging"))]
 #[macro_export]
 macro_rules! chip_log_automation {
-    ($mod:ident, $msg: expr $(, $args: expr)*) => {
-    };
+    ($mod:ident, $msg: expr $(, $args: expr)*) => {};
 }
-
 
 pub type LogRedirectCallback = Option<fn(&str, LogCategory, fmt::Arguments) -> ()>;
 
@@ -137,11 +132,10 @@ static MODULENAMES: [&'static str; LogModule::KLogModuleMax as usize] = [
     "ATM", // Automation
     "CSM", // CASESessionManager
 ];
-fn get_module_name(module: LogModule) -> &'static str
-{
+fn get_module_name(module: LogModule) -> &'static str {
     if module < LogModule::KLogModuleMax {
         return MODULENAMES[module as usize];
-    } 
+    }
     return MODULENAMES[LogModule::KLogModuleNotSpecified as usize];
 }
 
@@ -167,8 +161,7 @@ pub fn set_log_filter(category: u8) {
 }
 
 #[cfg(not(feature = "chip_log_filtering"))]
-pub fn set_log_filter(_category: u8) {
-}
+pub fn set_log_filter(_category: u8) {}
 
 pub fn log(module: LogModule, category: LogCategory, args: fmt::Arguments) {
     let module_name = get_module_name(module);
@@ -200,24 +193,23 @@ pub fn is_category_enabled(_category: LogCategory) -> bool {
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
+    use super::*;
+    use std::*;
 
-  mod new {
-      use super::super::*;
-      use std::*;
-      use crate::chip::chip_lib::support::logging::constants::LogModule;
-      use crate::chip::chip_lib::support::logging::constants::LogCategory;
-      use core::str::FromStr;
+    mod new {
+        use super::super::*;
+        use crate::chip::chip_lib::support::logging::constants::LogCategory;
+        use crate::chip::chip_lib::support::logging::constants::LogModule;
+        use core::str::FromStr;
+        use std::*;
 
-      #[test]
-      fn test_print() {
-          //log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
-          //chip_internal_log_impl!(Inet, Progress, "P {}", 123);
-          //chip_internal_log!(Inet, Progress, "P {}", 123);
-          chip_log_error!(Inet, "P {}", 123);
-          assert_eq!(1,1);
-      }
-  }
+        #[test]
+        fn test_print() {
+            //log(LogModule::KLogModuleInet, 2, format_args!("{}", 123));
+            //chip_internal_log_impl!(Inet, Progress, "P {}", 123);
+            //chip_internal_log!(Inet, Progress, "P {}", 123);
+            chip_log_error!(Inet, "P {}", 123);
+            assert_eq!(1, 1);
+        }
+    }
 }
-

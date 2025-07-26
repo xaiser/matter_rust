@@ -1,4 +1,4 @@
-use rand_core::{RngCore, CryptoRng, SeedableRng, Error};
+use rand_core::{CryptoRng, Error, RngCore, SeedableRng};
 
 pub struct SimpleRng {
     state: u32,
@@ -33,7 +33,7 @@ impl RngCore for SimpleRng {
         let mut i = 0;
         while i + 4 <= dest.len() {
             let rnd = self.next_u32().to_le_bytes();
-            dest[i..i+4].copy_from_slice(&rnd);
+            dest[i..i + 4].copy_from_slice(&rnd);
             i += 4;
         }
         if i < dest.len() {
@@ -73,4 +73,3 @@ mod tests {
         assert!(value != 0);
     }
 }
-

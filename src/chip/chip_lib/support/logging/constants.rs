@@ -2,8 +2,7 @@ use core::fmt;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub enum LogCategory
-{
+pub enum LogCategory {
     KLogCategoryNone = 0,
     KLogCategoryError = 1,
     KLogCategoryProgress = 2,
@@ -44,8 +43,7 @@ impl core::fmt::Display for LogCategory {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub enum LogModule
-{
+pub enum LogModule {
     KLogModuleNotSpecified = 0,
 
     KLogModuleInet,
@@ -88,7 +86,7 @@ pub enum LogModule
     KLogModuleAutomation,
     KLogModuleCASESessionManager,
 
-    KLogModuleMax
+    KLogModuleMax,
 }
 
 impl core::str::FromStr for LogModule {
@@ -144,4 +142,3 @@ impl core::str::FromStr for LogModule {
         }
     }
 }
-

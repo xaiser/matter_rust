@@ -1,7 +1,7 @@
 use crate::chip::NodeId;
 
-use crate::chip::inet::ip_address::IPAddress;
 use crate::chip::inet::inet_interface::InterfaceId;
+use crate::chip::inet::ip_address::IPAddress;
 
 use core::fmt;
 
@@ -10,7 +10,7 @@ pub trait LastTransportType {
 }
 
 #[repr(u8)]
-#[derive(Clone,Copy,PartialEq,Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Type {
     KUndefined,
     KUdp,
@@ -48,9 +48,9 @@ pub struct PeerAddress {
 
 impl Default for PeerAddress {
     fn default() -> Self {
-        Self { 
+        Self {
             m_transport_type: Type::KUndefined,
-            m_remote_id: 0 ,
+            m_remote_id: 0,
             m_ip_address: IPAddress::default(),
             m_interface: InterfaceId::default(),
             m_port: 0,
@@ -60,12 +60,20 @@ impl Default for PeerAddress {
 
 impl fmt::Display for PeerAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PeerAddress 
+        write!(
+            f,
+            "PeerAddress 
             m_transport_type: {},
             m_remote_id: {},
             m_ip_address: {},
             m_interface: {},
-            m_port: {}", self.m_transport_type, self.m_remote_id, self.m_ip_address, self.m_interface, self.m_port)
+            m_port: {}",
+            self.m_transport_type,
+            self.m_remote_id,
+            self.m_ip_address,
+            self.m_interface,
+            self.m_port
+        )
     }
 }
 
@@ -77,9 +85,9 @@ impl PeerAddress {
     */
 
     pub fn new_addr_type(addr: IPAddress, the_type: Type) -> Self {
-        Self { 
+        Self {
             m_transport_type: the_type,
-            m_remote_id: 0 ,
+            m_remote_id: 0,
             m_ip_address: addr,
             m_interface: InterfaceId::default(),
             m_port: 0,
@@ -133,21 +141,25 @@ impl PeerAddress {
 
 #[cfg(test)]
 mod test {
-  use super::*;
-  use std::*;
-  use crate::chip::inet::ip_address::IPAddress;
-  //use crate::chip::inet::inet_interface::InterfaceId;
+    use super::*;
+    use crate::chip::inet::ip_address::IPAddress;
+    use std::*;
+    //use crate::chip::inet::inet_interface::InterfaceId;
 
-  #[test]
-  fn new_udp() {
-      let a = PeerAddress::udp(IPAddress::ANY.clone());
-      assert_eq!(a.get_address() == IPAddress::ANY.clone(), true);
-  }
+    #[test]
+    fn new_udp() {
+        let a = PeerAddress::udp(IPAddress::ANY.clone());
+        assert_eq!(a.get_address() == IPAddress::ANY.clone(), true);
+    }
 
-  #[test]
-  fn new_udp_with_addr_port_interface() {
-      let a = PeerAddress::udp_addr_port_interface(IPAddress::ANY.clone(), 666, InterfaceId::default());
-      assert_eq!(a.get_address(), IPAddress::ANY.clone());
-      assert_eq!(a.get_port(), 666);
-  }
+    #[test]
+    fn new_udp_with_addr_port_interface() {
+        let a = PeerAddress::udp_addr_port_interface(
+            IPAddress::ANY.clone(),
+            666,
+            InterfaceId::default(),
+        );
+        assert_eq!(a.get_address(), IPAddress::ANY.clone());
+        assert_eq!(a.get_port(), 666);
+    }
 }

@@ -1,14 +1,14 @@
-pub mod object_life_cycle;
+pub mod buffer_reader;
+pub mod buffer_writer;
+pub mod chip_fault_injection;
 pub mod code_utils;
-pub mod pool;
+pub mod fault_injection;
+pub mod hsm;
 pub mod internal;
 pub mod iterators;
 pub mod logging;
-pub mod chip_fault_injection;
-pub mod fault_injection;
-pub mod buffer_reader;
-pub mod buffer_writer;
-pub mod hsm;
+pub mod object_life_cycle;
+pub mod pool;
 
 #[cfg(test)]
 pub mod test_persistent_storage;
