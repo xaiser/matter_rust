@@ -1,5 +1,5 @@
 use crate::chip::chip_lib::core::{
-    data_model_types::{FabricIndex, KUNDEFINED_FABRIC_INDEX},
+    data_model_types::{FabricIndex, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index},
     chip_persistent_storage_delegate::PersistentStorageDelegate,
 };
 use crate::chip::crypto::{self, OperationalKeystore};
@@ -11,6 +11,8 @@ use crate::ChipErrorResult;
 
 use crate::chip_ok;
 use crate::chip_error_incorrect_state;
+use crate::chip_error_invalid_fabric_index;
+use crate::chip_error_buffer_too_small;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -23,9 +25,10 @@ where
 {
     m_storage: * mut PA,
     m_pending_fabric_index: FabricIndex,
-    m_pending_keypair: * mut crypto::P256Keypair,
+    //m_pending_keypair: * mut crypto::P256Keypair,
+    m_pending_keypair: Option<crypto::P256Keypair>,
     m_is_pending_keypair_active: bool,
-    m_is_externally_owned_keypair: bool,
+    //m_is_externally_owned_keypair: bool,
 }
 
 impl<PA> Default for PersistentStorageOperationalKeystore<PA>
@@ -36,9 +39,9 @@ where
         Self {
             m_storage: ptr::null_mut(),
             m_pending_fabric_index: KUNDEFINED_FABRIC_INDEX,
-            m_pending_keypair: ptr::null_mut(),
+            m_pending_keypair: None,
             m_is_pending_keypair_active: false,
-            m_is_externally_owned_keypair: false
+            //m_is_externally_owned_keypair: false
         }
     }
 }
@@ -52,13 +55,16 @@ where
         self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
         self.m_is_externally_owned_keypair = false;
         self.m_storage = storage;
-        self.m_pending_keypair = ptr::null_mut();
+        self.m_pending_keypair = None;
         self.m_is_pending_keypair_active = false;
 
         chip_ok!()
     }
 
     fn reset_pending_key(&mut self) {
+        self.m_pending_keypair = None;
+        self.m_is_pending_keypair_active = false;
+        self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
     }
 }
 
@@ -79,6 +85,24 @@ where
         fabric_index: FabricIndex,
         out_certificate_siging_request: &mut [u8],
     ) -> ChipErrorResult {
+        verify_or_return_error!(self.m_storage.is_null() != false, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+
+        // If a key is pending, we cannot generate for a different fabric index until we commit or revert.
+        if (self.m_pending_fabric_index != KUNDEFINED_FABRIC_INDEX) && (self.m_pending_fabric_index != fabric_index) {
+            return Err(chip_error_invalid_fabric_index!());
+        }
+
+        verify_or_return_error!(out_certificate_siging_request.len() >= crypto::KMIN_CSR_BUFFER_SIZE, Err(chip_error_buffer_too_small!()));
+
+        // Replace previous pending keypair, if any was previously allocated
+        self.reset_pending_key();
+
+        let mut pending_keypair = crypto::P256Keypair::default();
+        pending_keypair.initialize();
+        let csr_length = out_certificate_siging_request.len();
+
+        self.m_pending_keypair = Some(crypto::P256Keypair::default());
         Err(chip_error_not_implemented!())
     }
 
