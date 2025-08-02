@@ -1,19 +1,19 @@
 use crate::chip::chip_lib::core::{
-    data_model_types::{FabricIndex, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index},
     chip_persistent_storage_delegate::PersistentStorageDelegate,
+    data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
 };
-use crate::chip::crypto::{self, OperationalKeystore, P256KeypairBase, ECPKeypair};
+use crate::chip::crypto::{self, ECPKeypair, OperationalKeystore, P256KeypairBase};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
 use crate::chip_sdk_error;
-use crate::ChipErrorResult;
 use crate::ChipError;
+use crate::ChipErrorResult;
 
-use crate::chip_ok;
+use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_invalid_fabric_index;
-use crate::chip_error_buffer_too_small;
+use crate::chip_ok;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -24,7 +24,7 @@ struct PersistentStorageOperationalKeystore<PA>
 where
     PA: PersistentStorageDelegate,
 {
-    m_storage: * mut PA,
+    m_storage: *mut PA,
     m_pending_fabric_index: FabricIndex,
     //m_pending_keypair: * mut crypto::P256Keypair,
     m_pending_keypair: Option<crypto::P256Keypair>,
@@ -34,7 +34,7 @@ where
 
 impl<PA> Default for PersistentStorageOperationalKeystore<PA>
 where
-    PA: PersistentStorageDelegate
+    PA: PersistentStorageDelegate,
 {
     fn default() -> Self {
         Self {
@@ -49,10 +49,13 @@ where
 
 impl<PA> PersistentStorageOperationalKeystore<PA>
 where
-    PA: PersistentStorageDelegate
+    PA: PersistentStorageDelegate,
 {
-    pub fn init(&mut self, storage: * mut PA) -> ChipErrorResult {
-        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+    pub fn init(&mut self, storage: *mut PA) -> ChipErrorResult {
+        verify_or_return_error!(
+            !self.m_storage.is_null(),
+            Err(chip_error_incorrect_state!())
+        );
         self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
         //self.m_is_externally_owned_keypair = false;
         self.m_storage = storage;
@@ -71,7 +74,7 @@ where
 
 impl<PA> OperationalKeystore for PersistentStorageOperationalKeystore<PA>
 where
-    PA: PersistentStorageDelegate
+    PA: PersistentStorageDelegate,
 {
     fn has_pending_op_keypair(&self) -> bool {
         false
@@ -86,15 +89,26 @@ where
         fabric_index: FabricIndex,
         out_certificate_siging_request: &mut [u8],
     ) -> Result<usize, ChipError> {
-        verify_or_return_error!(self.m_storage.is_null() != false, Err(chip_error_incorrect_state!()));
-        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+        verify_or_return_error!(
+            self.m_storage.is_null() != false,
+            Err(chip_error_incorrect_state!())
+        );
+        verify_or_return_error!(
+            is_valid_fabric_index(fabric_index),
+            Err(chip_error_invalid_fabric_index!())
+        );
 
         // If a key is pending, we cannot generate for a different fabric index until we commit or revert.
-        if (self.m_pending_fabric_index != KUNDEFINED_FABRIC_INDEX) && (self.m_pending_fabric_index != fabric_index) {
+        if (self.m_pending_fabric_index != KUNDEFINED_FABRIC_INDEX)
+            && (self.m_pending_fabric_index != fabric_index)
+        {
             return Err(chip_error_invalid_fabric_index!());
         }
 
-        verify_or_return_error!(out_certificate_siging_request.len() >= crypto::K_MIN_CSR_BUFFER_SIZE, Err(chip_error_buffer_too_small!()));
+        verify_or_return_error!(
+            out_certificate_siging_request.len() >= crypto::K_MIN_CSR_BUFFER_SIZE,
+            Err(chip_error_buffer_too_small!())
+        );
 
         // Replace previous pending keypair, if any was previously allocated
         self.reset_pending_key();
@@ -102,12 +116,14 @@ where
         let mut pending_keypair = crypto::P256Keypair::default();
         pending_keypair.initialize(crypto::ECPKeyTarget::Ecdh);
 
-        match pending_keypair.new_certificate_signing_request(&mut out_certificate_siging_request[..]) {
+        match pending_keypair
+            .new_certificate_signing_request(&mut out_certificate_siging_request[..])
+        {
             Ok(csr_length) => {
                 self.m_pending_keypair = Some(pending_keypair);
                 self.m_pending_fabric_index = fabric_index;
                 return Ok(csr_length);
-            },
+            }
             Err(e) => {
                 self.reset_pending_key();
                 return Err(e);
@@ -176,7 +192,7 @@ mod tests {
 
     type Store = PersistentStorageOperationalKeystore<TestPersistentStorage>;
 
-    fn setup(pa: * mut TestPersistentStorage) -> Store {
+    fn setup(pa: *mut TestPersistentStorage) -> Store {
         let mut store = Store::default();
         let _ = store.init(pa);
         store
@@ -187,8 +203,14 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        assert_eq!(true, store.new_op_keypair_for_fabric(2, &mut out_csr[..]).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .new_op_keypair_for_fabric(2, &mut out_csr[..])
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
     }
 } // end of mod tests

@@ -9,13 +9,13 @@ use crate::chip::CryptoRng;
 use crate::chip::VendorId;
 use crate::chip_static_assert;
 
-use crate::ChipError;
 use crate::chip_core_error;
 use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_well_uninitialized;
 use crate::chip_ok;
 use crate::chip_sdk_error;
+use crate::ChipError;
 use crate::ChipErrorResult;
 
 /*
@@ -595,9 +595,12 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
 
         self.ecdsa_sign_msg(&csr[0..4], &mut raw_sig)?;
 
-        verify_or_return_error!(csr.len() >= (4 + raw_sig.length()), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(
+            csr.len() >= (4 + raw_sig.length()),
+            Err(chip_error_invalid_argument!())
+        );
 
-        csr[4..(4+raw_sig.length())].copy_from_slice(raw_sig.const_bytes());
+        csr[4..(4 + raw_sig.length())].copy_from_slice(raw_sig.const_bytes());
 
         return Ok(4 + raw_sig.length());
     }
@@ -1311,10 +1314,15 @@ mod test {
             let mut alice = P256Keypair::default();
             let _ = alice.initialize(ECPKeyTarget::Ecdh);
             let mut csr: [u8; 128] = [0; 128];
-            assert_eq!(true, alice.new_certificate_signing_request(&mut csr[..]).is_ok_and(|s| {
-                println!("len is {}", s);
-                return s == 68;
-            }));
+            assert_eq!(
+                true,
+                alice
+                    .new_certificate_signing_request(&mut csr[..])
+                    .is_ok_and(|s| {
+                        println!("len is {}", s);
+                        return s == 68;
+                    })
+            );
         }
     }
 }

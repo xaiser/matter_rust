@@ -4,8 +4,8 @@ use crate::chip::crypto;
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
 use crate::chip_sdk_error;
-use crate::ChipErrorResult;
 use crate::ChipError;
+use crate::ChipErrorResult;
 
 pub trait OperationalKeystore {
     fn has_pending_op_keypair(&self) -> bool;
