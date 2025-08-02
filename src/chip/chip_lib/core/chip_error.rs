@@ -303,6 +303,13 @@ macro_rules! chip_error_buffer_too_small {
 }
 
 #[macro_export]
+macro_rules! chip_error_well_uninitialized {
+    () => {
+        chip_core_error!(0x1c)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_end_of_tlv {
     () => {
         chip_core_error!(0x21)

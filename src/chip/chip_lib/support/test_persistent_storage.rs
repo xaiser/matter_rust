@@ -27,7 +27,7 @@ use core::str::FromStr;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
-struct TestPersistentStorage {
+pub struct TestPersistentStorage {
     m_storage: HashMap<String, Vec<u8>>,
     m_poison_keys: HashSet<String>,
     m_reject_writes: bool,

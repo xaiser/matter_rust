@@ -5,6 +5,7 @@ use crate::chip_core_error;
 use crate::chip_error_not_implemented;
 use crate::chip_sdk_error;
 use crate::ChipErrorResult;
+use crate::ChipError;
 
 pub trait OperationalKeystore {
     fn has_pending_op_keypair(&self) -> bool;
@@ -15,7 +16,7 @@ pub trait OperationalKeystore {
         &mut self,
         fabric_index: FabricIndex,
         out_certificate_siging_request: &mut [u8],
-    ) -> ChipErrorResult;
+    ) -> Result<usize, ChipError>;
 
     fn activate_op_keypair_for_fabric(
         &mut self,
