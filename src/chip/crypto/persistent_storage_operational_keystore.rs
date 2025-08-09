@@ -2,7 +2,7 @@ use crate::chip::chip_lib::core::{
     chip_persistent_storage_delegate::PersistentStorageDelegate,
     data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
 };
-use crate::chip::crypto::{self, ECPKeypair, OperationalKeystore, P256KeypairBase};
+use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256KeypairBase};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
@@ -13,6 +13,7 @@ use crate::ChipErrorResult;
 use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_invalid_fabric_index;
+use crate::chip_error_invalid_public_key;
 use crate::chip_ok;
 
 use crate::verify_or_return_error;
@@ -136,7 +137,28 @@ where
         fabric_index: FabricIndex,
         noc_public_key: &crypto::P256PublicKey,
     ) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+        verify_or_return_error!(
+            self.m_storage.is_null() != false,
+            Err(chip_error_incorrect_state!())
+        );
+
+        verify_or_return_error!(
+            (is_valid_fabric_index(fabric_index)) && (fabric_index == self.m_pending_fabric_index),
+            Err(chip_error_invalid_fabric_index!())
+        );
+
+        if let Some(keypair) = &self.m_pending_keypair {
+            verify_or_return_error!(
+                keypair.ecdsa_pubkey().matches(noc_public_key),
+                Err(chip_error_invalid_public_key!())
+            );
+        } else {
+            return Err(chip_error_invalid_fabric_index!());
+        }
+
+        self.m_is_pending_keypair_active = true;
+
+        chip_ok!()
     }
 
     fn commit_op_keypair_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
@@ -188,6 +210,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chip::crypto::P256PublicKey;
     use crate::chip::chip_lib::support::test_persistent_storage::TestPersistentStorage;
 
     type Store = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -212,5 +235,87 @@ mod tests {
                 })
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn invalid_fabric_index() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        assert_eq!(
+            true,
+            store
+                .new_op_keypair_for_fabric(u8::MAX, &mut out_csr[..])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn pending_keypair() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        assert_eq!(
+            true,
+            store
+                .new_op_keypair_for_fabric(2, &mut out_csr[..])
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
+
+        assert_eq!(
+            true,
+            store
+                .new_op_keypair_for_fabric(3, &mut out_csr[..])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn small_csr_buffer() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 0] = [];
+        assert_eq!(
+            true,
+            store
+                .new_op_keypair_for_fabric(u8::MAX, &mut out_csr[..])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn activate_op_keyapir() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        if let Some(keypair) = &store.m_pending_keypair {
+            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+        } else {
+            assert!(false);
+        }
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
+            println!("err is {}", e);
+        }).is_ok());
+        assert_eq!(true, store.m_is_pending_keypair_active);
+    }
+
+    #[test]
+    fn activate_op_keyapir_with_wrong_pubkey() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).is_err());
+        assert_eq!(false, store.m_is_pending_keypair_active);
     }
 } // end of mod tests

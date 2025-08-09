@@ -188,7 +188,18 @@ pub fn clear_secret_data_with_raw(buf: *mut u8, len: usize) {
 }
 
 pub fn is_buffer_content_equal_constant_time(a: &[u8], b: &[u8], n: usize) -> bool {
-    false
+    // I guess this function is designed for safety so that the CPU will always use the same
+    // amount of time to compare the a&b no matter what the size is.
+    // Just compare them directly here for now.
+    if (a.len() != n) || (b.len() != n) {
+        return false;
+    }
+    for i in 0..n {
+        if a[i] != b[i] {
+            return false;
+        }
+    }
+    return true;
 }
 
 pub fn is_buffer_content_equal_constant_time_with_raw(

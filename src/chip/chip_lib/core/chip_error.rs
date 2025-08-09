@@ -450,6 +450,13 @@ macro_rules! chip_error_inbound_message_too_big {
     };
 }
 
+#[macro_export]
+macro_rules! chip_error_invalid_public_key {
+    () => {
+        chip_core_error!(0xc5)
+    };
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

@@ -9,6 +9,7 @@ pub mod iterators;
 pub mod logging;
 pub mod object_life_cycle;
 pub mod pool;
+pub mod default_storage_key_allocator;
 
 #[cfg(test)]
 pub mod test_persistent_storage;
