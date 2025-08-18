@@ -1,4 +1,8 @@
-use crate::chip::chip_lib::core::chip_persistent_storage_delegate::KKEY_LENGTH_MAX;
+use crate::chip::chip_lib::core::
+{
+    data_model_types::FabricIndex,
+    chip_persistent_storage_delegate::KKEY_LENGTH_MAX,
+};
 
 use core::fmt::{self, Arguments, Write};
 
@@ -107,6 +111,10 @@ impl DefaultStorageKeyAllocator {
     pub fn fabric_index_info() -> StorageKeyName {
         StorageKeyName::from("g/fidx")
     }
+
+    pub fn fabric_noc(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/n", index))
+    }
 }
 
 #[cfg(test)]
@@ -140,5 +148,15 @@ mod test {
             assert_eq!(b"a is b", name.key_name());
         }
     } // end of storage key name test
+    
+    mod default_storage_key_alloc {
+        use super::super::*;
+
+        #[test]
+        fn fabric_noc() {
+            let name = DefaultStorageKeyAllocator::fabric_noc(0);
+            assert_eq!(b"f/0/n", name.key_name());
+        }
+    } // end of default_storage_key_alloc
 
 }
