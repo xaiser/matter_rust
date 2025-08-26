@@ -1,8 +1,14 @@
-use crate::chip::chip_lib::core::{
+use crate::chip::chip_lib::{
+    support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+    core::{
+    tlv_writer::{TlvWriter, TlvWriterBasic, TlvContiguousBufferWriter},
+    tlv_types::TlvType, tlv_tags,
     chip_persistent_storage_delegate::PersistentStorageDelegate,
     data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
+    }
 };
-use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256KeypairBase};
+
+use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256Keypair, P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
@@ -14,12 +20,56 @@ use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_public_key;
+use crate::chip_error_invalid_argument;
 use crate::chip_ok;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
+use crate::tlv_estimate_struct_overhead;
 
 use core::ptr;
+
+fn op_key_version_tag() -> tlv_tags::Tag {
+    tlv_tags::context_tag(0)
+}
+
+fn op_key_data_tag() -> tlv_tags::Tag {
+    tlv_tags::context_tag(1)
+}
+
+const K_OP_KEY_VERSION: u16 = 1;
+
+const fn op_key_tlv_max_size() -> usize {
+    tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), P256SerializedKeypair::capacity())
+}
+
+
+fn store_operational_key<Delegate: PersistentStorageDelegate>(fabric_index: FabricIndex, storage: &mut Delegate, keypair: &P256Keypair) -> ChipErrorResult {
+    verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+    // Use a SensitiveDataBuffer to get RAII secret data clearing on scope exit.
+    let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
+    let mut writer = TlvContiguousBufferWriter::const_default();
+
+    writer.init(buf.bytes_raw(), SensitiveDataBuffer::<{op_key_tlv_max_size()}>::capacity() as u32);
+    let mut outer_type = TlvType::KtlvTypeNotSpecified;
+
+    writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_type)?;
+    writer.put_u16(op_key_version_tag(), K_OP_KEY_VERSION)?;
+
+    let mut serialized_op_key = P256SerializedKeypair::default();
+    keypair.serialize(&mut serialized_op_key)?;
+    writer.put_bytes(op_key_data_tag(), &serialized_op_key.const_bytes()[..serialized_op_key.length()])?;
+
+    writer.end_container(outer_type)?;
+
+    let op_key_length = writer.get_length_written();
+
+    verify_or_return_error!(op_key_length < (u16::MAX as usize), Err(chip_error_buffer_too_small!()));
+
+    storage.sync_set_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), &buf.const_bytes()[..op_key_length])?;
+
+    chip_ok!()
+}
 
 struct PersistentStorageOperationalKeystore<PA>
 where

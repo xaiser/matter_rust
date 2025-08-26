@@ -6,7 +6,7 @@ use crate::chip::chip_lib::core::
 
 use core::fmt::{self, Arguments, Write};
 
-struct StorageKeyName{
+pub struct StorageKeyName{
     m_key_name_buffer: [u8; KKEY_LENGTH_MAX],
     len: Option<usize>,
 }
@@ -34,6 +34,10 @@ impl StorageKeyName {
         } else {
             return &[];
         }
+    }
+
+    pub fn key_name_str(&self) -> &str {
+        str::from_utf8(self.key_name()).unwrap_or(&"")
     }
 
     pub fn key_name_raw(&self) -> (* const u8, usize) {
@@ -115,6 +119,10 @@ impl DefaultStorageKeyAllocator {
     pub fn fabric_noc(index: FabricIndex) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/n", index))
     }
+
+    pub fn fabric_op_key(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/o", index))
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +154,12 @@ mod test {
         fn write_str() {
             let name = StorageKeyName::from("a is b");
             assert_eq!(b"a is b", name.key_name());
+        }
+
+        #[test]
+        fn get_string() {
+            let name = StorageKeyName::formatted(format_args!("{} is {}", 'a', 'b'));
+            assert_eq!("a is b", name.key_name_str());
         }
     } // end of storage key name test
     

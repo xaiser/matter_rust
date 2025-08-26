@@ -106,6 +106,7 @@ pub trait TlvWriter {
     fn get_init_params(&self) -> TlvWriterInitParams<Self::BackingStoreType>;
     fn is_container_open(&self) -> bool;
     fn init(&mut self, buf: *mut u8, max_len: u32);
+    fn get_length_written(&self) -> usize;
 }
 
 pub struct TlvWriterBasic<BackingStoreType>
@@ -189,6 +190,10 @@ where
         self.set_close_container_reserved(true);
 
         self.m_initiialization_cookie = Self::KEXPECTED_INITIALIZATION_COOKIE;
+    }
+
+    fn get_length_written(&self) -> usize {
+        self.m_len_written
     }
 }
 
@@ -860,6 +865,15 @@ where
     }
 }
 
+pub struct DummyBackStore;
+impl TlvBackingStore for DummyBackStore {
+    fn get_new_buffer_will_always_fail(&self) -> bool {
+        false
+    }
+}
+
+pub type TlvContiguousBufferWriter = TlvWriterBasic<DummyBackStore>;
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1479,6 +1493,7 @@ mod test {
                 self.m_container_open
             }
             fn init(&mut self, _buf: *mut u8, _max_len: u32) {}
+            fn get_length_written(&self) -> usize {0}
         }
 
         fn setup(backing: *mut VecBackingStore) -> TheTlvWriter {

@@ -18,12 +18,10 @@ use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
 
-/*
 use core::str::FromStr;
 use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
-*/
 
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
@@ -701,6 +699,15 @@ impl P256KeypairBase for P256Keypair {
     }
 
     fn serialize(&self, output: &mut P256SerializedKeypair) -> ChipErrorResult {
+        let len = K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+        verify_or_return_error!(P256SerializedKeypair::capacity() >= len, Err(chip_error_internal!()));
+        let serialized_keypair: &mut [u8] = output.bytes();
+        serialized_keypair[0..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(self.m_ecdsa_public_key.const_bytes());
+        let mut p = self.m_ecdsa_keypair.to_bytes();
+        serialized_keypair[K_P256_PUBLIC_KEY_LENGTH..len].copy_from_slice(p.as_slice());
+        output.set_length(len);
+        // clear secret data
+        p.fill(0);
         chip_ok!()
     }
 
@@ -1335,5 +1342,13 @@ mod test {
                     })
             );
         }
-    }
+
+        #[test]
+        fn serialize() {
+            let mut keypair = P256Keypair::default();
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
+            let mut bytes = P256SerializedKeypair::default();
+            assert_eq!(true, keypair.serialize(&mut bytes).is_ok());
+        }
+    } // end of test_p256_keypair
 }
