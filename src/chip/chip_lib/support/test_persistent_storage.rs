@@ -136,6 +136,20 @@ impl TestPersistentStorage {
     pub fn clear_posion_key(&mut self) {
         self.m_poison_keys.clear();
     }
+
+    pub fn has_key(&self, key_string: &str) -> bool {
+        let key = key_string.to_string();
+        self.m_storage.contains_key(&key)
+    }
+
+    pub fn data_len(&self, key_string: &str) -> usize {
+        let key = key_string.to_string();
+        if let Some(value) = self.m_storage.get(&key) {
+            value.len()
+        } else {
+            0
+        }
+    }
 }
 
 impl PersistentStorageDelegate for TestPersistentStorage {

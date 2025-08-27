@@ -1093,7 +1093,7 @@ where
     }
 }
 
-struct DummyBackStore;
+pub struct DummyBackStore;
 impl TlvBackingStore for DummyBackStore {
     fn get_new_buffer_will_always_fail(&self) -> bool {
         false
