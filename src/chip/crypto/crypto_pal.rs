@@ -566,7 +566,7 @@ pub trait P256KeypairBase:
 
     fn serialize(&self, output: &mut P256SerializedKeypair) -> ChipErrorResult;
 
-    fn deserialize(&self, input: &mut P256SerializedKeypair) -> ChipErrorResult;
+    fn deserialize(&mut self, input: &P256SerializedKeypair) -> ChipErrorResult;
 }
 
 pub struct P256Keypair {
@@ -711,7 +711,20 @@ impl P256KeypairBase for P256Keypair {
         chip_ok!()
     }
 
-    fn deserialize(&self, input: &mut P256SerializedKeypair) -> ChipErrorResult {
+    fn deserialize(&mut self, input: &P256SerializedKeypair) -> ChipErrorResult {
+        let pub_key_len = self.m_ecdsa_public_key.length();
+        let len = K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+        verify_or_return_error!(input.length() == len, Err(chip_error_invalid_argument!()));
+
+        self.clear();
+
+        self.m_ecdsa_public_key.bytes().copy_from_slice(&input.const_bytes()[0..pub_key_len]);
+        self.m_ecdsa_keypair = SigningKey::from_slice(&input.const_bytes()[pub_key_len..]).map_err(|_|
+            chip_error_internal!()
+        )?;
+
+        self.m_initialized = true;
+
         chip_ok!()
     }
 }
@@ -1349,6 +1362,17 @@ mod test {
             let _ = keypair.initialize(ECPKeyTarget::Ecdh);
             let mut bytes = P256SerializedKeypair::default();
             assert_eq!(true, keypair.serialize(&mut bytes).is_ok());
+        }
+
+        #[test]
+        fn dserialize() {
+            let mut keypair = P256Keypair::default();
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
+            let mut bytes = P256SerializedKeypair::default();
+            assert_eq!(true, keypair.serialize(&mut bytes).is_ok());
+            let mut keypair1 = P256Keypair::default();
+            assert_eq!(true, keypair1.deserialize(&bytes).is_ok());
+            assert_eq!(keypair.m_ecdsa_keypair, keypair1.m_ecdsa_keypair);
         }
     } // end of test_p256_keypair
 }

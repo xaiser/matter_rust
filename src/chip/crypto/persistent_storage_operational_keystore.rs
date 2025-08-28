@@ -23,6 +23,7 @@ use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_public_key;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_version_mismatch;
+use crate::chip_error_persisted_storage_value_not_found;
 use crate::chip_ok;
 
 use crate::verify_or_return_error;
@@ -303,10 +304,44 @@ where
     }
 
     fn remove_op_keyapir_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+        verify_or_return_error!(
+            self.m_storage.is_null() == false,
+            Err(chip_error_incorrect_state!())
+        );
+
+        verify_or_return_error!(
+            is_valid_fabric_index(fabric_index),
+            Err(chip_error_invalid_fabric_index!())
+        );
+
+        if self.m_pending_keypair.is_some() && self.m_pending_fabric_index == fabric_index {
+            self.revert_pending_keypair();
+        }
+
+        unsafe {
+            return (*self.m_storage).sync_delete_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str()).
+                map_err(|e| {
+                    let not_found = chip_error_persisted_storage_value_not_found!();
+                    match e {
+                        not_found => {
+                            chip_error_invalid_fabric_index!()
+                        },
+                        _ => {
+                            e
+                        }
+                    }
+                });
+        }
     }
 
-    fn revert_pending_keypair(&mut self) {}
+    fn revert_pending_keypair(&mut self) {
+        if self.m_storage.is_null() {
+            return;
+        }
+
+        // Just reset the pending key, we never stored anything
+        self.reset_pending_key();
+    }
 
     fn supports_sign_with_op_keypair_in_background(&self) -> bool {
         false
@@ -488,7 +523,7 @@ mod tests {
     fn export_stored_key() {
         let mut pa = TestPersistentStorage::default();
         let mut keypair = crypto::P256Keypair::default();
-        keypair.initialize(crypto::ECPKeyTarget::Ecdh);
+        let _ = keypair.initialize(crypto::ECPKeyTarget::Ecdh);
 
         assert_eq!(true, store_operational_key(0, &mut pa, &keypair).is_ok());
 
@@ -530,5 +565,38 @@ mod tests {
         // export the op key
         let mut output_serialized_op_key = P256SerializedKeypair::default();
         assert_eq!(true, store.export_op_keypair_for_fabric(2, &mut output_serialized_op_key).is_ok());
+    }
+
+    #[test]
+    fn remove_op_key() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        if let Some(keypair) = &store.m_pending_keypair {
+            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+        } else {
+            assert!(false);
+        }
+        // activate the op key
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
+            println!("err is {}", e);
+        }).is_ok());
+        assert_eq!(true, store.m_is_pending_keypair_active);
+        // commit the op key
+        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
+            println!("commit err is {}", e);
+        }).is_ok());
+
+        // removed it
+        assert_eq!(true, store.remove_op_keyapir_for_fabric(2).is_ok());
+
+        // try to export it, should fail
+        let mut output_serialized_op_key = P256SerializedKeypair::default();
+        assert_eq!(true, store.export_op_keypair_for_fabric(2, &mut output_serialized_op_key).is_err());
+
     }
 } // end of mod tests
