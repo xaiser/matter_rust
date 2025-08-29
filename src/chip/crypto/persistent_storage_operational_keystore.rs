@@ -9,7 +9,7 @@ use crate::chip::chip_lib::{
     }
 };
 
-use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256Keypair, P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer};
+use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256Keypair, P256EcdsaSignature, P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
@@ -24,6 +24,7 @@ use crate::chip_error_invalid_public_key;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_version_mismatch;
 use crate::chip_error_persisted_storage_value_not_found;
+use crate::chip_error_internal;
 use crate::chip_ok;
 
 use crate::verify_or_return_error;
@@ -116,6 +117,25 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: Fabri
     chip_ok!()
 }
 
+fn sign_with_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: FabricIndex, storage: &mut Delegate,
+    message: &[u8], out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
+    verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+    let mut keypair = P256Keypair::default();
+    let mut serialized_keypair = P256SerializedKeypair::default();
+
+    let _ = export_stored_op_key(fabric_index, storage, &mut serialized_keypair)?;
+
+    let _ = keypair.deserialize(&serialized_keypair)?;
+
+    let err = keypair.ecdsa_sign_msg(message, out_signature);
+
+    // clear the keypair, clear will just generate another new keypair which is not used to sign
+    // the message
+    keypair.clear();
+
+    return err;
+}
+
 struct PersistentStorageOperationalKeystore<PA>
 where
     PA: PersistentStorageDelegate,
@@ -177,7 +197,21 @@ where
     }
 
     fn has_op_keypair_for_fabric(&self, fabric_index: FabricIndex) -> bool {
-        false
+        verify_or_return_error!(
+            self.m_storage.is_null() == false,
+            false
+        );
+        verify_or_return_error!(
+            is_valid_fabric_index(fabric_index),
+            false
+        );
+
+        if self.m_is_pending_keypair_active == true && (fabric_index == self.m_pending_fabric_index) && self.m_pending_keypair.is_some() {
+            return true;
+        }
+
+        let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
+        return storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), buf.bytes()).is_ok();
     }
 
     fn new_op_keypair_for_fabric(
@@ -300,6 +334,24 @@ where
         fabric_index: FabricIndex,
         operational_keystore: &Self,
     ) -> ChipErrorResult {
+        verify_or_return_error!(
+            self.m_storage.is_null() == false,
+            Err(chip_error_incorrect_state!())
+        );
+
+        verify_or_return_error!(
+            is_valid_fabric_index(fabric_index),
+            Err(chip_error_invalid_fabric_index!())
+        );
+
+        /*
+        let mut serialized_keypair = P256SerializedKeypair::default();
+
+        if !self.has_op_keypair_for_fabric(fabric_index) {
+            operational_keystore.export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair)?;
+        }
+        */
+
         Err(chip_error_not_implemented!())
     }
 
@@ -353,14 +405,35 @@ where
         message: &[u8],
         out_signature: &mut crypto::P256EcdsaSignature,
     ) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+        verify_or_return_error!(
+            self.m_storage.is_null() == false,
+            Err(chip_error_incorrect_state!())
+        );
+
+        verify_or_return_error!(
+            is_valid_fabric_index(fabric_index),
+            Err(chip_error_invalid_fabric_index!())
+        );
+
+        if self.m_is_pending_keypair_active == true && (fabric_index == self.m_pending_fabric_index) {
+            verify_or_return_error!(self.m_pending_keypair.is_some(), Err(chip_error_internal!()));
+            return self.m_pending_keypair.as_ref().unwrap().ecdsa_sign_msg(message, out_signature);
+        }
+
+        unsafe {
+            return sign_with_stored_op_key(fabric_index, &mut (*self.m_storage), message, out_signature);
+        }
     }
 
     fn allocate_ephemeral_keypair_for_case(&self) -> *mut crypto::P256Keypair {
+        // TODO: we don't how to implement this yet
         ptr::null_mut()
     }
 
-    fn release_ephemeral_keypair(keypair: *mut crypto::P256Keypair) {}
+    fn release_ephemeral_keypair(keypair: *mut crypto::P256Keypair) {
+        // TODO: we don't need this until we have the allocate_ephemeral_keypair_for_case
+        // implementation.
+    }
 }
 
 #[cfg(test)]
@@ -480,7 +553,7 @@ mod tests {
     fn store_op_key() {
         let mut pa = TestPersistentStorage::default();
         let mut keypair = crypto::P256Keypair::default();
-        keypair.initialize(crypto::ECPKeyTarget::Ecdh);
+        let _ = keypair.initialize(crypto::ECPKeyTarget::Ecdh);
 
         assert_eq!(true, store_operational_key(0, &mut pa, &keypair).is_ok());
 
@@ -598,5 +671,70 @@ mod tests {
         let mut output_serialized_op_key = P256SerializedKeypair::default();
         assert_eq!(true, store.export_op_keypair_for_fabric(2, &mut output_serialized_op_key).is_err());
 
+    }
+
+    #[test]
+    fn sign_message() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        if let Some(keypair) = &store.m_pending_keypair {
+            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+        } else {
+            assert!(false);
+        }
+        // activate the op key
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
+            println!("err is {}", e);
+        }).is_ok());
+        assert_eq!(true, store.m_is_pending_keypair_active);
+        // commit the op key
+        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
+            println!("commit err is {}", e);
+        }).is_ok());
+
+        let mut sig = P256EcdsaSignature::default();
+
+        assert_eq!(true, sign_with_stored_op_key(2, &mut pa, &[1,2,3,4], &mut sig).is_ok());
+    }
+
+    #[test]
+    fn sign_message_with_pending_keypair() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        if let Some(keypair) = &store.m_pending_keypair {
+            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+        } else {
+            assert!(false);
+        }
+        // activate the op key
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
+            println!("err is {}", e);
+        }).is_ok());
+        assert_eq!(true, store.m_is_pending_keypair_active);
+
+        let mut sig_with_pending_keypair = P256EcdsaSignature::default();
+        // sign with pending key
+        assert_eq!(true, store.sign_with_op_keyapir(2, &[1,2,3,4], &mut sig_with_pending_keypair).is_ok());
+        // commit it
+        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
+            println!("commit err is {}", e);
+        }).is_ok());
+
+        let mut sig_with_stored_keypair = P256EcdsaSignature::default();
+
+        // sign with pending key
+        assert_eq!(true, store.sign_with_op_keyapir(2, &[1,2,3,4], &mut sig_with_stored_keypair).is_ok());
+
+        assert_eq!(sig_with_pending_keypair.const_bytes(), sig_with_stored_keypair.const_bytes());
     }
 } // end of mod tests
