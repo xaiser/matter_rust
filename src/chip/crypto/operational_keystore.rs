@@ -37,7 +37,7 @@ pub trait OperationalKeystore {
     fn migrate_op_keypair_for_fabric(
         &mut self,
         fabric_index: FabricIndex,
-        operational_keystore: &Self,
+        operational_keystore: &mut Self,
     ) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }

@@ -211,7 +211,9 @@ where
         }
 
         let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
-        return storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), buf.bytes()).is_ok();
+        unsafe {
+            return (*self.m_storage).sync_get_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), buf.bytes()).is_ok();
+        }
     }
 
     fn new_op_keypair_for_fabric(
@@ -332,7 +334,7 @@ where
     fn migrate_op_keypair_for_fabric(
         &mut self,
         fabric_index: FabricIndex,
-        operational_keystore: &Self,
+        operational_keystore: &mut Self,
     ) -> ChipErrorResult {
         verify_or_return_error!(
             self.m_storage.is_null() == false,
@@ -344,15 +346,35 @@ where
             Err(chip_error_invalid_fabric_index!())
         );
 
-        /*
         let mut serialized_keypair = P256SerializedKeypair::default();
 
         if !self.has_op_keypair_for_fabric(fabric_index) {
             operational_keystore.export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair)?;
-        }
-        */
 
-        Err(chip_error_not_implemented!())
+            let mut keypair = P256Keypair::default();
+
+            keypair.deserialize(&serialized_keypair)?;
+            unsafe {
+                match store_operational_key(fabric_index, &mut (*self.m_storage), &keypair) {
+                    Err(e) => {
+                        keypair.clear();
+                        return Err(e);
+                    },
+                    _ => {}
+                }
+            }
+            match operational_keystore.remove_op_keyapir_for_fabric(fabric_index) {
+                Err(e) => {
+                    keypair.clear();
+                    return Err(e);
+                },
+                _ => {}
+            }
+        } else if self.has_op_keypair_for_fabric(fabric_index) {
+            operational_keystore.remove_op_keyapir_for_fabric(fabric_index)?;
+        }
+
+        chip_ok!()
     }
 
     fn remove_op_keyapir_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
@@ -736,5 +758,41 @@ mod tests {
         assert_eq!(true, store.sign_with_op_keyapir(2, &[1,2,3,4], &mut sig_with_stored_keypair).is_ok());
 
         assert_eq!(sig_with_pending_keypair.const_bytes(), sig_with_stored_keypair.const_bytes());
+    }
+
+    #[test]
+    fn migrate_to_other() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(core::ptr::addr_of_mut!(pa));
+        let mut out_csr: [u8; 256] = [0; 256];
+        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        assert_eq!(false, store.m_is_pending_keypair_active);
+        // create the noc public key
+        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        if let Some(keypair) = &store.m_pending_keypair {
+            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+        } else {
+            assert!(false);
+        }
+        // activate the op key
+        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
+            println!("err is {}", e);
+        }).is_ok());
+        assert_eq!(true, store.m_is_pending_keypair_active);
+        // commit the op key
+        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
+            println!("commit err is {}", e);
+        }).is_ok());
+
+        let mut pa1 = TestPersistentStorage::default();
+        let mut store1 = setup(core::ptr::addr_of_mut!(pa1));
+        // ensure there is no fabric index = 2
+        assert_eq!(false, store1.has_op_keypair_for_fabric(2));
+        // migrate
+        assert_eq!(true, store1.migrate_op_keypair_for_fabric(2, &mut store).is_ok());
+        // chekc store1 has it
+        assert_eq!(true, store1.has_op_keypair_for_fabric(2));
+        // chekc store losts it
+        assert_eq!(false, store.has_op_keypair_for_fabric(2));
     }
 } // end of mod tests
