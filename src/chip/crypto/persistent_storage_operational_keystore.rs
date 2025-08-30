@@ -1,15 +1,19 @@
 use crate::chip::chip_lib::{
-    support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
     core::{
-    tlv_writer::{TlvWriter, TlvWriterBasic, TlvContiguousBufferWriter},
-    tlv_reader::{TlvReader, TlvReaderBasic, TlvContiguousBufferReader},
-    tlv_types::TlvType, tlv_tags,
-    chip_persistent_storage_delegate::PersistentStorageDelegate,
-    data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
-    }
+        chip_persistent_storage_delegate::PersistentStorageDelegate,
+        data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
+        tlv_reader::{TlvContiguousBufferReader, TlvReader, TlvReaderBasic},
+        tlv_tags,
+        tlv_types::TlvType,
+        tlv_writer::{TlvContiguousBufferWriter, TlvWriter, TlvWriterBasic},
+    },
+    support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
 };
 
-use crate::chip::crypto::{self, ECPKey, ECPKeypair, OperationalKeystore, P256Keypair, P256EcdsaSignature, P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer};
+use crate::chip::crypto::{
+    self, ECPKey, ECPKeypair, OperationalKeystore, P256EcdsaSignature, P256Keypair,
+    P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer,
+};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
@@ -19,17 +23,17 @@ use crate::ChipErrorResult;
 
 use crate::chip_error_buffer_too_small;
 use crate::chip_error_incorrect_state;
+use crate::chip_error_internal;
+use crate::chip_error_invalid_argument;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_public_key;
-use crate::chip_error_invalid_argument;
-use crate::chip_error_version_mismatch;
 use crate::chip_error_persisted_storage_value_not_found;
-use crate::chip_error_internal;
+use crate::chip_error_version_mismatch;
 use crate::chip_ok;
 
+use crate::tlv_estimate_struct_overhead;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
-use crate::tlv_estimate_struct_overhead;
 
 use core::{ptr, slice};
 
@@ -44,42 +48,77 @@ fn op_key_data_tag() -> tlv_tags::Tag {
 const K_OP_KEY_VERSION: u16 = 1;
 
 const fn op_key_tlv_max_size() -> usize {
-    tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), P256SerializedKeypair::capacity())
+    tlv_estimate_struct_overhead!(
+        core::mem::size_of::<u16>(),
+        P256SerializedKeypair::capacity()
+    )
 }
 
-
-fn store_operational_key<Delegate: PersistentStorageDelegate>(fabric_index: FabricIndex, storage: &mut Delegate, keypair: &P256Keypair) -> ChipErrorResult {
-    verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+fn store_operational_key<Delegate: PersistentStorageDelegate>(
+    fabric_index: FabricIndex,
+    storage: &mut Delegate,
+    keypair: &P256Keypair,
+) -> ChipErrorResult {
+    verify_or_return_error!(
+        is_valid_fabric_index(fabric_index),
+        Err(chip_error_invalid_argument!())
+    );
     // Use a SensitiveDataBuffer to get RAII secret data clearing on scope exit.
-    let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
+    let mut buf = SensitiveDataBuffer::<{ op_key_tlv_max_size() }>::default();
     let mut writer = TlvContiguousBufferWriter::const_default();
 
-    writer.init(buf.bytes_raw(), SensitiveDataBuffer::<{op_key_tlv_max_size()}>::capacity() as u32);
+    writer.init(
+        buf.bytes_raw(),
+        SensitiveDataBuffer::<{ op_key_tlv_max_size() }>::capacity() as u32,
+    );
     let mut outer_type = TlvType::KtlvTypeNotSpecified;
 
-    writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_type)?;
+    writer.start_container(
+        tlv_tags::anonymous_tag(),
+        TlvType::KtlvTypeStructure,
+        &mut outer_type,
+    )?;
     writer.put_u16(op_key_version_tag(), K_OP_KEY_VERSION)?;
 
     let mut serialized_op_key = P256SerializedKeypair::default();
     keypair.serialize(&mut serialized_op_key)?;
-    writer.put_bytes(op_key_data_tag(), &serialized_op_key.const_bytes()[..serialized_op_key.length()])?;
+    writer.put_bytes(
+        op_key_data_tag(),
+        &serialized_op_key.const_bytes()[..serialized_op_key.length()],
+    )?;
 
     writer.end_container(outer_type)?;
 
     let op_key_length = writer.get_length_written();
 
-    verify_or_return_error!(op_key_length < (u16::MAX as usize), Err(chip_error_buffer_too_small!()));
+    verify_or_return_error!(
+        op_key_length < (u16::MAX as usize),
+        Err(chip_error_buffer_too_small!())
+    );
 
-    storage.sync_set_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), &buf.const_bytes()[..op_key_length])?;
+    storage.sync_set_key_value(
+        DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(),
+        &buf.const_bytes()[..op_key_length],
+    )?;
 
     chip_ok!()
 }
 
-fn export_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: FabricIndex, storage: &mut Delegate, serialized_op_key: &mut P256SerializedKeypair) -> ChipErrorResult {
-    verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+fn export_stored_op_key<Delegate: PersistentStorageDelegate>(
+    fabric_index: FabricIndex,
+    storage: &mut Delegate,
+    serialized_op_key: &mut P256SerializedKeypair,
+) -> ChipErrorResult {
+    verify_or_return_error!(
+        is_valid_fabric_index(fabric_index),
+        Err(chip_error_invalid_fabric_index!())
+    );
     // Use a SensitiveDataBuffer to get RAII secret data clearing on scope exit.
-    let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
-    let size = storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), buf.bytes())?;
+    let mut buf = SensitiveDataBuffer::<{ op_key_tlv_max_size() }>::default();
+    let size = storage.sync_get_key_value(
+        DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(),
+        buf.bytes(),
+    )?;
 
     buf.set_length(size);
 
@@ -89,10 +128,13 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: Fabri
 
     reader.next_type_tag(TlvType::KtlvTypeStructure, tlv_tags::anonymous_tag())?;
     let container_type = reader.enter_container()?;
-    
+
     reader.next_tag(op_key_version_tag())?;
     let op_key_version: u16 = reader.get_u16()?;
-    verify_or_return_error!(op_key_version == K_OP_KEY_VERSION, Err(chip_error_version_mismatch!()));
+    verify_or_return_error!(
+        op_key_version == K_OP_KEY_VERSION,
+        Err(chip_error_version_mismatch!())
+    );
 
     reader.next_tag(op_key_data_tag())?;
 
@@ -105,21 +147,32 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: Fabri
     let key_data_len = key_data.len();
     drop(key_data);
 
-    verify_or_return_error!(key_data_len <= P256SerializedKeypair::capacity(), Err(chip_error_buffer_too_small!()));
+    verify_or_return_error!(
+        key_data_len <= P256SerializedKeypair::capacity(),
+        Err(chip_error_buffer_too_small!())
+    );
 
     reader.exit_container(container_type)?;
 
     unsafe {
-        serialized_op_key.bytes()[0..key_data_len].copy_from_slice(slice::from_raw_parts(key_data_ptr, key_data_len));
+        serialized_op_key.bytes()[0..key_data_len]
+            .copy_from_slice(slice::from_raw_parts(key_data_ptr, key_data_len));
     }
     serialized_op_key.set_length(key_data_len);
 
     chip_ok!()
 }
 
-fn sign_with_stored_op_key<Delegate: PersistentStorageDelegate>(fabric_index: FabricIndex, storage: &mut Delegate,
-    message: &[u8], out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
-    verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+fn sign_with_stored_op_key<Delegate: PersistentStorageDelegate>(
+    fabric_index: FabricIndex,
+    storage: &mut Delegate,
+    message: &[u8],
+    out_signature: &mut P256EcdsaSignature,
+) -> ChipErrorResult {
+    verify_or_return_error!(
+        is_valid_fabric_index(fabric_index),
+        Err(chip_error_invalid_argument!())
+    );
     let mut keypair = P256Keypair::default();
     let mut serialized_keypair = P256SerializedKeypair::default();
 
@@ -168,10 +221,7 @@ where
     PA: PersistentStorageDelegate,
 {
     pub fn init(&mut self, storage: *mut PA) -> ChipErrorResult {
-        verify_or_return_error!(
-            self.m_storage.is_null(),
-            Err(chip_error_incorrect_state!())
-        );
+        verify_or_return_error!(self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
         self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
         //self.m_is_externally_owned_keypair = false;
         self.m_storage = storage;
@@ -197,22 +247,24 @@ where
     }
 
     fn has_op_keypair_for_fabric(&self, fabric_index: FabricIndex) -> bool {
-        verify_or_return_error!(
-            self.m_storage.is_null() == false,
-            false
-        );
-        verify_or_return_error!(
-            is_valid_fabric_index(fabric_index),
-            false
-        );
+        verify_or_return_error!(self.m_storage.is_null() == false, false);
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), false);
 
-        if self.m_is_pending_keypair_active == true && (fabric_index == self.m_pending_fabric_index) && self.m_pending_keypair.is_some() {
+        if self.m_is_pending_keypair_active == true
+            && (fabric_index == self.m_pending_fabric_index)
+            && self.m_pending_keypair.is_some()
+        {
             return true;
         }
 
-        let mut buf = SensitiveDataBuffer::<{op_key_tlv_max_size()}>::default();
+        let mut buf = SensitiveDataBuffer::<{ op_key_tlv_max_size() }>::default();
         unsafe {
-            return (*self.m_storage).sync_get_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(), buf.bytes()).is_ok();
+            return (*self.m_storage)
+                .sync_get_key_value(
+                    DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(),
+                    buf.bytes(),
+                )
+                .is_ok();
         }
     }
 
@@ -298,17 +350,27 @@ where
             Err(chip_error_incorrect_state!())
         );
 
-        verify_or_return_error!(self.m_pending_keypair.is_some(), Err(chip_error_invalid_public_key!()));
+        verify_or_return_error!(
+            self.m_pending_keypair.is_some(),
+            Err(chip_error_invalid_public_key!())
+        );
 
         verify_or_return_error!(
             (is_valid_fabric_index(fabric_index)) && (fabric_index == self.m_pending_fabric_index),
             Err(chip_error_invalid_fabric_index!())
         );
 
-        verify_or_return_error!(self.m_is_pending_keypair_active == true, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(
+            self.m_is_pending_keypair_active == true,
+            Err(chip_error_incorrect_state!())
+        );
 
         unsafe {
-            store_operational_key(fabric_index, &mut (*self.m_storage), self.m_pending_keypair.as_ref().unwrap())?;
+            store_operational_key(
+                fabric_index,
+                &mut (*self.m_storage),
+                self.m_pending_keypair.as_ref().unwrap(),
+            )?;
         }
 
         self.reset_pending_key();
@@ -349,7 +411,8 @@ where
         let mut serialized_keypair = P256SerializedKeypair::default();
 
         if !self.has_op_keypair_for_fabric(fabric_index) {
-            operational_keystore.export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair)?;
+            operational_keystore
+                .export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair)?;
 
             let mut keypair = P256Keypair::default();
 
@@ -359,7 +422,7 @@ where
                     Err(e) => {
                         keypair.clear();
                         return Err(e);
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -367,7 +430,7 @@ where
                 Err(e) => {
                     keypair.clear();
                     return Err(e);
-                },
+                }
                 _ => {}
             }
         } else if self.has_op_keypair_for_fabric(fabric_index) {
@@ -393,16 +456,17 @@ where
         }
 
         unsafe {
-            return (*self.m_storage).sync_delete_key_value(DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str()).
-                map_err(|e| {
+            return (*self.m_storage)
+                .sync_delete_key_value(
+                    DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(),
+                )
+                .map_err(|e| {
                     let not_found = chip_error_persisted_storage_value_not_found!();
                     match e {
                         not_found => {
                             chip_error_invalid_fabric_index!()
-                        },
-                        _ => {
-                            e
                         }
+                        _ => e,
                     }
                 });
         }
@@ -437,13 +501,26 @@ where
             Err(chip_error_invalid_fabric_index!())
         );
 
-        if self.m_is_pending_keypair_active == true && (fabric_index == self.m_pending_fabric_index) {
-            verify_or_return_error!(self.m_pending_keypair.is_some(), Err(chip_error_internal!()));
-            return self.m_pending_keypair.as_ref().unwrap().ecdsa_sign_msg(message, out_signature);
+        if self.m_is_pending_keypair_active == true && (fabric_index == self.m_pending_fabric_index)
+        {
+            verify_or_return_error!(
+                self.m_pending_keypair.is_some(),
+                Err(chip_error_internal!())
+            );
+            return self
+                .m_pending_keypair
+                .as_ref()
+                .unwrap()
+                .ecdsa_sign_msg(message, out_signature);
         }
 
         unsafe {
-            return sign_with_stored_op_key(fabric_index, &mut (*self.m_storage), message, out_signature);
+            return sign_with_stored_op_key(
+                fabric_index,
+                &mut (*self.m_storage),
+                message,
+                out_signature,
+            );
         }
     }
 
@@ -461,9 +538,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chip::crypto::{self, P256PublicKey, P256Keypair};
     use crate::chip::chip_lib::support::{
-        test_persistent_storage::TestPersistentStorage, default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName}};
+        default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+        test_persistent_storage::TestPersistentStorage,
+    };
+    use crate::chip::crypto::{self, P256Keypair, P256PublicKey};
 
     type Store = PersistentStorageOperationalKeystore<TestPersistentStorage>;
 
@@ -543,18 +622,25 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
     }
 
@@ -563,11 +649,16 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).is_err());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .is_err()
+        );
         assert_eq!(false, store.m_is_pending_keypair_active);
     }
 
@@ -591,24 +682,37 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
         // commit the op key
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         // check we have reset the pending key
         assert_eq!(true, store.m_pending_keypair.is_none());
@@ -626,8 +730,14 @@ mod tests {
         let _ = keypair.serialize(&mut expected_serialized_op_key);
 
         let mut output_serialized_op_key = P256SerializedKeypair::default();
-        assert_eq!(true, export_stored_op_key(0, &mut pa, &mut output_serialized_op_key).is_ok());
-        assert_eq!(expected_serialized_op_key.const_bytes(), output_serialized_op_key.const_bytes());
+        assert_eq!(
+            true,
+            export_stored_op_key(0, &mut pa, &mut output_serialized_op_key).is_ok()
+        );
+        assert_eq!(
+            expected_serialized_op_key.const_bytes(),
+            output_serialized_op_key.const_bytes()
+        );
     }
 
     #[test]
@@ -635,31 +745,49 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
         // commit the op key
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         // check we have reset the pending key
         assert_eq!(true, store.m_pending_keypair.is_none());
 
         // export the op key
         let mut output_serialized_op_key = P256SerializedKeypair::default();
-        assert_eq!(true, store.export_op_keypair_for_fabric(2, &mut output_serialized_op_key).is_ok());
+        assert_eq!(
+            true,
+            store
+                .export_op_keypair_for_fabric(2, &mut output_serialized_op_key)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -667,32 +795,49 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
         // commit the op key
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         // removed it
         assert_eq!(true, store.remove_op_keyapir_for_fabric(2).is_ok());
 
         // try to export it, should fail
         let mut output_serialized_op_key = P256SerializedKeypair::default();
-        assert_eq!(true, store.export_op_keypair_for_fabric(2, &mut output_serialized_op_key).is_err());
-
+        assert_eq!(
+            true,
+            store
+                .export_op_keypair_for_fabric(2, &mut output_serialized_op_key)
+                .is_err()
+        );
     }
 
     #[test]
@@ -700,28 +845,44 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
         // commit the op key
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         let mut sig = P256EcdsaSignature::default();
 
-        assert_eq!(true, sign_with_stored_op_key(2, &mut pa, &[1,2,3,4], &mut sig).is_ok());
+        assert_eq!(
+            true,
+            sign_with_stored_op_key(2, &mut pa, &[1, 2, 3, 4], &mut sig).is_ok()
+        );
     }
 
     #[test]
@@ -729,35 +890,61 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
 
         let mut sig_with_pending_keypair = P256EcdsaSignature::default();
         // sign with pending key
-        assert_eq!(true, store.sign_with_op_keyapir(2, &[1,2,3,4], &mut sig_with_pending_keypair).is_ok());
+        assert_eq!(
+            true,
+            store
+                .sign_with_op_keyapir(2, &[1, 2, 3, 4], &mut sig_with_pending_keypair)
+                .is_ok()
+        );
         // commit it
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         let mut sig_with_stored_keypair = P256EcdsaSignature::default();
 
         // sign with pending key
-        assert_eq!(true, store.sign_with_op_keyapir(2, &[1,2,3,4], &mut sig_with_stored_keypair).is_ok());
+        assert_eq!(
+            true,
+            store
+                .sign_with_op_keyapir(2, &[1, 2, 3, 4], &mut sig_with_stored_keypair)
+                .is_ok()
+        );
 
-        assert_eq!(sig_with_pending_keypair.const_bytes(), sig_with_stored_keypair.const_bytes());
+        assert_eq!(
+            sig_with_pending_keypair.const_bytes(),
+            sig_with_stored_keypair.const_bytes()
+        );
     }
 
     #[test]
@@ -765,31 +952,47 @@ mod tests {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(core::ptr::addr_of_mut!(pa));
         let mut out_csr: [u8; 256] = [0; 256];
-        let _  = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
+        let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
-            noc_pubkey = P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+            noc_pubkey =
+                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
         } else {
             assert!(false);
         }
         // activate the op key
-        assert_eq!(true, store.activate_op_keypair_for_fabric(2, &noc_pubkey).inspect_err(|e| {
-            println!("err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .activate_op_keypair_for_fabric(2, &noc_pubkey)
+                .inspect_err(|e| {
+                    println!("err is {}", e);
+                })
+                .is_ok()
+        );
         assert_eq!(true, store.m_is_pending_keypair_active);
         // commit the op key
-        assert_eq!(true, store.commit_op_keypair_for_fabric(2).inspect_err(|e| {
-            println!("commit err is {}", e);
-        }).is_ok());
+        assert_eq!(
+            true,
+            store
+                .commit_op_keypair_for_fabric(2)
+                .inspect_err(|e| {
+                    println!("commit err is {}", e);
+                })
+                .is_ok()
+        );
 
         let mut pa1 = TestPersistentStorage::default();
         let mut store1 = setup(core::ptr::addr_of_mut!(pa1));
         // ensure there is no fabric index = 2
         assert_eq!(false, store1.has_op_keypair_for_fabric(2));
         // migrate
-        assert_eq!(true, store1.migrate_op_keypair_for_fabric(2, &mut store).is_ok());
+        assert_eq!(
+            true,
+            store1.migrate_op_keypair_for_fabric(2, &mut store).is_ok()
+        );
         // chekc store1 has it
         assert_eq!(true, store1.has_op_keypair_for_fabric(2));
         // chekc store losts it

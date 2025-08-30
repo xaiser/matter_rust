@@ -1493,7 +1493,9 @@ mod test {
                 self.m_container_open
             }
             fn init(&mut self, _buf: *mut u8, _max_len: u32) {}
-            fn get_length_written(&self) -> usize {0}
+            fn get_length_written(&self) -> usize {
+                0
+            }
         }
 
         fn setup(backing: *mut VecBackingStore) -> TheTlvWriter {

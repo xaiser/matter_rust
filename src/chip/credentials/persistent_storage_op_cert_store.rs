@@ -1,8 +1,8 @@
-use crate::chip::credentials::{self, OperationalCertificateStore};
 use crate::chip::chip_lib::core::{
     chip_persistent_storage_delegate::PersistentStorageDelegate,
     data_model_types::{FabricIndex, KUNDEFINED_FABRIC_INDEX},
 };
+use crate::chip::credentials::{self, OperationalCertificateStore};
 
 use crate::chip_core_error;
 use crate::chip_error_not_implemented;
@@ -30,7 +30,7 @@ pub struct PersistentStorageOpCertStore<PS>
 where
     PS: PersistentStorageDelegate,
 {
-    m_storage: * mut PS, 
+    m_storage: *mut PS,
     m_pending_fabric_index: FabricIndex,
     // TODO: make this in the heap once we use the real certificate
     m_pending_rcac: Option<[u8; DUMMY_CERT_SIZE]>,

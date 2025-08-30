@@ -1,12 +1,10 @@
-use crate::chip::chip_lib::core::
-{
-    data_model_types::FabricIndex,
-    chip_persistent_storage_delegate::KKEY_LENGTH_MAX,
+use crate::chip::chip_lib::core::{
+    chip_persistent_storage_delegate::KKEY_LENGTH_MAX, data_model_types::FabricIndex,
 };
 
 use core::fmt::{self, Arguments, Write};
 
-pub struct StorageKeyName{
+pub struct StorageKeyName {
     m_key_name_buffer: [u8; KKEY_LENGTH_MAX],
     len: Option<usize>,
 }
@@ -40,7 +38,7 @@ impl StorageKeyName {
         str::from_utf8(self.key_name()).unwrap_or(&"")
     }
 
-    pub fn key_name_raw(&self) -> (* const u8, usize) {
+    pub fn key_name_raw(&self) -> (*const u8, usize) {
         if let Some(len) = self.len {
             return (self.m_key_name_buffer.as_ptr(), len);
         } else {
@@ -103,7 +101,8 @@ impl Write for StorageKeyName {
         let current_len = *current_len_ref;
         let bytes = s.as_bytes();
         let to_copy = bytes.len().min(self.m_key_name_buffer.len() - current_len);
-        self.m_key_name_buffer[current_len..current_len + to_copy].copy_from_slice(&bytes[..to_copy]);
+        self.m_key_name_buffer[current_len..current_len + to_copy]
+            .copy_from_slice(&bytes[..to_copy]);
         *current_len_ref += to_copy;
         Ok(())
     }
@@ -162,7 +161,7 @@ mod test {
             assert_eq!("a is b", name.key_name_str());
         }
     } // end of storage key name test
-    
+
     mod default_storage_key_alloc {
         use super::super::*;
 
@@ -172,5 +171,4 @@ mod test {
             assert_eq!(b"f/0/n", name.key_name());
         }
     } // end of default_storage_key_alloc
-
 }
