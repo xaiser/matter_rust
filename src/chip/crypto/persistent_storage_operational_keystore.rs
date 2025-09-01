@@ -145,7 +145,8 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(
     // do this.
     let key_data_ptr = key_data.as_ptr();
     let key_data_len = key_data.len();
-    drop(key_data);
+    //drop(key_data);
+    //let _ = key_data;
 
     verify_or_return_error!(
         key_data_len <= P256SerializedKeypair::capacity(),
@@ -158,9 +159,8 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(
         serialized_op_key.bytes()[0..key_data_len]
             .copy_from_slice(slice::from_raw_parts(key_data_ptr, key_data_len));
     }
-    serialized_op_key.set_length(key_data_len);
 
-    chip_ok!()
+    return serialized_op_key.set_length(key_data_len);
 }
 
 fn sign_with_stored_op_key<Delegate: PersistentStorageDelegate>(
