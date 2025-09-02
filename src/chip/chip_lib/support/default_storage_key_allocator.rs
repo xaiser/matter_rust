@@ -119,6 +119,22 @@ impl DefaultStorageKeyAllocator {
         StorageKeyName::formatted(format_args!("f/{}/n", index))
     }
 
+    pub fn fabric_icac(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/i", index))
+    }
+
+    pub fn fabric_rcac(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/r", index))
+    }
+
+    pub fn fabric_vvsc(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/vvsc", index))
+    }
+
+    pub fn fabric_vid_verification_statement(index: FabricIndex) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/vvs", index))
+    }
+
     pub fn fabric_op_key(index: FabricIndex) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/o", index))
     }
