@@ -9,7 +9,8 @@ use crate::chip_error_invalid_argument;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
-pub const K_MAX_CHIP_CERT_LENGTH: usize = 4;
+// we use this buffer to store the vid verification statement too
+pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 
 pub struct CertBuffer {
     pub buf: [u8; K_MAX_CHIP_CERT_LENGTH],

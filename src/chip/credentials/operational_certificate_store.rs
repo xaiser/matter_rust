@@ -14,6 +14,13 @@ pub enum CertChainElement {
     Knoc = 2,
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone)]
+pub enum VidVerificationElement {
+    KvidVerificationStatement = 0,
+    Kvvsc = 1,
+}
+
 pub trait OperationalCertificateStore {
     fn has_pending_root_cert(&self) -> bool;
     fn has_pending_noc_chain(&self) -> bool;

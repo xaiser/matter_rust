@@ -103,6 +103,13 @@ pub const K_PID_PREFIX_FOR_CN_ENCODING: &str = "Mpid:";
 pub const K_VID_AND_PID_HEX_LENGTH: usize = core::mem::size_of::<u16>() * 2;
 pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
 
+pub const K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE: usize = core::mem::size_of::<u8>() + K_SUBJECT_KEY_IDENTIFIER_LENGTH + K_P256_ECDSA_SIGNATURE_LENGTH_RAW;
+
+chip_static_assert!(
+    K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE == 85,
+    "Expected size of VendorIdVerificationStatement version 1 was computed incorrectly due to changes of fundamental constants"
+);
+
 /*
  * Overhead to encode a raw ECDSA signature in X9.62 format in ASN.1 DER
  *

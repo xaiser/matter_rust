@@ -5,7 +5,8 @@ use crate::chip::chip_lib::{
     },
     support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
 };
-use crate::chip::credentials::{self, OperationalCertificateStore, operational_certificate_store::CertChainElement, chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH}};
+use crate::chip::credentials::{self, OperationalCertificateStore, operational_certificate_store::{CertChainElement, VidVerificationElement}, chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH}};
+use crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 
 use crate::chip_core_error;
 use crate::chip_sdk_error;
@@ -17,6 +18,7 @@ use crate::chip_error_incorrect_state;
 use crate::chip_error_not_implemented;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_argument;
+use crate::chip_error_persisted_storage_value_not_found;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -61,6 +63,40 @@ fn storage_has_certificate<PS: PersistentStorageDelegate>(storage: &PS, fabric_i
     } else {
         false
     }
+}
+
+fn save_vid_verification_element_to_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: VidVerificationElement, element_data: &[u8]) -> ChipErrorResult {
+    let mut storage_key = StorageKeyName::default();
+    match element {
+        VidVerificationElement::KvidVerificationStatement => {
+            storage_key = DefaultStorageKeyAllocator::fabric_vid_verification_statement(fabric_index);
+        },
+        VidVerificationElement::Kvvsc => {
+            storage_key = DefaultStorageKeyAllocator::fabric_vvsc(fabric_index);
+        }
+    }
+
+    if element_data.is_empty() {
+        match storage.sync_delete_key_value(storage_key.key_name_str()) {
+            Ok(_) => {
+                return chip_ok!();
+            },
+            Err(e) => {
+                if e == chip_error_persisted_storage_value_not_found!() {
+                    return chip_ok!();
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    return storage.sync_set_key_value(storage_key.key_name_str(), element_data);
+}
+
+fn delete_vid_verification_element_from_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: VidVerificationElement) -> ChipErrorResult {
+    // Saving an empty bytespan actually deletes the element.
+    return save_vid_verification_element_to_storage(storage, fabric_index, element, &[]);
 }
 
 pub struct PersistentStorageOpCertStore<PS>
@@ -128,6 +164,79 @@ where
         self.m_pending_vid_verification_statement = None;
         self.m_state_flag.remove(StateFlags::KvidVerificationStatementUpdated);
         self.m_state_flag.remove(StateFlags::KvvscUpdated);
+    }
+
+    fn has_noc_chain_for_fabric(&self, fabric_index: FabricIndex) -> bool {
+        return self.has_certificate_for_fabric(fabric_index, CertChainElement::Krcac) &&
+            self.has_certificate_for_fabric(fabric_index, CertChainElement::Knoc);
+    }
+
+    fn basic_vid_verification_assumptions_are_met(&self, fabric_index: FabricIndex) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+
+        // Must already have a valid NOC chain.
+        verify_or_return_error!(self.has_noc_chain_for_fabric(fabric_index), Err(chip_error_incorrect_state!()));
+
+        chip_ok!()
+    }
+
+    fn update_vid_verification_signer_cert_for_fabric(&mut self, fabric_index: FabricIndex, vvsc: &[u8]) -> ChipErrorResult {
+        self.basic_vid_verification_assumptions_are_met(fabric_index)?;
+        verify_or_return_error!(vvsc.is_empty() && vvsc.len() <= K_MAX_CHIP_CERT_LENGTH, Err(chip_error_invalid_argument!()));
+
+        if vvsc.is_empty() {
+            if fabric_index == self.m_pending_fabric_index {
+                self.m_pending_vvsc = None;
+                self.m_state_flag.insert(StateFlags::KvvscUpdated);
+            } else {
+                unsafe {
+                    let _ = delete_vid_verification_element_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, VidVerificationElement::Kvvsc)?;
+                }
+            }
+        } else {
+            if fabric_index == self.m_pending_fabric_index {
+                let mut buf = CertBuffer::default();
+                buf.init(vvsc)?;
+                self.m_pending_vvsc = Some(buf);
+                self.m_state_flag.insert(StateFlags::KvvscUpdated);
+            } else {
+                unsafe {
+                    let _ = save_vid_verification_element_to_storage(self.m_storage.as_mut().unwrap(), fabric_index, VidVerificationElement::Kvvsc, vvsc)?;
+                }
+            }
+        }
+
+        chip_ok!()
+    }
+
+    fn update_vid_verification_statement_for_fabric(&mut self, fabric_index: FabricIndex, vid_verification_statement: &[u8]) -> ChipErrorResult {
+        self.basic_vid_verification_assumptions_are_met(fabric_index)?;
+        verify_or_return_error!(vid_verification_statement.is_empty() && vid_verification_statement.len() == K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE, Err(chip_error_invalid_argument!()));
+
+        if vid_verification_statement.is_empty() {
+            if fabric_index == self.m_pending_fabric_index {
+                self.m_pending_vid_verification_statement = None;
+                self.m_state_flag.insert(StateFlags::KvidVerificationStatementUpdated);
+            } else {
+                unsafe {
+                    let _ = delete_vid_verification_element_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, VidVerificationElement::KvidVerificationStatement);
+                }
+            }
+        } else {
+            if fabric_index == self.m_pending_fabric_index {
+                let mut buf = CertBuffer::default();
+                buf.init(vid_verification_statement)?;
+                self.m_pending_vid_verification_statement = Some(buf);
+                self.m_state_flag.insert(StateFlags::KvidVerificationStatementUpdated);
+            } else {
+                unsafe {
+                    let _ = save_vid_verification_element_to_storage(self.m_storage.as_mut().unwrap(), fabric_index, VidVerificationElement::KvidVerificationStatement, vid_verification_statement);
+                }
+            }
+        }
+
+        chip_ok!()
     }
 }
 
@@ -242,7 +351,39 @@ where
         noc: &[u8],
         icac: &[u8],
     ) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+        verify_or_return_error!(self.m_storage.is_null() == false, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+        verify_or_return_error!(noc.is_empty() == false && noc.len() <= K_MAX_CHIP_CERT_LENGTH, Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(icac.len() <= K_MAX_CHIP_CERT_LENGTH, Err(chip_error_invalid_argument!()));
+        // Can't have called AddNewOpCertsForFabric first, and should never get here after AddNewTrustedRootCertForFabric.
+        verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KaddNewOpCertsCalled | StateFlags::KaddNewTrustedRootCalled), Err(chip_error_incorrect_state!()));
+        // Can't have already pending NOC from UpdateOpCerts not yet committed
+        verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KupdateOpCertsCalled), Err(chip_error_incorrect_state!()));
+        unsafe {
+            // Need to have trusted roots installed to make the chain valid
+            verify_or_return_error!(storage_has_certificate(self.m_storage.as_mut().unwrap(), fabric_index, CertChainElement::Krcac), Err(chip_error_incorrect_state!()));
+            // Must have persisted NOC for same fabric if updating
+            verify_or_return_error!(storage_has_certificate(self.m_storage.as_mut().unwrap(), fabric_index, CertChainElement::Knoc), Err(chip_error_incorrect_state!()));
+            // Don't check for ICAC, we may not have had one before, but assume that if NOC is there, a
+            // previous chain was at least partially there
+        }
+
+        let mut noc_buf = CertBuffer::default();
+        noc_buf.init(noc)?;
+
+        let mut icac_buf = CertBuffer::default();
+        if icac.len() > 0 {
+            icac_buf.init(icac)?;
+        }
+
+        self.m_pending_noc = Some(noc_buf);
+        self.m_pending_icac = Some(icac_buf);
+
+        self.m_pending_fabric_index = fabric_index;
+
+        self.m_state_flag.insert(StateFlags::KupdateOpCertsCalled);
+
+        chip_ok!()
     }
 
     fn commit_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
@@ -430,5 +571,20 @@ mod tests {
         assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
 
         assert_eq!(false, store.add_new_op_certs_for_fabric(0, &[], &[]).is_ok());
+    }
+
+    #[test]
+    fn update_noc_cert() {
+        // TODO: test this after we can commit the pending certs
+    }
+
+    #[test]
+    fn update_vvsc() {
+        // TODO: test this after we can commit the pending certs
+    }
+
+    #[test]
+    fn update_vid_verification_statement() {
+        // TODO: test this after we can commit the pending certs
     }
 } // end of tests
