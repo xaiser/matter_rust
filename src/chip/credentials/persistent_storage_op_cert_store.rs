@@ -166,6 +166,10 @@ where
         self.m_state_flag.remove(StateFlags::KvvscUpdated);
     }
 
+    fn has_pending_vid_verification_elements(&self) -> bool {
+        self.m_state_flag.intersects(StateFlags::KvidVerificationStatementUpdated | StateFlags::KvvscUpdated)
+    }
+
     fn has_noc_chain_for_fabric(&self, fabric_index: FabricIndex) -> bool {
         return self.has_certificate_for_fabric(fabric_index, CertChainElement::Krcac) &&
             self.has_certificate_for_fabric(fabric_index, CertChainElement::Knoc);
@@ -237,6 +241,44 @@ where
         }
 
         chip_ok!()
+    }
+
+    fn commit_vid_verification_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+
+        if !self.has_pending_vid_verification_elements() {
+            return chip_ok!();
+        }
+
+        verify_or_return_error!(is_valid_fabric_index(fabric_index) && fabric_index == self.m_pending_fabric_index, Err(chip_error_invalid_fabric_index!()));
+
+        let mut vvsc_err = chip_ok!();
+        let mut vvs_err = chip_ok!();
+        if self.m_state_flag.contains(StateFlags::KvvscUpdated) {
+            if let Some(vvsc) = self.m_pending_vvsc.as_ref() {
+                unsafe {
+                    vvsc_err = save_vid_verification_element_to_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, VidVerificationElement::Kvvsc, vvsc.const_bytes());
+                }
+            } else {
+                vvsc_err = Err(chip_error_incorrect_state!());
+            }
+        }
+        if self.m_state_flag.contains(StateFlags::KvidVerificationStatementUpdated) {
+            if let Some(vvs) = self.m_pending_vid_verification_statement.as_ref() {
+                unsafe {
+                    vvs_err = save_vid_verification_element_to_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, VidVerificationElement::KvidVerificationStatement, vvs.const_bytes());
+                }
+            } else {
+                vvs_err = Err(chip_error_incorrect_state!());
+            }
+        }
+
+        // return the frist error
+        if vvsc_err.is_err() {
+            return vvsc_err;
+        }
+
+        return vvs_err;
     }
 }
 
@@ -585,6 +627,11 @@ mod tests {
 
     #[test]
     fn update_vid_verification_statement() {
+        // TODO: test this after we can commit the pending certs
+    }
+
+    #[test]
+    fn commit_vid_verification_for_fabric() {
         // TODO: test this after we can commit the pending certs
     }
 } // end of tests
