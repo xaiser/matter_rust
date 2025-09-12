@@ -7,7 +7,7 @@ use crate::ChipError;
 use crate::ChipErrorResult;
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum CertChainElement {
     Krcac = 0,
     Kicac = 1,

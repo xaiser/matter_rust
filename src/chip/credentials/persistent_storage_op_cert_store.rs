@@ -19,6 +19,7 @@ use crate::chip_error_not_implemented;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_persisted_storage_value_not_found;
+use crate::chip_error_internal;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -94,10 +95,38 @@ fn save_vid_verification_element_to_storage<PS: PersistentStorageDelegate>(stora
     return storage.sync_set_key_value(storage_key.key_name_str(), element_data);
 }
 
+fn save_cert_to_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: CertChainElement, cert: &[u8]) -> ChipErrorResult {
+    let storage_key = get_storage_key_for_cert(fabric_index, element).ok_or(chip_error_internal!())?;
+
+    if element == CertChainElement::Kicac && cert.is_empty() {
+        match storage.sync_delete_key_value(storage_key.key_name_str()) {
+            Err(e) => {
+                if e == chip_error_persisted_storage_value_not_found!() {
+                    return chip_ok!();
+                } else {
+                    return Err(e);
+                }
+            },
+            _ => { return chip_ok!(); }
+        }
+    }
+
+    return storage.sync_set_key_value(storage_key.key_name_str(), cert);
+}
+
 fn delete_vid_verification_element_from_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: VidVerificationElement) -> ChipErrorResult {
     // Saving an empty bytespan actually deletes the element.
     return save_vid_verification_element_to_storage(storage, fabric_index, element, &[]);
 }
+
+fn delete_cert_from_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: CertChainElement) -> ChipErrorResult {
+    if let Some(storage_key_name) = get_storage_key_for_cert(fabric_index, element) {
+        return storage.sync_delete_key_value(storage_key_name.key_name_str());
+    } else {
+        return Err(chip_error_internal!());
+    }
+}
+
 
 pub struct PersistentStorageOpCertStore<PS>
 where
@@ -429,7 +458,57 @@ where
     }
 
     fn commit_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+        verify_or_return_error!(self.m_storage.is_null() == false, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index) && fabric_index == self.m_pending_fabric_index, Err(chip_error_invalid_fabric_index!()));
+
+        verify_or_return_error!(self.has_pending_noc_chain(), Err(chip_error_incorrect_state!()));
+
+        if self.has_pending_root_cert() {
+            // Neither of these conditions should have occurred based on other interlocks, but since
+            // committing certificates is a dangerous operation, we absolutely validate our assumptions.
+            verify_or_return_error!(!self.m_state_flag.contains(StateFlags::KupdateOpCertsCalled), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(self.m_state_flag.contains(StateFlags::KaddNewTrustedRootCalled), Err(chip_error_incorrect_state!()));
+        }
+
+        unsafe {
+            // Start committing NOC first so we don't have dangling roots if one was added.
+            // We have check the pending_noc, so just call unwrap
+            let noc_err = save_cert_to_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Knoc, self.m_pending_noc.as_ref().unwrap().const_bytes());
+
+            // ICAC storage handles deleting on empty/missing
+            let icac_err = save_cert_to_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Kicac, self.m_pending_icac.as_ref().unwrap_or(&CertBuffer::const_default()).const_bytes());
+
+            let mut rcac_err = chip_ok!();
+            if self.has_pending_root_cert() {
+                rcac_err = save_cert_to_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Krcac, self.m_pending_rcac.as_ref().unwrap().const_bytes());
+            }
+
+            let vid_verify_err = self.commit_vid_verification_for_fabric(self.m_pending_fabric_index);
+
+            // Remember which was the first error, and if any error occurred.
+            //let sticky_err = [noc_err, icac_err, rcac_err, vid_verify_err].iter().find(|e| e.is_err());
+
+            //if let Some(err)  = sticky_err {
+            if let Some(sticky_err) = [noc_err, icac_err, rcac_err, vid_verify_err].iter().find(|e| e.is_err()) {
+                // On Adds rather than updates, remove anything possibly stored for the new fabric on partial
+                // failure.
+                if self.m_state_flag.contains(StateFlags::KaddNewOpCertsCalled) {
+                    let _ = delete_cert_from_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Knoc);
+                    let _ = delete_cert_from_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Kicac);
+                    let _ = delete_vid_verification_element_from_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, VidVerificationElement::Kvvsc);
+                    let _ = delete_vid_verification_element_from_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, VidVerificationElement::KvidVerificationStatement);
+                }
+                if self.m_state_flag.contains(StateFlags::KaddNewTrustedRootCalled) {
+                    let _ = delete_cert_from_storage(self.m_storage.as_mut().unwrap(), self.m_pending_fabric_index, CertChainElement::Krcac);
+                }
+
+                return sticky_err.clone();
+            }
+        }
+
+        self.revert_pending_op_certs();
+
+        chip_ok!()
     }
 
     fn remove_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {

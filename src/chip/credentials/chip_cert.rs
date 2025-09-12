@@ -48,11 +48,11 @@ impl CertBuffer {
     }
 
     pub fn bytes(&mut self) -> &mut [u8] {
-        return &mut self.buf[..];
+        return &mut self.buf[..self.len];
     }
 
     pub fn const_bytes(&self) -> &[u8] {
-        return &self.buf[..];
+        return &self.buf[..self.len];
     }
 
     pub fn length(&self) -> usize {
