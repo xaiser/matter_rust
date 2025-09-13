@@ -20,6 +20,7 @@ use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_persisted_storage_value_not_found;
 use crate::chip_error_internal;
+use crate::chip_error_not_found;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -127,6 +128,11 @@ fn delete_cert_from_storage<PS: PersistentStorageDelegate>(storage: &mut PS, fab
     }
 }
 
+fn load_cert_from_stroage<PS: PersistentStorageDelegate>(storage: &mut PS, fabric_index: FabricIndex, element: CertChainElement, out_certificate: &mut [u8]) -> Result<usize, ChipError> {
+    let storage_key = get_storage_key_for_cert(fabric_index, element).ok_or(chip_error_internal!())?;
+
+    return storage.sync_get_key_value(storage_key.key_name_str(), out_certificate);
+}
 
 pub struct PersistentStorageOpCertStore<PS>
 where
@@ -264,6 +270,31 @@ where
         }
 
         true
+    }
+
+    fn get_pending_certificate(&self, fabric_index: FabricIndex, element: CertChainElement, out_certificate: &mut [u8]) -> Result<usize, ChipError> {
+        verify_or_return_error!(fabric_index == self.m_pending_fabric_index, Err(chip_error_not_found!()));
+        match element {
+            CertChainElement::Krcac => {
+                if let Some(cert) = self.m_pending_rcac.as_ref() { 
+                    out_certificate[0..cert.length()].copy_from_slice(cert.const_bytes());
+                    return Ok(cert.length());
+                }
+            },
+            CertChainElement::Kicac => {
+                if let Some(cert) = self.m_pending_icac.as_ref() { 
+                    out_certificate[0..cert.length()].copy_from_slice(cert.const_bytes());
+                    return Ok(cert.length());
+                }
+            },
+            CertChainElement::Knoc => {
+                if let Some(cert) = self.m_pending_noc.as_ref() { 
+                    out_certificate[0..cert.length()].copy_from_slice(cert.const_bytes());
+                    return Ok(cert.length());
+                }
+            },
+        }
+        return Err(chip_error_not_found!());
     }
 }
 
@@ -585,9 +616,77 @@ where
     fn get_certificate(
         &self,
         fabric_index: FabricIndex,
+        element: CertChainElement,
         out_certificate: &mut [u8],
-    ) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+    ) -> Result<usize, ChipError> {
+        verify_or_return_error!(self.m_storage.is_null() == false, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+        // Handle case of pending data
+        match self.get_pending_certificate(fabric_index, element, out_certificate) {
+            Ok(length) => {
+                return Ok(length);
+            },
+            Err(e) => {
+                let not_found = chip_error_not_found!();
+                if e != chip_error_not_found!() {
+                    return Err(e);
+                }
+
+                // now we have not_found error
+                // If we have a pending NOC and no pending ICAC, don't delegate to storage, return not found here
+                // since in the pending state, there truly is nothing.
+                if element == CertChainElement::Kicac {
+                    // Don't delegate to storage if we just have a pending NOC and are missing the ICAC
+                    return Err(not_found);
+                }
+            }
+        }
+
+        // Not found in pending, let's look in persisted
+        unsafe {
+            return load_cert_from_stroage(self.m_storage.as_mut().unwrap(), fabric_index, element, out_certificate);
+        }
+    }
+
+    fn get_vid_verification_element(&self, fabric_index: FabricIndex, element: VidVerificationElement, out_certificate: &mut [u8]) -> Result<usize, ChipError> {
+        verify_or_return_error!(self.m_storage.is_null() == false, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+
+        let mut key_name: StorageKeyName = StorageKeyName::default();
+
+        if element == VidVerificationElement::KvidVerificationStatement {
+            if self.m_state_flag.contains(StateFlags::KvidVerificationStatementUpdated) && fabric_index == self.m_pending_fabric_index {
+                if let Some(cert) = self.m_pending_vid_verification_statement.as_ref() {
+                    out_certificate[0..cert.length()].copy_from_slice(cert.const_bytes());
+                    return Ok(cert.length());
+                }
+            }
+            key_name = DefaultStorageKeyAllocator::fabric_vid_verification_statement(fabric_index);
+        } else if element == VidVerificationElement::Kvvsc {
+            if self.m_state_flag.contains(StateFlags::KvvscUpdated) && fabric_index == self.m_pending_fabric_index {
+                if let Some(cert) = self.m_pending_vvsc.as_ref() {
+                    out_certificate[0..cert.length()].copy_from_slice(cert.const_bytes());
+                    return Ok(cert.length());
+                }
+            }
+            key_name = DefaultStorageKeyAllocator::fabric_vvsc(fabric_index);
+        }
+
+        if key_name.is_uninitialized() {
+            return Err(chip_error_invalid_argument!());
+        }
+
+
+        unsafe {
+            let err = self.m_storage.as_ref().unwrap().sync_get_key_value(key_name.key_name_str(), out_certificate);
+
+            if err.as_ref().is_err_and(|e| *e == chip_error_persisted_storage_value_not_found!() || *e == chip_error_not_found!()) {
+                out_certificate.fill(0);
+                return Ok(0);
+            }
+
+            return err;
+        }
     }
 }
 
@@ -1003,4 +1102,256 @@ mod tests {
         assert_eq!(false, store.has_any_certificate_for_fabric(0));
     }
 
+    #[test]
+    fn remove_empty_index() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+
+        // remove
+        assert_eq!(false, store.remove_certs_for_fabric(0).inspect_err(|e| println!("{:?}", e)).is_ok());
+    }
+
+    #[test]
+    fn remove_pending_certs() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // remove
+        assert_eq!(true, store.remove_certs_for_fabric(0).inspect_err(|e| println!("{:?}", e)).is_ok());
+        assert_eq!(false, store.has_any_certificate_for_fabric(0));
+    }
+
+    #[test]
+    fn commit_and_get() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // commit
+        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(true, store.get_certificate(0, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
+    }
+
+    #[test]
+    fn get_pending_noc() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(true, store.get_certificate(0, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
+    }
+
+    #[test]
+    fn get_empty_fabric_index() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // commit
+        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(false, store.get_certificate(1, CertChainElement::Knoc, &mut out).is_ok());
+    }
+
+
+    #[test]
+    fn commit_and_get_vvsc() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // commit
+        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(true, store.get_vid_verification_element(0, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
+    }
+
+    #[test]
+    fn commit_and_get_vvsc_empty_fabric() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // commit
+        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(true, store.get_vid_verification_element(1, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 0));
+    }
+
+    #[test]
+    fn commit_and_get_pending_vvsc() {
+        let mut pa = TestPersistentStorage::default();
+        let mut store = setup(ptr::addr_of_mut!(pa));
+        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+
+        // add root
+        let mut rcac = CertBuffer::default();
+        let _ = rcac.init(&[1]);
+
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+
+        // add icac and no
+        let mut icac_cert = CertBuffer::default();
+        let _ = icac_cert.init(&[2]);
+        let mut noc_cert = CertBuffer::default();
+        let _ = noc_cert.init(&[3]);
+        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+
+        let mut vvsc_cert = CertBuffer::default();
+        let _ = vvsc_cert.init(&[4]);
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+
+        let mut vvs_cert = CertBuffer::default();
+        let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.has_pending_vid_verification_elements());
+
+        // get
+        let mut out: [u8; 1] = [0; 1];
+        assert_eq!(true, store.get_vid_verification_element(0, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
+    }
 } // end of tests

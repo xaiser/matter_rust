@@ -15,7 +15,7 @@ pub enum CertChainElement {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum VidVerificationElement {
     KvidVerificationStatement = 0,
     Kvvsc = 1,
@@ -62,10 +62,11 @@ pub trait OperationalCertificateStore {
     fn get_certificate(
         &self,
         fabric_index: FabricIndex,
+        element: CertChainElement,
         out_certificate: &mut [u8],
-    ) -> ChipErrorResult;
+    ) -> Result<usize, ChipError>;
 
-    fn get_vid_verification_element(&self, _fabric_index: FabricIndex, _element: VidVerificationElement, out_certificate: &mut [u8]) -> ChipErrorResult {
+    fn get_vid_verification_element(&self, _fabric_index: FabricIndex, _element: VidVerificationElement, _out_certificate: &mut [u8]) -> Result<usize, ChipError> {
         Err(chip_error_not_implemented!())
     }
 }

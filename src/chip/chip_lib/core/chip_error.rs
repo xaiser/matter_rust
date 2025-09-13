@@ -457,6 +457,13 @@ macro_rules! chip_error_invalid_public_key {
     };
 }
 
+#[macro_export]
+macro_rules! chip_error_not_found {
+    () => {
+        chip_core_error!(0xd9)
+    };
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
