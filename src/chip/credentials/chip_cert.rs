@@ -47,6 +47,14 @@ impl CertBuffer {
         chip_ok!()
     }
 
+    pub fn all_bytes(&mut self) -> &mut [u8] {
+        return &mut self.buf[..];
+    }
+
+    pub fn const_all_bytes(&self) -> &[u8] {
+        return &self.buf[..];
+    }
+
     pub fn bytes(&mut self) -> &mut [u8] {
         return &mut self.buf[..self.len];
     }

@@ -24,6 +24,9 @@ pub enum VidVerificationElement {
 pub trait OperationalCertificateStore {
     fn has_pending_root_cert(&self) -> bool;
     fn has_pending_noc_chain(&self) -> bool;
+    fn has_pending_vid_verification_elements(&self) -> bool {
+        false
+    }
     fn has_certificate_for_fabric(
         &self,
         fabric_index: FabricIndex,
@@ -48,6 +51,12 @@ pub trait OperationalCertificateStore {
     ) -> ChipErrorResult;
     fn commit_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
     fn remove_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
+    fn update_vid_verification_signer_cert_for_fabric(&mut self, _fabric_index: FabricIndex, _vvsc: &[u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+    fn update_vid_verification_statement_for_fabric(&mut self, _fabric_index: FabricIndex, _vvs: &[u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
     fn revert_pending_op_certs(&mut self);
     fn revert_pending_op_certs_except_root(&mut self);
     fn get_certificate(
@@ -55,6 +64,10 @@ pub trait OperationalCertificateStore {
         fabric_index: FabricIndex,
         out_certificate: &mut [u8],
     ) -> ChipErrorResult;
+
+    fn get_vid_verification_element(&self, _fabric_index: FabricIndex, _element: VidVerificationElement, out_certificate: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
 }
 
 pub struct OpCertStoreTransaction<'a, OCS>
