@@ -139,6 +139,11 @@ impl DefaultStorageKeyAllocator {
     pub fn fabric_op_key(index: FabricIndex) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/o", index))
     }
+
+    // LastKnownGoodTime
+    pub fn last_known_good_time_key() -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("g/lkgt"))
+    }
 }
 
 #[cfg(test)]
