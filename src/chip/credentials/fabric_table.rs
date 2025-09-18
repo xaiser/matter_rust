@@ -1,5 +1,8 @@
-use crate::chip::chip_lib::core::data_model_types::{
-    KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+use crate::chip::{
+    system::system_clock::Seconds32,
+    chip_lib::core::data_model_types::{
+        KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+    }
 };
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
 use crate::chip::chip_lib::core::{
@@ -19,11 +22,13 @@ use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
+use crate::chip_error_not_implemented;
 use crate::chip_ok;
 use crate::chip_sdk_error;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::ChipErrorResult;
+use crate::ChipError;
 
 use core::cell::UnsafeCell;
 
@@ -42,7 +47,7 @@ pub struct FabricInfo {
     m_vendor_id: VendorId,
     m_has_externally_owned_operation_key: bool,
     m_should_advertise_identity: bool,
-    m_operation_key: UnsafeCell<*mut P256Keypair>,
+    m_operation_key: *mut P256Keypair,
 }
 
 impl Default for FabricInfo {
@@ -63,7 +68,7 @@ impl FabricInfo {
             m_vendor_id: VendorId::NotSpecified,
             m_has_externally_owned_operation_key: false,
             m_should_advertise_identity: true,
-            m_operation_key: UnsafeCell::new(ptr::null_mut()),
+            m_operation_key: ptr::null_mut(),
         }
     }
 
@@ -131,7 +136,8 @@ impl FabricInfo {
     }
 
     pub fn has_operational_key(&self) -> bool {
-        unsafe { (*self.m_operation_key.get()).is_null() == false }
+        //unsafe { (*self.m_operation_key.get()).is_null() == false }
+        self.m_operation_key.is_null() == false
     }
 
     pub fn should_advertise_identity(&self) -> bool {
@@ -261,15 +267,13 @@ mod fabric_info_private {
             self.m_vendor_id = VendorId::NotSpecified;
             self.m_fabric_label = [0; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES];
 
-            unsafe {
-                if !self.m_has_externally_owned_operation_key
-                    && (*self.m_operation_key.get()).is_null() == false
-                {
-                    // TODO: delete by platform
-                }
+            if !self.m_has_externally_owned_operation_key
+                && self.m_operation_key.is_null() == false
+            {
+                // TODO: delete by platform
             }
 
-            self.m_operation_key = UnsafeCell::new(ptr::null_mut());
+            self.m_operation_key = ptr::null_mut();
 
             self.m_has_externally_owned_operation_key = false;
             self.m_should_advertise_identity = true;
@@ -367,7 +371,7 @@ where
 {
     m_states: [FabricInfo; CHIP_CONFIG_MAX_FABRICS],
     // Used for UpdateNOC pending fabric updates
-    m_pendingFabric: FabricInfo,
+    m_pending_fabric: FabricInfo,
     m_storage: *mut PSD,
     m_operational_keystore: *mut OK,
     m_op_cert_store: *mut OCS,
@@ -392,4 +396,149 @@ where
     m_fabric_count: u8,
 
     m_state_flag: StateFlags,
+}
+
+pub struct InitParams<PSD, OK, OCS>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+{
+    pub storage: * mut PSD,
+    pub operational_keystore: * mut OK,
+    pub op_certs_store: * mut OCS,
+}
+
+pub struct SignVidVerificationResponseData {
+    pub fabric_index: FabricIndex,
+    pub fabric_binding_version: u8,
+    //TODO; chech the type
+    pub signature: [u8; 1],
+}
+
+impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+{
+    pub const fn const_default() -> Self {
+        Self {
+            m_states: [const { FabricInfo::const_default() }; CHIP_CONFIG_MAX_FABRICS],
+            m_pending_fabric: FabricInfo::const_default(),
+            m_storage: ptr::null_mut(),
+            m_operational_keystore: ptr::null_mut(),
+            m_op_cert_store: ptr::null_mut(),
+            m_delegate_list_root: ptr::null_mut(),
+            m_fabric_index_with_pending_state: KUNDEFINED_FABRIC_INDEX,
+            m_deleted_fabric_index_from_init: KUNDEFINED_FABRIC_INDEX,
+            m_last_known_good_time: LastKnownGoodTime::<PSD>::const_default(),
+            m_next_available_fabric_index: None,
+            m_fabric_count: 0,
+            // TODO check the init value
+            m_state_flag: StateFlags::KabortCommitForTest,
+        }
+    }
+
+    pub fn delete(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn delete_all_fabric(&mut self) {}
+
+    pub fn find_fabric(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId) -> Option<FabricInfo> {
+        None
+    }
+
+    pub fn find_fabric_with_index(&self, _fabric_index: FabricIndex) -> Option<FabricInfo> {
+        None
+    }
+
+    pub fn find_indentiy(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId, _node_id: NodeId) -> Option<FabricInfo> {
+        None
+    }
+
+    pub fn find_fabric_with_compressed_id(&self, _compressed_fabric_id: CompressedFabricId) -> Option<FabricInfo> {
+        None
+    }
+
+    pub fn init(&mut self, _init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn shutdown(&mut self) {}
+
+    pub fn get_deleted_fabric_from_commit_marker(&self) -> FabricIndex {
+        0
+    }
+
+    pub fn clear_commit_marker(&mut self) {}
+
+    pub fn forget(&mut self, _fabric_index: FabricIndex) {}
+
+    pub fn add_fabric_delegate(&mut self, _delegate: * mut Delegate) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn remove_fabric_delegate(&mut self, _delegate: * mut Delegate) {
+    }
+
+    pub fn set_fabric_label(&mut self, _fabric_index: FabricIndex, _fabric_label: &str) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn get_fabric_label(&self, _fabric_index: FabricIndex) -> Result<&str, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn get_last_known_good_chip_epoch_time(&self) -> Result<Seconds32, ChipError> {
+        self.m_last_known_good_time.get_last_known_good_chip_epoch_time()
+    }
+
+    pub fn set_last_known_good_chip_epoch_time(&mut self, _last_known_good_chip_epoch_time: Seconds32) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fabric_count(&self) -> u8 {
+        self.m_fabric_count
+    }
+
+    pub fn fetch_root_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_pending_non_fabric_associcated_root_cert(&self, _out_cert: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_icac_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_noc_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_vid_verification_statement(&self, _fabric_index: FabricIndex, _out_vid_verification_statement: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_vvsc(&self, _fabric_index: FabricIndex, _out_vvsc: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_root_pubkey(&self, _fabric_index: FabricIndex) -> Result<P256PublicKey, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+}
+
+impl<PSD, OK, OCS> Default for FabricTable<PSD, OK, OCS>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+{
+    fn default() -> Self {
+        FabricTable::<PSD,OK,OCS>::const_default()
+    }
 }
