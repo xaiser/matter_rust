@@ -15,7 +15,7 @@ use crate::chip::crypto::{
     crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey},
 };
 
-use crate::chip::credentials;
+use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
@@ -27,6 +27,7 @@ use crate::ChipErrorResult;
 
 use core::cell::UnsafeCell;
 
+use bitflags::{bitflags, Flags};
 use core::{ptr, str};
 
 const KFABRIC_LABEL_MAX_LENGTH_IN_BYTES: usize = 32;
@@ -314,27 +315,29 @@ mod fabric_info_private {
     }
 }
 
-#[repr(u16)]
-enum StateFlags {
-    // If true, we are in the process of a fail-safe and there was at least one
-    // operation that caused partial data in the fabric table.
-    KIsPendingFabricDataPresent = (1u16 << 0),
-    KIsTrustedRootPending = (1u16 << 1),
-    KIsUpdatePending = (1u16 << 2),
-    KIsAddPending = (1u16 << 3),
+bitflags! {
+    #[derive(Clone, Copy)]
+    struct StateFlags: u16 {
+        // If true, we are in the process of a fail-safe and there was at least one
+        // operation that caused partial data in the fabric table.
+        const KisPendingFabricDataPresent = (1u16 << 0);
+        const KisTrustedRootPending = (1u16 << 1);
+        const KisUpdatePending = (1u16 << 2);
+        const KisAddPending = (1u16 << 3);
 
-    // Only true when `AllocatePendingOperationalKey` has been called
-    KIsOperationalKeyPending = (1u16 << 4),
-    // True if `AllocatePendingOperationalKey` was for an existing fabric
-    KIsPendingKeyForUpdateNoc = (1u16 << 5),
+        // Only true when `AllocatePendingOperationalKey` has been called
+        const KisOperationalKeyPending = (1u16 << 4);
+        // True if `AllocatePendingOperationalKey` was for an existing fabric
+        const KisPendingKeyForUpdateNoc = (1u16 << 5);
 
-    // True if we allow more than one fabric with same root and fabricId in the fabric table
-    // for test purposes. This disables a collision check.
-    KAreCollidingFabricsIgnored = (1u16 << 6),
+        // True if we allow more than one fabric with same root and fabricId in the fabric table
+        // for test purposes. This disables a collision check.
+        const KareCollidingFabricsIgnored = (1u16 << 6);
 
-    // If set to true (only possible on test builds), will cause `CommitPendingFabricData()` to early
-    // return during commit, skipping clean-ups, so that we can validate commit marker fabric removal.
-    KAbortCommitForTest = (1u16 << 7),
+        // If set to true (only possible on test builds), will cause `CommitPendingFabricData()` to early
+        // return during commit, skipping clean-ups, so that we can validate commit marker fabric removal.
+        const KabortCommitForTest = (1u16 << 7);
+    }
 }
 
 #[derive(Default)]
@@ -378,5 +381,15 @@ where
 
     // For when a revert occurs during init, so that more clean-up can be scheduled by caller.
     m_deleted_fabric_index_from_init: FabricIndex,
+
     //create the last known good time
+    m_last_known_good_time: LastKnownGoodTime<PSD>,
+
+    // We may not have an mNextAvailableFabricIndex if our table is as large as
+    // it can go and is full.
+    m_next_available_fabric_index: Option<FabricIndex>,
+
+    m_fabric_count: u8,
+
+    m_state_flag: StateFlags,
 }

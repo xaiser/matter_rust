@@ -19,6 +19,7 @@ use crate::ChipErrorResult;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_buffer_too_small;
 use crate::chip_error_persisted_storage_value_not_found;
+use crate::chip_error_invalid_argument;
 use crate::chip_ok;
 
 use crate::chip_internal_log;
@@ -38,7 +39,7 @@ fn k_last_known_good_chip_epoch_seconds_tag() -> tlv_tags::Tag {
     tlv_tags::context_tag(0)
 }
 
-struct LastKnownGoodTime<PS>
+pub struct LastKnownGoodTime<PS>
 where
     PS: PersistentStorageDelegate,
 {
@@ -109,6 +110,76 @@ where
         chip_ok!()
     }
 
+    pub fn set_last_known_good_chip_epoch_time(&mut self, last_known_good_chip_epoch_time: Seconds32, not_before: Seconds32) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(self.m_last_known_good_chip_epoch_time.is_some(), Err(chip_error_incorrect_state!()));
+        chip_log_progress!(TimeService, "Last Known Good Time {}", self.m_last_known_good_chip_epoch_time.as_ref().unwrap().as_secs());
+        chip_log_progress!(TimeService, "New proposed Last Known Good Time {}", last_known_good_chip_epoch_time.as_secs());
+
+        // TODO: uncomment this after we have build time
+        //VerifyOrExit(lastKnownGoodChipEpochTime >= buildTime, err = CHIP_ERROR_INVALID_ARGUMENT);
+
+        verify_or_return_error!(last_known_good_chip_epoch_time >= not_before, Err(chip_error_invalid_argument!()));
+
+        self.store_last_known_good_chip_epoch_time(last_known_good_chip_epoch_time).inspect_err(|e| {
+            chip_log_progress!(TimeService, "Failed to update Last Known Good Time {}", e.format());
+        })?;
+
+        self.m_last_known_good_chip_epoch_time = Some(last_known_good_chip_epoch_time);
+
+        chip_log_progress!(TimeService, "Updating Last Known Good Time {}", self.m_last_known_good_chip_epoch_time.as_ref().unwrap().as_secs());
+
+        chip_ok!()
+    }
+
+    pub fn update_pending_last_known_good_chip_epoch_time(&mut self, last_known_good_chip_epoch_time: Seconds32) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(self.m_last_known_good_chip_epoch_time.is_some(), Err(chip_error_incorrect_state!()));
+        chip_log_progress!(TimeService, "Last Known Good Time {}", self.m_last_known_good_chip_epoch_time.as_ref().unwrap().as_secs());
+        chip_log_progress!(TimeService, "New proposed Last Known Good Time {}", last_known_good_chip_epoch_time.as_secs());
+
+        if last_known_good_chip_epoch_time > *self.m_last_known_good_chip_epoch_time.as_ref().unwrap() {
+            chip_log_progress!(TimeService, "Updating pending Last Known Good Time to {}", last_known_good_chip_epoch_time.as_secs());
+            self.m_last_known_good_chip_epoch_time = Some(last_known_good_chip_epoch_time);
+        } else {
+            chip_log_progress!(TimeService, "Retaing current Last Known Good Time");
+        }
+
+        chip_ok!()
+    }
+
+    pub fn commit_last_known_good_chip_epoch_time(&mut self) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(self.m_last_known_good_chip_epoch_time.is_some(), Err(chip_error_incorrect_state!()));
+        chip_log_progress!(TimeService, "Commit Last Known Good Time to storage: {}", self.m_last_known_good_chip_epoch_time.as_ref().unwrap().as_secs());
+
+        self.store_last_known_good_chip_epoch_time(self.m_last_known_good_chip_epoch_time.as_ref().unwrap().clone()).inspect_err(|e| {
+            chip_log_progress!(TimeService, "Failed to commit Last Known Good Time {}", e.format());
+        })?;
+
+        chip_ok!()
+    }
+
+    pub fn revert_pending_last_known_good_chip_epoch_time(&mut self) -> ChipErrorResult {
+        verify_or_return_error!(self.m_last_known_good_chip_epoch_time.is_some(), Err(chip_error_incorrect_state!()));
+        chip_log_progress!(TimeService, "Pending Last Known Good Time {}", self.m_last_known_good_chip_epoch_time.as_ref().unwrap().as_secs());
+
+        match self.load_last_known_good_chip_epoch_time() {
+            Ok(stored_time) => {
+                chip_log_progress!(TimeService, "Reverted Last Known Good Time to previsou value {}", stored_time.as_secs());
+                self.m_last_known_good_chip_epoch_time = Some(stored_time);
+
+                chip_ok!()
+            },
+            Err(e) => {
+                chip_log_progress!(TimeService, "Clearing Last Known Good Time; failed to load a previous value {}", e.format());
+                self.m_last_known_good_chip_epoch_time = Some(Seconds32::from_secs(0));
+
+                Err(e)
+            }
+        }
+    }
+
     pub fn get_last_known_good_chip_epoch_time(&self) -> Result<Seconds32, ChipError> {
         verify_or_return_error!(self.m_last_known_good_chip_epoch_time.is_some(), Err(chip_error_incorrect_state!()));
         return Ok(self.m_last_known_good_chip_epoch_time.clone().unwrap());
@@ -161,15 +232,16 @@ mod tests {
 
     fn setup(pa: *mut TestPersistentStorage) -> LKGT {
         let mut l = LKGT::default();
-        //let _ = store.init(pa);
+        let _ = l.init(pa);
         l
     }
 
     #[test]
-    fn init() {
+    fn init_with_empty_storeage() {
         let mut pa = TestPersistentStorage::default();
         let mut good_time = LKGT::default();
         assert_eq!(true, good_time.init(ptr::addr_of_mut!(pa)).is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| 0 == d.as_secs()));
     }
 
     #[test]
@@ -198,5 +270,115 @@ mod tests {
         good_time.m_storage = ptr::addr_of_mut!(pa);
 
         assert_eq!(false, good_time.load_last_known_good_chip_epoch_time().is_ok());
+    }
+
+    #[test]
+    fn init_with_pre_load_time() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = LKGT::default();
+
+        // pre load the time
+        good_time.m_storage = ptr::addr_of_mut!(pa);
+        assert_eq!(true, good_time.store_last_known_good_chip_epoch_time(Seconds32::from_secs(123)).is_ok());
+        let expected_output = Seconds32::from_secs(123);
+
+        assert_eq!(true, good_time.init(ptr::addr_of_mut!(pa)).is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| expected_output == d));
+    }
+
+    #[test]
+    fn set_time() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let expected_output = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(123);
+
+        assert_eq!(true, good_time.set_last_known_good_chip_epoch_time(expected_output.clone(), not_before.clone()).is_ok());
+
+    }
+
+    #[test]
+    fn set_time_last_than_before() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let expected_output = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(124);
+
+        assert_eq!(false, good_time.set_last_known_good_chip_epoch_time(expected_output.clone(), not_before.clone()).is_ok());
+
+    }
+
+    #[test]
+    fn update_pending_time() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let first_time = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(123);
+        // set first
+        assert_eq!(true, good_time.set_last_known_good_chip_epoch_time(first_time.clone(), not_before.clone()).is_ok());
+        // update
+        let expected_output = Seconds32::from_secs(124);
+        assert_eq!(true, good_time.update_pending_last_known_good_chip_epoch_time(expected_output.clone()).is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| expected_output == d));
+    }
+
+    #[test]
+    fn failed_to_update_pending_time() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let first_time = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(123);
+        // set first
+        assert_eq!(true, good_time.set_last_known_good_chip_epoch_time(first_time.clone(), not_before.clone()).is_ok());
+        // update
+        let expected_output = Seconds32::from_secs(123);
+        // event if the update is not success, the reuslt is ok
+        assert_eq!(true, good_time.update_pending_last_known_good_chip_epoch_time(expected_output.clone()).is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| first_time == d));
+    }
+
+    #[test]
+    fn revert_to_previous_time() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let first_time = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(123);
+        // set first
+        assert_eq!(true, good_time.set_last_known_good_chip_epoch_time(first_time.clone(), not_before.clone()).is_ok());
+
+        // update
+        let expected_output = Seconds32::from_secs(124);
+        assert_eq!(true, good_time.update_pending_last_known_good_chip_epoch_time(expected_output.clone()).is_ok());
+
+        // revert
+        assert_eq!(true, good_time.revert_pending_last_known_good_chip_epoch_time().is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| first_time == d));
+    }
+
+    #[test]
+    fn revert_to_previous_time_failed_to_load() {
+        let mut pa = TestPersistentStorage::default();
+        let mut good_time = setup(ptr::addr_of_mut!(pa));
+
+        let first_time = Seconds32::from_secs(123);
+        let not_before = Seconds32::from_secs(123);
+        // set first
+        assert_eq!(true, good_time.set_last_known_good_chip_epoch_time(first_time.clone(), not_before.clone()).is_ok());
+
+        // update
+        let expected_output = Seconds32::from_secs(124);
+        assert_eq!(true, good_time.update_pending_last_known_good_chip_epoch_time(expected_output.clone()).is_ok());
+
+        // posion the storage
+        pa.add_posion_key(DefaultStorageKeyAllocator::last_known_good_time_key().key_name_str());
+
+        // revert
+        assert_eq!(false, good_time.revert_pending_last_known_good_chip_epoch_time().is_ok());
+        assert_eq!(true, good_time.m_last_known_good_chip_epoch_time.is_some_and(|d| 0 == d.as_secs()));
     }
 } // end of mod tests
