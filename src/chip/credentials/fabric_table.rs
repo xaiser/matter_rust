@@ -1,7 +1,10 @@
 use crate::chip::{
     system::system_clock::Seconds32,
-    chip_lib::core::data_model_types::{
-        KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+    chip_lib::core::{
+        case_auth_tag::CatValues,
+        data_model_types::{
+            KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+        }
     }
 };
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
@@ -18,7 +21,7 @@ use crate::chip::crypto::{
     crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey},
 };
 
-use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime};
+use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime, chip_cretificate_set::ValidationContext};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
@@ -363,6 +366,13 @@ struct Delegate {
     next: *mut Self,
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone, PartialEq)]
+pub enum AdvertiseIdentity {
+    Yes,
+    No,
+}
+
 pub struct FabricTable<PSD, OK, OCS>
 where
     PSD: PersistentStorageDelegate,
@@ -528,6 +538,105 @@ where
     }
 
     pub fn fetch_root_pubkey(&self, _fabric_index: FabricIndex) -> Result<P256PublicKey, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn fetch_Cats(&self, _fabric_index: FabricIndex) -> Result<CatValues, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn sign_with_op_keypair(&self, _fabric_index: FabricIndex, _message: &[u8], _out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn allocate_ephemeral_keypair_for_case(&self) -> Result<P256Keypair, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn release_ephemeral_keypair(&self, _keypair: P256Keypair) {
+    }
+
+    pub fn allocate_pending_operation_key(&self, _fabric_index: Option<FabricIndex>, _out_csr: &mut [u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+
+    /**
+     * @brief Returns whether an operational key is pending (Some if `AllocatePendingOperationalKey` was
+     *        previously successfully called, None otherwise).
+     *
+     * @return in option: this is set to true if the `AllocatePendingOperationalKey` had an
+     *                                    associated fabric index attached, indicating it's for UpdateNoc
+     */
+    pub fn has_pending_operational_key(&self) -> Option<bool> {
+        None
+    }
+
+    pub fn has_operational_key_for_fabric(&self, _fabric_index: FabricIndex) -> bool {
+        false
+    }
+
+    pub fn get_pending_fabric_index(&self) -> FabricIndex {
+        KUNDEFINED_FABRIC_INDEX
+    }
+
+
+    pub fn get_operational_keystore(&self) -> * OK {
+        self.m_operational_keystore
+    }
+
+
+    pub fn add_new_pending_trusted_root_cert(&mut self, _rcac: &[u8]) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn add_new_pending_fabric_with_operational_keystore(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
+        _advertise_identity: Option<AdvertiseIdentity>) -> Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn add_new_pending_fabric_with_provided_op_key(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
+        _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
+        _advertise_identity: Option<AdvertiseIdentity>) -> Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+
+    pub fn update_pending_fabric_with_operational_keystore(&mut self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8],
+        _advertise_identity: Option<AdvertiseIdentity>) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn update_pending_fabric_with_provided_op_key(&mut self, _noc: &[u8], _icac: &[u8], 
+        _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
+        _advertise_identity: Option<AdvertiseIdentity>) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn commit_pending_fabric_data(&mut self) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn revert_pending_fabric_data(&mut self) { }
+
+    pub fn revert_pending_op_certs_except_root(&mut self) { }
+
+    pub fn verify_credentials(&self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
+        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, *P256PublicKey), ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn run_verify_credentials(_fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
+        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, *P256PublicKey), ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn permit_colliding_fabrics(&mut self) { 
+        self.m_state_flag.insert(StateFlags::KareCollidingFabricsIgnored);
+    }
+
+    pub fn add_new_fabric_for_test(&mut self, _root_cert: &[u8], _icac_cert: &[u8], _noc_cert: &[u8], _ok_key: &[u8]) -> 
+        Result<FabricIndex, ChipError> {
         Err(chip_error_not_implemented!())
     }
 }
