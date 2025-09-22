@@ -189,7 +189,7 @@ fn sign_with_stored_op_key<Delegate: PersistentStorageDelegate>(
     return err;
 }
 
-struct PersistentStorageOperationalKeystore<PA>
+pub struct PersistentStorageOperationalKeystore<PA>
 where
     PA: PersistentStorageDelegate,
 {

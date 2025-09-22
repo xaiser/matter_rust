@@ -1,6 +1,7 @@
 use crate::chip::{
     system::system_clock::Seconds32,
     chip_lib::core::{
+        tlv_reader::TlvContiguousBufferReader,
         case_auth_tag::CatValues,
         data_model_types::{
             KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
@@ -21,7 +22,8 @@ use crate::chip::crypto::{
     crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey},
 };
 
-use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime, chip_cretificate_set::ValidationContext};
+use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+certificate_validity_policy::CertificateValidityPolicy};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
@@ -581,7 +583,7 @@ where
     }
 
 
-    pub fn get_operational_keystore(&self) -> * OK {
+    pub fn get_operational_keystore(&self) -> * const OK {
         self.m_operational_keystore
     }
 
@@ -622,12 +624,12 @@ where
     pub fn revert_pending_op_certs_except_root(&mut self) { }
 
     pub fn verify_credentials(&self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
-        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, *P256PublicKey), ChipError> {
+        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
         Err(chip_error_not_implemented!())
     }
 
     pub fn run_verify_credentials(_fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
-        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, *P256PublicKey), ChipError> {
+        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
         Err(chip_error_not_implemented!())
     }
 
@@ -637,6 +639,136 @@ where
 
     pub fn add_new_fabric_for_test(&mut self, _root_cert: &[u8], _icac_cert: &[u8], _noc_cert: &[u8], _ok_key: &[u8]) -> 
         Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn add_new_uncommited_fabric_for_test(&mut self, _root_cert: &[u8], _icac_cert: &[u8], _noc_cert: &[u8], _ok_key: &[u8]) -> 
+        Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn add_new_fabric_for_test_ignoring_collisions(&mut self, root_cert: &[u8], icac_cert: &[u8], noc_cert: &[u8], ok_key: &[u8]) -> 
+        Result<FabricIndex, ChipError> {
+            self.permit_colliding_fabrics();
+            self.m_state_flag.remove(StateFlags::KareCollidingFabricsIgnored);
+            return self.add_new_fabric_for_test(root_cert, icac_cert, noc_cert, ok_key);
+    }
+
+    pub fn set_force_abort_commit_for_test(&mut self, abort_commit_for_test: bool) {
+        if abort_commit_for_test {
+            self.m_state_flag.insert(StateFlags::KabortCommitForTest);
+        } else {
+            self.m_state_flag.remove(StateFlags::KabortCommitForTest);
+        }
+    }
+
+    pub fn peek_fabric_index_for_next_addition(&self) -> Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn set_fabric_index_for_next_addition(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn sign_vid_verification_request(&self, _fabric_index: FabricIndex, _client_challenge: &[u8], _attestation_challenge: &[u8], out_response: &mut SignVidVerificationResponseData) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    pub fn set_vid_verification_statement_elements(&self, _fabric_index: FabricIndex, _vendor_id: Option<u16>, _vid_verification_statement: Option<&[u8]>, _vvsc: Option<&[u8]>) -> Result<bool, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn get_mutable_fabric_by_index(&mut self, _fabric_index: FabricIndex) -> Result<&mut FabricInfo, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn load_from_storage(&self, _fabric_index: FabricIndex) -> Result<* mut FabricInfo, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn store_fabric_metadata(&mut self, _fabric_info: &FabricInfo) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn set_pending_data_fabric_index(&mut self, _fabric_index: FabricIndex) -> bool {
+        false
+    }
+
+    fn add_or_update_inner(&mut self, _fabric_index: FabricIndex, _is_addition: bool, _existing_op_key: &P256Keypair,
+        _is_existingg_op_key_externally_owned: bool, _vendor_id: u16, _advertise_identity: AdvertiseIdentity) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn add_new_pending_fabric_common(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
+        _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
+        _advertise_identity: AdvertiseIdentity) -> Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn update_pending_fabric_common(&mut self, _noc: &[u8], _icac: &[u8], 
+        _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
+        _advertise_identity: AdvertiseIdentity) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn find_fabric_common_with_id(&self, _root_pub_key: &P256EcdsaSignature, _fabric_id: FabricId, _node_id: NodeId) -> Option<&FabricInfo> {
+        None
+    }
+
+    fn find_fabric_common(&self, root_pub_key: &P256EcdsaSignature, fabric_id: FabricId) -> Option<&FabricInfo> {
+        return self.find_fabric_common_with_id(root_pub_key, fabric_id, KUNDEFINED_NODE_ID);
+    }
+
+    fn update_next_available_fabric_index(&mut self) {}
+
+    fn ensure_next_available_fabric_index_updated(&mut self) {}
+
+    fn store_fabric_index_info(&mut self) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn delete_metadata_from_storage(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn find_existing_fabric_by_noc_chaining(&self, _current_fabric_index: FabricIndex, _noc: &[u8]) -> Result<FabricIndex, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn get_shadow_pending_fabric_entry(&self) -> Option<&FabricInfo> {
+        if self.has_pending_fabric_update() {
+            Some(&self.m_pending_fabric)
+        } else {
+            None
+        }
+    }
+
+    fn has_pending_fabric_update(&self) -> bool {
+        return self.m_pending_fabric.is_initialized() && self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent | StateFlags::KisUpdatePending);
+    }
+
+    fn validate_incoming_noc_chain(_noc: &[u8], _icac: &[u8], _rcac: &[u8], existing_fabric_id: FabricId, _policy: &CertificateValidityPolicy,
+        ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn read_fabric_info(&self, _reader: &mut TlvContiguousBufferReader) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn notify_fabric_updated(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn notify_fabric_commited(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn store_commit_marker(&mut self, _commit_marker: &CommitMarker) -> ChipErrorResult {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn get_commit_marker(&self) -> Result<CommitMarker, ChipError> {
         Err(chip_error_not_implemented!())
     }
 }
@@ -651,3 +783,24 @@ where
         FabricTable::<PSD,OK,OCS>::const_default()
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chip::{
+        credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+        crypto::persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+        chip_lib::support::test_persistent_storage::TestPersistentStorage,
+    };
+
+    type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
+    type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
+    type TestFabricTest = FabricTable<TestPersistentStorage, OK, OCS>;
+
+    #[test]
+    fn default_init() {
+        let table = TestFabricTest::const_default();
+        assert_eq!(false, table.has_operational_key_for_fabric(0));
+    }
+} // end of mod tests
