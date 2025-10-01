@@ -48,6 +48,7 @@ pub struct FabricInfo {
     m_compressed_fabric_id: CompressedFabricId,
     m_root_publick_key: P256PublicKey,
     m_fabric_label: [u8; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES],
+    m_fabric_label_len: usize,
     m_fabric_index: FabricIndex,
     m_vendor_id: VendorId,
     m_has_externally_owned_operation_key: bool,
@@ -69,6 +70,7 @@ impl FabricInfo {
             m_compressed_fabric_id: KUNDEFINED_COMPRESSED_FABRIC_ID,
             m_root_publick_key: P256PublicKey::const_default(),
             m_fabric_label: [0; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES],
+            m_fabric_label_len: 0,
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             m_vendor_id: VendorId::NotSpecified,
             m_has_externally_owned_operation_key: false,
@@ -150,13 +152,29 @@ impl FabricInfo {
     }
 }
 
+impl Drop for FabricInfo {
+    fn drop(&mut self) {
+        self.reset();
+    }
+}
+
+// TODO: we have to handle the transfer of ownership of operational keypair when we have an
+// assignment. For examle, let info2 = info1
+
 mod fabric_info_private {
     use super::FabricInfo;
     use super::KFABRIC_LABEL_MAX_LENGTH_IN_BYTES;
 
-    use crate::chip::chip_lib::core::chip_persistent_storage_delegate::PersistentStorageDelegate;
-    use crate::chip::chip_lib::core::data_model_types::{
-        FabricIndex, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+    use crate::chip::chip_lib::core::{
+        chip_persistent_storage_delegate::PersistentStorageDelegate,
+    };
+    use crate::chip::chip_lib::core::{
+        tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        tlv_types::TlvType,
+        tlv_tags,
+        data_model_types::{
+            FabricIndex, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+        },
     };
     use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
     use crate::chip::{CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId};
@@ -166,6 +184,7 @@ mod fabric_info_private {
     };
     use crate::chip_core_error;
     use crate::chip_error_invalid_argument;
+    use crate::chip_error_internal;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::tlv_estimate_struct_overhead;
@@ -175,6 +194,14 @@ mod fabric_info_private {
 
     use core::cell::UnsafeCell;
     use core::{ptr, str};
+
+    fn vendor_id_tag() -> tlv_tags::Tag {
+        tlv_tags::context_tag(0)
+    }
+
+    fn fabric_label_tag() -> tlv_tags::Tag {
+        tlv_tags::context_tag(1)
+    }
 
     pub(super) struct InitParams {
         pub m_node_id: NodeId,
@@ -271,6 +298,7 @@ mod fabric_info_private {
 
             self.m_vendor_id = VendorId::NotSpecified;
             self.m_fabric_label = [0; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES];
+            self.m_fabric_label_len = 0;
 
             if !self.m_has_externally_owned_operation_key
                 && self.m_operation_key.is_null() == false
@@ -309,6 +337,25 @@ mod fabric_info_private {
             &self,
             storage: *mut Storage,
         ) -> ChipErrorResult {
+            let mut buf: [u8; FabricInfo::metadata_tlv_max_size()] = [0; {FabricInfo::metadata_tlv_max_size()}];
+            let mut writer = TlvContiguousBufferWriter::const_default();
+
+            writer.init(buf.as_mut_ptr(), FabricInfo::metadata_tlv_max_size() as u32);
+
+            let mut outer_type = TlvType::KtlvTypeNotSpecified;
+
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                TlvType::KtlvTypeStructure,
+                &mut outer_type,
+            )?;
+
+            writer.put_u16(vendor_id_tag(), self.m_vendor_id as u16)?;
+            let label = str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]).map_err(|_| {
+                chip_error_internal!()
+            })?;
+            writer.put_string(fabric_label_tag(), label)?;
+
             chip_ok!()
         }
 
@@ -796,11 +843,11 @@ mod tests {
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
-    type TestFabricTest = FabricTable<TestPersistentStorage, OK, OCS>;
+    type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
 
     #[test]
     fn default_init() {
-        let table = TestFabricTest::const_default();
+        let table = TestFabricTable::const_default();
         assert_eq!(false, table.has_operational_key_for_fabric(0));
     }
 } // end of mod tests
