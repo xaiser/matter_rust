@@ -1,11 +1,13 @@
 use crate::chip::{
     system::system_clock::Seconds32,
-    chip_lib::core::{
-        tlv_reader::TlvContiguousBufferReader,
-        case_auth_tag::CatValues,
-        data_model_types::{
-            KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
-        }
+    chip_lib::{
+        core::{
+            tlv_reader::TlvContiguousBufferReader,
+            case_auth_tag::CatValues,
+            data_model_types::{
+                KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+            }
+        },
     }
 };
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
@@ -80,7 +82,7 @@ impl FabricInfo {
     }
 
     pub fn get_fabric_label(&self) -> Option<&str> {
-        match str::from_utf8(&self.m_fabric_label[..]) {
+        match str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]) {
             Ok(s) => Some(s),
             Err(e) => {
                 let valid_up_to = e.valid_up_to();
@@ -165,8 +167,11 @@ mod fabric_info_private {
     use super::FabricInfo;
     use super::KFABRIC_LABEL_MAX_LENGTH_IN_BYTES;
 
-    use crate::chip::chip_lib::core::{
-        chip_persistent_storage_delegate::PersistentStorageDelegate,
+    use crate::chip::chip_lib::{
+        support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+        core::{
+            chip_persistent_storage_delegate::PersistentStorageDelegate,
+        },
     };
     use crate::chip::chip_lib::core::{
         tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
@@ -184,6 +189,7 @@ mod fabric_info_private {
     };
     use crate::chip_core_error;
     use crate::chip_error_invalid_argument;
+    use crate::chip_error_buffer_too_small;
     use crate::chip_error_internal;
     use crate::chip_ok;
     use crate::chip_sdk_error;
@@ -356,7 +362,15 @@ mod fabric_info_private {
             })?;
             writer.put_string(fabric_label_tag(), label)?;
 
-            chip_ok!()
+            writer.end_container(outer_type)?;
+
+            let meta_data_len = u16::try_from(writer.get_length_written()).map_err(|_| {
+                chip_error_buffer_too_small!()
+            })?;
+
+            unsafe {
+                return storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
+            }
         }
 
         pub(super) fn load_from_storge<Storage: PersistentStorageDelegate>(
@@ -369,6 +383,36 @@ mod fabric_info_private {
             chip_ok!()
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use super::super::*;
+        use crate::chip::{
+            credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+            crypto::persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+            chip_lib::support::test_persistent_storage::TestPersistentStorage,
+        };
+        use core::ptr;
+
+        type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
+        type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
+        type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
+
+        #[test]
+        fn default_init() {
+            let info = FabricInfo::const_default();
+            assert_eq!(false, info.has_operational_key());
+        }
+
+        #[test]
+        fn commit() {
+            let mut pa = TestPersistentStorage::default();
+            let info = FabricInfo::const_default();
+            assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(true, pa.has_key(DefaultStorageKeyAllocator::fabric_metadata(0).key_name_str()));
+        }
+    } // end of mod tests
 }
 
 bitflags! {
