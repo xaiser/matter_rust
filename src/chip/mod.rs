@@ -16,6 +16,7 @@ pub use chip_lib::core::group_id::GroupId;
 pub use chip_lib::core::node_id::NodeId;
 pub use chip_lib::core::scoped_node_id::ScopedNodeId;
 pub use chip_lib::support::logging;
+pub use chip_lib::asn1::asn1;
 
 // replace with real random
 pub use crypto::simple_rand::SimpleRng as CryptoRng;

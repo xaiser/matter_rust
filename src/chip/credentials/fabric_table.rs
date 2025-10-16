@@ -312,6 +312,8 @@ mod fabric_info_private {
                 // TODO: delete by platform
             }
 
+            // TODO: Also, make sure the correct when we have a = b
+
             self.m_operation_key = ptr::null_mut();
 
             self.m_has_externally_owned_operation_key = false;
