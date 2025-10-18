@@ -1,4 +1,5 @@
 use crate::chip::{
+    FabricId, NodeId,
     asn1::{Oid, Asn1Oid},
     chip_lib::core::chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
 };
@@ -12,6 +13,7 @@ use crate::chip_ok;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_not_implemented;
 use crate::chip_error_no_memory;
+use crate::chip_error_not_found;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -224,6 +226,28 @@ impl Default for ChipCertificateData {
     }
 }
 
+pub fn extract_node_id_fabric_id_from_op_cert(opcert: &ChipCertificateData) -> Result<(NodeId, FabricId), ChipError> {
+    // Since we assume the cert is pre-validated, we are going to assume that
+    // its subject in fact has both a node id and a fabric id.
+    let mut node_id: Option<NodeId> = None;
+    let mut fabric_id: Option<FabricId> = None;
+
+    for r in opcert.m_subject_dn.rdn.iter().take_while(|r| r.is_empty() == false) {
+        if r.m_attr_oid == Asn1Oid::KoidAttributeTypeMatterNodeId.into() {
+            node_id = Some(r.m_chip_val);
+        }
+        if r.m_attr_oid == Asn1Oid::KoidAttributeTypeMatterFabricId.into() {
+            fabric_id = Some(r.m_chip_val);
+        }
+    }
+
+    if node_id.is_none() || fabric_id.is_none() {
+        return Err(chip_error_not_found!());
+    }
+
+    return Ok((node_id.unwrap(), fabric_id.unwrap()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +355,23 @@ mod tests {
             assert_eq!(false, dn.add_attribute_printable(Asn1Oid::KoidNotSpecified.into(), 1, true).is_ok());
         }
     } // end of dn
+    
+    mod chip_certificate_data {
+        use super::super::*;
+
+        #[test]
+        fn extract_node_id_fabrid_id() {
+            let mut cert = ChipCertificateData::default();
+            assert_eq!(true, cert.m_subject_dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId.into(), 1).is_ok());
+            assert_eq!(true, cert.m_subject_dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterFabricId.into(), 2).is_ok());
+
+            if let Ok((node_id, fabric_id)) = extract_node_id_fabric_id_from_op_cert(&cert) {
+                assert_eq!(1, node_id);
+                assert_eq!(2, fabric_id);
+            } else {
+                assert!(false);
+            }
+        }
+    } // end of other
 
 } // end of tests
