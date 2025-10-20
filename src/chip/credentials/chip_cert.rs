@@ -1,7 +1,10 @@
 use crate::chip::{
     FabricId, NodeId,
     asn1::{Oid, Asn1Oid},
-    chip_lib::core::chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
+    chip_lib::core::{
+        chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
+        tlv_reader::{TlvContiguousBufferReader, TlvReader},
+    }
 };
 
 use crate::chip_core_error;
@@ -21,6 +24,10 @@ use crate::verify_or_return_value;
 // we use this buffer to store the vid verification statement too
 pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
+
+// Not using now, just give it a type
+#[derive(Copy, Clone)]
+pub enum CertDecodeFlags {}
 
 #[inline]
 fn is_chip_64bit_dn_attr(oid: Oid) -> bool {
@@ -200,6 +207,10 @@ impl ChipDN {
     pub fn rdn_count(&self) -> u8 {
         self.rdn.iter().take_while(|r| r.is_empty() == false).count() as u8
     }
+
+    pub fn decode_from_tlv<Reader: TlvReader>(&mut self, reader: &Reader) -> ChipErrorResult {
+        Err(chip_error_invalid_argument!())
+    }
 }
 
 impl Default for ChipDN {
@@ -209,7 +220,7 @@ impl Default for ChipDN {
 }
 
 pub struct ChipCertificateData {
-    m_subject_dn: ChipDN,
+    pub m_subject_dn: ChipDN,
 }
 
 impl ChipCertificateData {

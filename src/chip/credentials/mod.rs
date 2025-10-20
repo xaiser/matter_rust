@@ -5,5 +5,6 @@ mod chip_cert;
 mod last_known_good_time;
 pub mod chip_certificate_set;
 pub mod certificate_validity_policy;
+pub mod chip_cert_to_x509;
 
 pub use operational_certificate_store::OperationalCertificateStore;
