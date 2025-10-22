@@ -1,7 +1,12 @@
 use crate::chip::{
     FabricId, NodeId,
-    asn1::{Oid, Asn1Oid},
+    asn1::{Oid, Asn1Oid, get_oid, OidCategory},
     chip_lib::core::{
+        case_auth_tag::is_valid_case_auth_tag,
+        data_mode_types::is_valid_fabric_id,
+        node_id::is_operational_node_id,
+        tlv_types::TlvType,
+        tlv_tags::{is_context_tag, tag_num_from_tag},
         chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
         tlv_reader::{TlvContiguousBufferReader, TlvReader},
     }
@@ -17,6 +22,8 @@ use crate::chip_error_invalid_argument;
 use crate::chip_error_not_implemented;
 use crate::chip_error_no_memory;
 use crate::chip_error_not_found;
+use crate::chip_error_invalid_tlv_tag;
+use crate::chip_error_wrong_node_id;
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -185,14 +192,15 @@ impl ChipDN {
         chip_ok!()
     }
 
-    pub fn add_attribute_printable(&mut self, oid: Oid, val: u64, is_printable_string: bool) -> ChipErrorResult {
+    pub fn add_attribute_string(&mut self, oid: Oid, val: &str, is_printable_string: bool) -> ChipErrorResult {
         let rdn_count = self.rdn_count() as usize;
         verify_or_return_error!(rdn_count < CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES, Err(chip_error_no_memory!()));
         verify_or_return_error!(!is_chip_dn_attr(oid), Err(chip_error_invalid_argument!()));
         verify_or_return_error!(oid != Asn1Oid::KoidNotSpecified.into(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(val.len() < K_MAX_RDN_STRING_LENGTH, Err(chip_error_invalid_argument!()));
 
         self.rdn[rdn_count].m_attr_oid = oid;
-        self.rdn[rdn_count].m_chip_val = val;
+        self.rdn[rdn_count].m_string[..val.len()].copy_from_slice(val.as_bytes());
         self.rdn[rdn_count].m_attr_is_printable_string = is_printable_string;
 
         chip_ok!()
@@ -208,7 +216,47 @@ impl ChipDN {
         self.rdn.iter().take_while(|r| r.is_empty() == false).count() as u8
     }
 
-    pub fn decode_from_tlv<Reader: TlvReader>(&mut self, reader: &Reader) -> ChipErrorResult {
+    pub fn decode_from_tlv<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+        const KoidAttributeIsPrintableStringFlag: u32 = 0x00000080;
+        const KoidAttributeTypeMask: u32 = 0x0000007F;
+
+        verify_or_return_error!(reader.get_type() == TlvType::KtlvTypeList, Err(chip_error_invalid_tlv_tag!()));
+
+        let outer_container = reader.enter_container()?;
+
+        while(reader.next().is_ok()) {
+            let tlv_tag = reader.get_tag();
+            verify_or_return_error!(is_context_tag(tlv_tag), Err(chip_error_invalid_tlv_tag!()));
+
+            let tlv_tag_num = tag_num_from_tag(&tlv_tag);
+
+            let attr_oid = get_oid(OidCatetory::KoidCategoryAttributeTyper, (tlv_tag_num & KoidAttributeTypeMask) as u8);
+
+            let attr_is_printable_string = (tlv_tag_num & KoidAttributeIsPrintableStringFlag) == KoidAttributeIsPrintableStringFlag;
+
+            if is_chip_64bit_dn_attr(attr_oid) {
+                // For 64-bit CHIP-defined DN attributes.
+                verify_or_return_error!(attr_is_printable_string == false, Err(chip_error_invalid_tlv_tag!()));
+                let chip_attr = reader.get_u64()?;
+                if attr_oid == crate::chip::asn1::KoidAttributeTypeMatterFabridId {
+                    verify_or_return_error!(is_operational_node_id(chip_attr), Err(chip_error_wrong_node_id!()));
+                } else if attr_oid == crate::chip::asn1::KoidAttributeTypeFabridId {
+                    verify_or_return_error!(is_valid_fabrid_id(chip_attr), Err(chip_error_invalid_argument!()));
+                }
+                self.add_attribute(attr_oid, chip_attr)?;
+            } else if is_chip_32bit_dn_attr(attr_oid) {
+                // For 32-bit CHIP-defined DN attributes.
+                verify_or_return_error!(attr_is_printable_string == false, Err(chip_error_invalid_tlv_tag!()));
+                let chip_attr = reader.get_u32()?;
+                if attr_oid == crate::chip_asn1::KoidAttributeTypeMatterCASEAuthTag {
+                    verify_or_return_error(is_valid_case_auth_tag(chip_attr), Err(chip_error_invalid_argument!()));
+                }
+                self.add_attribute(attr_oid, chip_attr as u64)?;
+            } else {
+            }
+
+        }
+
         Err(chip_error_invalid_argument!())
     }
 }

@@ -114,3 +114,24 @@ impl TryFrom<u16> for Asn1Oid {
         }
     }
 }
+
+#[repr(u16)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OidCategory {
+    KoidCategoryNotSpecified       = 0x0000,
+    KoidCategoryPubKeyAlgo         = 0x0100,
+    KoidCategorySigAlgo            = 0x0200,
+    KoidCategoryAttributeType      = 0x0300,
+    KoidCategoryEllipticCurve      = 0x0400,
+    KoidCategoryExtension          = 0x0500,
+    KoidCategoryKeyPurpose         = 0x0600,
+    KoidCategoryUnknown            = 0x0F00,
+    KoidCategoryMask               = 0x0F00,
+}
+
+#[inline]
+pub fn get_oid(category; OidCategory, id: u8) -> Oid {
+    //let id: u16 = category as u16 | id as u16;
+    //id.into();
+    (category as u16 | id as u16).into()
+}

@@ -388,6 +388,13 @@ macro_rules! chip_error_invalid_argument {
 }
 
 #[macro_export]
+macro_rules! chip_error_wrong_node_id {
+    () => {
+        chip_core_error!(0x5c)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_invalid_fabric_index {
     () => {
         chip_core_error!(0x71)
