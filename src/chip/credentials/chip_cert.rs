@@ -1,15 +1,18 @@
 use crate::chip::{
     FabricId, NodeId,
     asn1::{Oid, Asn1Oid, get_oid, OidCategory},
-    chip_lib::core::{
-        case_auth_tag::is_valid_case_auth_tag,
-        data_mode_types::is_valid_fabric_id,
-        node_id::is_operational_node_id,
-        tlv_types::TlvType,
-        tlv_tags::{is_context_tag, tag_num_from_tag},
-        chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
-        tlv_reader::{TlvContiguousBufferReader, TlvReader},
-    }
+    chip_lib::{
+        core::{
+            case_auth_tag::is_valid_case_auth_tag,
+            data_model_types::is_valid_fabric_id,
+            node_id::is_operational_node_id,
+            tlv_types::TlvType,
+            tlv_tags::{is_context_tag, tag_num_from_tag},
+            chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
+            tlv_reader::{TlvContiguousBufferReader, TlvReader},
+        },
+        support::default_string::DefaultString,
+    },
 };
 
 use crate::chip_core_error;
@@ -31,6 +34,7 @@ use crate::verify_or_return_value;
 // we use this buffer to store the vid verification statement too
 pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
+pub type ChipRDNString = DefaultString<K_MAX_RDN_STRING_LENGTH>;
 
 // Not using now, just give it a type
 #[derive(Copy, Clone)]
@@ -114,7 +118,7 @@ impl CertBuffer {
 
 #[derive(Copy, Clone)]
 pub struct ChipRDN {
-    m_string: [u8; K_MAX_RDN_STRING_LENGTH],
+    m_string: ChipRDNString,
     m_chip_val: u64,
     m_attr_oid: Oid,
     m_attr_is_printable_string: bool,
@@ -123,7 +127,7 @@ pub struct ChipRDN {
 impl ChipRDN {
     pub const fn const_default() -> Self {
         Self {
-            m_string: [0; K_MAX_RDN_STRING_LENGTH],
+            m_string: ChipRDNString::const_default(),
             m_chip_val: 0,
             m_attr_oid: Asn1Oid::KoidNotSpecified as Oid,
             m_attr_is_printable_string: false,
@@ -131,7 +135,7 @@ impl ChipRDN {
     }
 
     pub fn clear(&mut self) {
-        self.m_string = [0; K_MAX_RDN_STRING_LENGTH];
+        self.m_string.clear();
         self.m_chip_val = 0;
         self.m_attr_oid = Asn1Oid::KoidNotSpecified as Oid;
         self.m_attr_is_printable_string = false;
@@ -200,7 +204,7 @@ impl ChipDN {
         verify_or_return_error!(val.len() < K_MAX_RDN_STRING_LENGTH, Err(chip_error_invalid_argument!()));
 
         self.rdn[rdn_count].m_attr_oid = oid;
-        self.rdn[rdn_count].m_string[..val.len()].copy_from_slice(val.as_bytes());
+        self.rdn[rdn_count].m_string = ChipRDNString::from(val);
         self.rdn[rdn_count].m_attr_is_printable_string = is_printable_string;
 
         chip_ok!()
@@ -224,13 +228,13 @@ impl ChipDN {
 
         let outer_container = reader.enter_container()?;
 
-        while(reader.next().is_ok()) {
+        while reader.next().is_ok() {
             let tlv_tag = reader.get_tag();
-            verify_or_return_error!(is_context_tag(tlv_tag), Err(chip_error_invalid_tlv_tag!()));
+            verify_or_return_error!(is_context_tag(&tlv_tag), Err(chip_error_invalid_tlv_tag!()));
 
             let tlv_tag_num = tag_num_from_tag(&tlv_tag);
 
-            let attr_oid = get_oid(OidCatetory::KoidCategoryAttributeTyper, (tlv_tag_num & KoidAttributeTypeMask) as u8);
+            let attr_oid = get_oid(OidCategory::KoidCategoryAttributeType, (tlv_tag_num & KoidAttributeTypeMask) as u8);
 
             let attr_is_printable_string = (tlv_tag_num & KoidAttributeIsPrintableStringFlag) == KoidAttributeIsPrintableStringFlag;
 
@@ -238,18 +242,18 @@ impl ChipDN {
                 // For 64-bit CHIP-defined DN attributes.
                 verify_or_return_error!(attr_is_printable_string == false, Err(chip_error_invalid_tlv_tag!()));
                 let chip_attr = reader.get_u64()?;
-                if attr_oid == crate::chip::asn1::KoidAttributeTypeMatterFabridId {
+                if attr_oid == crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId.into() {
                     verify_or_return_error!(is_operational_node_id(chip_attr), Err(chip_error_wrong_node_id!()));
-                } else if attr_oid == crate::chip::asn1::KoidAttributeTypeFabridId {
-                    verify_or_return_error!(is_valid_fabrid_id(chip_attr), Err(chip_error_invalid_argument!()));
+                } else if attr_oid == crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId.into() {
+                    verify_or_return_error!(is_valid_fabric_id(chip_attr), Err(chip_error_invalid_argument!()));
                 }
                 self.add_attribute(attr_oid, chip_attr)?;
             } else if is_chip_32bit_dn_attr(attr_oid) {
                 // For 32-bit CHIP-defined DN attributes.
                 verify_or_return_error!(attr_is_printable_string == false, Err(chip_error_invalid_tlv_tag!()));
                 let chip_attr = reader.get_u32()?;
-                if attr_oid == crate::chip_asn1::KoidAttributeTypeMatterCASEAuthTag {
-                    verify_or_return_error(is_valid_case_auth_tag(chip_attr), Err(chip_error_invalid_argument!()));
+                if attr_oid == crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterCASEAuthTag.into() {
+                    verify_or_return_error!(is_valid_case_auth_tag(chip_attr), Err(chip_error_invalid_argument!()));
                 }
                 self.add_attribute(attr_oid, chip_attr as u64)?;
             } else {
@@ -361,8 +365,6 @@ mod tests {
             let mut rdn2 = ChipRDN::default();
             rdn1.m_attr_oid = Asn1Oid::KoidAttributeTypeCommonName as Oid;
             rdn2.m_attr_oid = Asn1Oid::KoidAttributeTypeCommonName as Oid;
-            rdn1.m_string[0] = 0;
-            rdn1.m_string[0] = 1;
             assert_eq!(false, rdn1 == rdn2);
         }
     } // end of rdn
@@ -404,14 +406,14 @@ mod tests {
         fn add_oid_printable() {
             let mut dn = ChipDN::default();
             
-            assert_eq!(true, dn.add_attribute_printable(Asn1Oid::KoidAttributeTypeCommonName.into(), 1, true).is_ok());
+            assert_eq!(true, dn.add_attribute_string(Asn1Oid::KoidAttributeTypeCommonName.into(), "123", true).is_ok());
         }
 
         #[test]
         fn add_oid_printable_not_specified_oid() {
             let mut dn = ChipDN::default();
             
-            assert_eq!(false, dn.add_attribute_printable(Asn1Oid::KoidNotSpecified.into(), 1, true).is_ok());
+            assert_eq!(false, dn.add_attribute_string(Asn1Oid::KoidNotSpecified.into(), "123", true).is_ok());
         }
     } // end of dn
     

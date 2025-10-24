@@ -126,11 +126,12 @@ pub enum OidCategory {
     KoidCategoryExtension          = 0x0500,
     KoidCategoryKeyPurpose         = 0x0600,
     KoidCategoryUnknown            = 0x0F00,
-    KoidCategoryMask               = 0x0F00,
 }
 
+pub const K_OID_CATEGORY_MASK: u16 = 0x0F00;
+
 #[inline]
-pub fn get_oid(category; OidCategory, id: u8) -> Oid {
+pub fn get_oid(category: OidCategory, id: u8) -> Oid {
     //let id: u16 = category as u16 | id as u16;
     //id.into();
     (category as u16 | id as u16).into()

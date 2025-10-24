@@ -19,9 +19,9 @@ pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode
 
     reader.init(cert.as_ptr(), cert.len());
 
-    return decode_chip_cert_with_reader(&reader, cert_data, decode_flag);
+    return decode_chip_cert_with_reader(&mut reader, cert_data, decode_flag);
 }
 
-pub fn decode_chip_cert_with_reader<Reader: TlvReader>(reader: &Reader, cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
+pub fn decode_chip_cert_with_reader<Reader: TlvReader>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
     return cert_data.m_subject_dn.decode_from_tlv(reader);
 }
