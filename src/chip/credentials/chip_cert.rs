@@ -257,11 +257,17 @@ impl ChipDN {
                 }
                 self.add_attribute(attr_oid, chip_attr as u64)?;
             } else {
+                let chip_attr = reader.get_string()?;
+                if chip_attr.is_none() {
+                    return Err(chip_error_invalid_argument!());
+                }
+                self.add_attribute_string(attr_oid, chip_attr.unwrap(), attr_is_printable_string)?;
             }
-
         }
 
-        Err(chip_error_invalid_argument!())
+        reader.exit_container(outer_container)?;
+
+        chip_ok!()
     }
 }
 
@@ -365,12 +371,20 @@ mod tests {
             let mut rdn2 = ChipRDN::default();
             rdn1.m_attr_oid = Asn1Oid::KoidAttributeTypeCommonName as Oid;
             rdn2.m_attr_oid = Asn1Oid::KoidAttributeTypeCommonName as Oid;
+            rdn1.m_string = DefaultString::from("1");
+            rdn2.m_string = DefaultString::from("2");
             assert_eq!(false, rdn1 == rdn2);
         }
     } // end of rdn
     
     mod dn {
         use super::super::*;
+        use crate::chip::chip_lib::core::{
+            tlv_types::{self, TlvType},
+            tlv_tags::{self, is_context_tag, tag_num_from_tag},
+            tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        };
 
         #[test]
         fn init() {
@@ -414,6 +428,38 @@ mod tests {
             let mut dn = ChipDN::default();
             
             assert_eq!(false, dn.add_attribute_string(Asn1Oid::KoidNotSpecified.into(), "123", true).is_ok());
+        }
+
+        #[test]
+        fn decode_from_tlv_successfully() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeList, &mut outer_container);
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // end container
+            writer.end_container(outer_container);
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(true, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(1, dn.rdn_count());
+            assert_eq!(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u16, dn.rdn[0].m_attr_oid);
+            assert_eq!(0x01, dn.rdn[0].m_chip_val);
         }
     } // end of dn
     
