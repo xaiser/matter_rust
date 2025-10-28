@@ -3,7 +3,7 @@
 use core::fmt::{self, Write};
 use core::str;
 
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone, Debug)]
 pub struct DefaultString<const N: usize> { m_buf: [u8; N],
     len: usize,
 }

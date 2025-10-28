@@ -13,6 +13,8 @@ use crate::chip::{
         },
         support::default_string::DefaultString,
     },
+    credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
+    crypto::K_P256_PUBLIC_KEY_LENGTH,
 };
 
 use crate::chip_core_error;
@@ -36,9 +38,48 @@ pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIF
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
 pub type ChipRDNString = DefaultString<K_MAX_RDN_STRING_LENGTH>;
 
-// Not using now, just give it a type
 #[derive(Copy, Clone)]
-pub enum CertDecodeFlags {}
+pub enum ChipCertTag
+{
+    // ---- Context-specific Tags for ChipCertificate Structure ----
+    KtagSerialNumber            = 1,  /* [ byte string ] Certificate serial number, in BER integer encoding. */
+    KtagSignatureAlgorithm      = 2,  /* [ unsigned int ] Enumerated value identifying the certificate signature algorithm. */
+    KtagIssuer                  = 3,  /* [ list ] The issuer distinguished name of the certificate. */
+    KtagNotBefore               = 4,  /* [ unsigned int ] Certificate validity period start (certificate date format). */
+    KtagNotAfter                = 5,  /* [ unsigned int ] Certificate validity period end (certificate date format). */
+    KtagSubject                 = 6,  /* [ list ] The subject distinguished name of the certificate. */
+    KtagPublicKeyAlgorithm      = 7,  /* [ unsigned int ] Identifies the algorithm with which the public key can be used. */
+    KtagEllipticCurveIdentifier = 8,  /* [ unsigned int ] For EC certs, identifies the elliptic curve used. */
+    KtagEllipticCurvePublicKey  = 9,  /* [ byte string ] The elliptic curve public key, in X9.62 encoded format. */
+    KtagExtensions              = 10, /* [ list ] Certificate extensions. */
+    KtagECDSASignature          = 11, /* [ byte string ] The ECDSA signature for the certificate. */
+}
+
+#[derive(Copy, Clone)]
+pub enum ChipCertExtensionTag {
+    // ---- Context-specific Tags for certificate extensions ----
+    KtagBasicConstraints       = 1, /* [ structure ] Identifies whether the subject of the certificate is a CA. */
+    KtagKeyUsage               = 2, /* [ unsigned int ] Bits identifying key usage, per RFC5280. */
+    KtagExtendedKeyUsage       = 3, /* [ array ] Enumerated values giving the purposes for which the public key can be used. */
+    KtagSubjectKeyIdentifier   = 4, /* [ byte string ] Identifier of the certificate's public key. */
+    KtagAuthorityKeyIdentifier = 5, /* [ byte string ] Identifier of the public key used to sign the certificate. */
+    KtagFutureExtension        = 6, /* [ byte string ] Arbitrary extension. DER encoded SEQUENCE as in X.509 form. */
+}
+
+#[derive(Copy, Clone)]
+pub enum ChipCertBasicConstraintTag {
+
+    // ---- Context-specific Tags for BasicConstraints Structure ----
+    KtagBasicConstraintsIsCA = 1,              /* [ boolean ] True if the certificate can be used to verify certificate */
+    KtagBasicConstraintsPathLenConstraint = 2, /* [ unsigned int ] Maximum number of subordinate intermediate certificates. */
+}
+
+// Not using now, just give it a type
+#[derive(Copy, Clone, Default)]
+pub enum CertDecodeFlags {
+    #[default]
+    KNone,
+}
 
 #[inline]
 fn is_chip_64bit_dn_attr(oid: Oid) -> bool {
@@ -279,12 +320,14 @@ impl Default for ChipDN {
 
 pub struct ChipCertificateData {
     pub m_subject_dn: ChipDN,
+    pub m_public_key: [u8; K_P256_PUBLIC_KEY_LENGTH],
 }
 
 impl ChipCertificateData {
     pub const fn const_default() -> Self {
         Self {
             m_subject_dn: ChipDN::const_default(),
+            m_public_key: [0; K_P256_PUBLIC_KEY_LENGTH],
         }
     }
 }
@@ -315,6 +358,13 @@ pub fn extract_node_id_fabric_id_from_op_cert(opcert: &ChipCertificateData) -> R
     }
 
     return Ok((node_id.unwrap(), fabric_id.unwrap()));
+}
+
+pub fn extract_node_id_fabric_id_from_op_cert_byte(opcert: &[u8]) -> Result<(NodeId, FabricId), ChipError> {
+    let mut op_cert: ChipCertificateData = ChipCertificateData::default();
+    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+
+    extract_node_id_fabric_id_from_op_cert(&op_cert)
 }
 
 #[cfg(test)]
@@ -431,7 +481,7 @@ mod tests {
         }
 
         #[test]
-        fn decode_from_tlv_successfully() {
+        fn decode_64bit_from_tlv_successfully() {
             const RAW_SIZE: usize = 128;
             let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -460,6 +510,142 @@ mod tests {
             assert_eq!(1, dn.rdn_count());
             assert_eq!(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u16, dn.rdn[0].m_attr_oid);
             assert_eq!(0x01, dn.rdn[0].m_chip_val);
+        }
+
+        #[test]
+        fn decode_64bit_from_tlv_not_list() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(false, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(0, dn.rdn_count());
+        }
+
+        #[test]
+        fn decode_64bit_from_tlv_empty_reader() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(false, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(0, dn.rdn_count());
+        }
+
+        #[test]
+        fn decode_64bit_from_tlv_invalid_tag() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeList, &mut outer_container);
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::anonymous_tag(), 0x01u64);
+            // end container
+            writer.end_container(outer_container);
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(false, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(0, dn.rdn_count());
+        }
+
+        #[test]
+        fn decode_32bit_from_tlv_successfully() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeList, &mut outer_container);
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterCASEAuthTag as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a 0x1
+            writer.put_u32(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u32);
+            // end container
+            writer.end_container(outer_container);
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(true, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(1, dn.rdn_count());
+            assert_eq!(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterCASEAuthTag as u16, dn.rdn[0].m_attr_oid);
+            assert_eq!(0x01, dn.rdn[0].m_chip_val);
+        }
+
+        #[test]
+        fn decode_non_matter_from_tlv_successfully() {
+            const RAW_SIZE: usize = 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeList, &mut outer_container);
+            // set up a tag number from matter id
+            let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a 0x1
+            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            // end container
+            writer.end_container(outer_container);
+
+            let mut dn = ChipDN::default();
+
+            let mut reader: TlvContiguousBufferReader = TlvContiguousBufferReader::const_default();
+            reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
+            // decode_from_tlv should be called after some outer paring function calls.
+            // To simulate that, we just start the reader by next.
+            reader.next();
+
+            assert_eq!(true, dn.decode_from_tlv(&mut reader).inspect_err(|e| { println!("{:?}", e) }).is_ok());
+            assert_eq!(1, dn.rdn_count());
+            assert_eq!(crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u16, dn.rdn[0].m_attr_oid);
+            assert_eq!(DefaultString::from("123"), dn.rdn[0].m_string);
         }
     } // end of dn
     
