@@ -14,6 +14,7 @@ sha2 = { version = "0.10", default-features = false }
 generic-array = "0.14"
 p256 = { version = "0.13.2", features = ["ecdh"] }
 rand_core = { version = "0.6", default-features = false }
+hkdf = { version = "0.12.4", default-features = false }
 
 [dev-dependencies]
 

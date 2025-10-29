@@ -29,6 +29,7 @@ use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::PublicKey;
 use sha2::{Digest, Sha256};
+use hkdf::Hkdf;
 
 use core::slice;
 
@@ -1242,6 +1243,38 @@ pub fn derive_group_operational_credentials(
     chip_ok!()
 }
 
+struct HKDFSha;
+
+impl HKDFSha {
+    /*
+     * @brief A function that implements SHA-256 based HKDF
+     *
+     * This implements the CHIP_Crypto_KDF() cryptographic primitive
+     * in the the specification.
+     *
+     *  Error values are:
+     *   - CHIP_ERROR_INVALID_ARGUMENT: for any bad arguments or nullptr input on
+     *     any pointer.
+     *   - CHIP_ERROR_INTERNAL: for any unexpected error arising in the underlying
+     *     cryptographic layers.
+     *
+     * @param secret The secret to use as the key to the HKDF
+     * @param secret_length Length of the secret
+     * @param salt Optional salt to use as input to the HKDF
+     * @param salt_length Length of the salt
+     * @param info Optional info to use as input to the HKDF
+     * @param info_length Length of the info
+     * @param out_buffer Pointer to buffer to write output into.
+     * @param out_length Size of the underlying out_buffer. That length of output key material will be generated in out_buffer.
+     * @return Returns a CHIP_ERROR on error, CHIP_NO_ERROR otherwise
+     **/
+    pub fn hkdf_sha(secret: &[u8], salt: &[u8], info: &[u8], out: &mut [u8]) -> ChipErrorResult {
+        let hk = Hkdf::<Sha256>::new(Some(salt), secret);
+
+        hk.expand(info, out).map_err(|_| chip_error_internal!())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1387,4 +1420,23 @@ mod test {
             assert_eq!(keypair.m_ecdsa_keypair, keypair1.m_ecdsa_keypair);
         }
     } // end of test_p256_keypair
+    
+    mod test_hkdf_sha {
+        use super::super::*;
+        use super::*;
+        use std::*;
+
+        #[test]
+        fn hkdf_sha() {
+            let key: [u8; 3] = [1,2,3];
+            let salt: [u8; 3] = [4,5,6];
+            let info: [u8; 3] = [11,22,33];
+            let mut out1: [u8; 10] = [0; 10];
+            let mut out2: [u8; 10] = [0; 10];
+
+            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok());
+            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out2).is_ok());
+            assert_eq!(out1, out2);
+        }
+    } // end of test_hkdf_sha
 }
