@@ -13,6 +13,7 @@ use crate::chip_core_error;
 use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_well_uninitialized;
+use crate::chip_error_buffer_too_small;
 use crate::chip_ok;
 use crate::chip_sdk_error;
 use crate::ChipError;
@@ -1053,20 +1054,43 @@ pub struct Spake2pP256Sha256HKDFHMAC {
 
 pub type Spake2pVerifierSerialized = [u8; K_SPAKE2P_VERIFIER_SERIALIZED_LENGTH];
 
-pub fn generate_compressed_fabric_id(
+pub fn generate_compressed_fabric_id_raw_bytes(
     root_public_key: &P256PublicKey,
     fabrid_id: u64,
     out_compressed_fabrid_id: &mut [u8],
 ) -> ChipErrorResult {
-    chip_ok!()
+    verify_or_return_error!(root_public_key.is_uncompressed(), Err(chip_error_invalid_argument!()));
+    verify_or_return_error!(out_compressed_fabrid_id.len() == K_COMPRESSED_FABRIC_IDENTIFIER_SIZE, Err(chip_error_buffer_too_small!()));
+    // Ensure proper endianness for Fabric ID (i.e. big-endian as it appears in certificates)
+    let fabric_id_as_big_endian_salt = fabrid_id.to_be_bytes();
+
+    // Compute Compressed fabric reference per spec pseudocode
+    //   CompressedFabricIdentifier =
+    //     CHIP_Crypto_KDF(
+    //       inputKey := TargetOperationalRootPublicKey,
+    //       salt:= TargetOperationalFabricID,
+    //       info := CompressedFabricInfo,
+    //       len := 64)
+    //
+    // NOTE: len=64 bits is implied by output buffer size when calling HKDF_sha::HKDF_SHA256.
+    const K_COMPRESSED_FABRIC_INFO: [u8; 16] = /* "CompressedFabric" */
+        [ 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x65, 0x64, 0x46, 0x61, 0x62, 0x72, 0x69, 0x63 ];
+
+    // Must drop uncompressed point form format specifier (first byte), per spec method
+    let input_key = &root_public_key.const_bytes()[1..];
+
+    HKDFSha::hkdf_sha(input_key, &fabric_id_as_big_endian_salt[..], &K_COMPRESSED_FABRIC_INFO[..], out_compressed_fabrid_id)
 }
 
-pub fn generate_compressed_fabric_id_u64(
+pub fn generate_compressed_fabric_id(
     root_public_key: &P256PublicKey,
     fabrid_id: u64,
-    out_compressed_fabrid_id: &mut u64,
-) -> ChipErrorResult {
-    chip_ok!()
+) -> Result<u64, ChipError> {
+    let mut buffer: [u8; core::mem::size_of::<u64>()] = [0; core::mem::size_of::<u64>()];
+
+    generate_compressed_fabric_id_raw_bytes(root_public_key, fabrid_id, &mut buffer)?;
+
+    return Ok(u64::from_be_bytes(buffer));
 }
 
 pub enum CertificateChainValidationResult {
@@ -1437,6 +1461,20 @@ mod test {
             assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok());
             assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out2).is_ok());
             assert_eq!(out1, out2);
+        }
+
+        #[test]
+        fn hkdf_sha_diff() {
+            let key: [u8; 3] = [1,2,3];
+            let salt: [u8; 3] = [4,5,6];
+            let info: [u8; 3] = [11,22,33];
+            let info2: [u8; 3] = [17,28,39];
+            let mut out1: [u8; 10] = [0; 10];
+            let mut out2: [u8; 10] = [0; 10];
+
+            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok());
+            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info2[..], &mut out2).is_ok());
+            assert_ne!(out1, out2);
         }
     } // end of test_hkdf_sha
 }

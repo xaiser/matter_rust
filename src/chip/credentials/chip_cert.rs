@@ -14,7 +14,7 @@ use crate::chip::{
         support::default_string::DefaultString,
     },
     credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
-    crypto::K_P256_PUBLIC_KEY_LENGTH,
+    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH}
 };
 
 use crate::chip_core_error;
@@ -365,6 +365,17 @@ pub fn extract_node_id_fabric_id_from_op_cert_byte(opcert: &[u8]) -> Result<(Nod
     decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
 
     extract_node_id_fabric_id_from_op_cert(&op_cert)
+}
+
+pub fn extract_public_key_from_chip_cert(opcert: &ChipCertificateData) -> Result<P256PublicKey, ChipError> {
+    Ok(P256PublicKey::default_with_raw_value(&opcert.m_public_key[..]))
+}
+
+pub fn extract_public_key_from_chip_cert_byte(opcert: &[u8]) -> Result<P256PublicKey, ChipError> {
+    let mut op_cert: ChipCertificateData = ChipCertificateData::default();
+    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+
+    extract_public_key_from_chip_cert(&op_cert)
 }
 
 #[cfg(test)]

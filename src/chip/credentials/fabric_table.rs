@@ -167,11 +167,15 @@ mod fabric_info_private {
     use super::FabricInfo;
     use super::KFABRIC_LABEL_MAX_LENGTH_IN_BYTES;
 
-    use crate::chip::chip_lib::{
-        support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
-        core::{
-            chip_persistent_storage_delegate::PersistentStorageDelegate,
+    use crate::chip::{
+        chip_lib::{
+            support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+            core::{
+                chip_persistent_storage_delegate::PersistentStorageDelegate,
+            },
         },
+        credentials::chip_cert::{extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
+        crypto::generate_compressed_fabric_id,
     };
     use crate::chip::chip_lib::core::{
         tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
@@ -201,12 +205,18 @@ mod fabric_info_private {
     use core::cell::UnsafeCell;
     use core::{ptr, str};
 
+    const K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES: u8 = 32;
+
     fn vendor_id_tag() -> tlv_tags::Tag {
         tlv_tags::context_tag(0)
     }
 
     fn fabric_label_tag() -> tlv_tags::Tag {
         tlv_tags::context_tag(1)
+    }
+
+    const fn metadata_tlv_max_size() -> usize {
+        tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES as usize)
     }
 
     pub(super) struct InitParams {
@@ -376,12 +386,27 @@ mod fabric_info_private {
         }
 
         pub(super) fn load_from_storge<Storage: PersistentStorageDelegate>(
-            &self,
+            &mut self,
             storage: *mut Storage,
             new_fabric_index: FabricIndex,
             rcac: &[u8],
             noc: &[u8],
         ) -> ChipErrorResult {
+            verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
+            self.m_fabric_index = new_fabric_index;
+            {
+                (self.m_node_id, self.m_fabric_id) = extract_node_id_fabric_id_from_op_cert_byte(noc)?;
+                self.m_root_publick_key = extract_public_key_from_chip_cert_byte(rcac)?;
+                self.m_compressed_fabric_id = generate_compressed_fabric_id(&self.m_root_publick_key, self.m_fabric_id)?;
+            }
+            // Load other storable metadata (label, vendorId, etc)
+            {
+                const size: usize = metadata_tlv_max_size();
+                let mut buffer: [u8; size] = [0; size];
+                unsafe {
+                    storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
+                }
+            }
             chip_ok!()
         }
     }
