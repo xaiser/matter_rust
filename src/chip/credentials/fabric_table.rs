@@ -179,8 +179,9 @@ mod fabric_info_private {
     };
     use crate::chip::chip_lib::core::{
         tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        tlv_reader::{TlvContiguousBufferReader, TlvReader},
         tlv_types::TlvType,
-        tlv_tags,
+        tlv_tags::{self, anonymous_tag},
         data_model_types::{
             FabricIndex, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
         },
@@ -406,6 +407,22 @@ mod fabric_info_private {
                 unsafe {
                     storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 }
+                let mut reader = TlvContiguousBufferReader::const_default();
+                reader.init(buffer.as_ptr(), size);
+                reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
+                let container_type = reader.enter_container()?;
+
+                reader.next_tag(vendor_id_tag())?;
+                self.m_vendor_id = reader.get_u16()?.into();
+
+                reader.next_tag(fabric_label_tag())?;
+                let label = reader.get_string()?.ok_or(chip_error_internal!())?;
+
+                verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
+                self.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
+
+                reader.exit_container(container_type)?;
+                reader.verify_end_of_container()?;
             }
             chip_ok!()
         }

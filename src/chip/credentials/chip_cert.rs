@@ -30,6 +30,11 @@ use crate::chip_error_not_found;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_wrong_node_id;
 
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use core::str::FromStr;
+
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
@@ -270,6 +275,7 @@ impl ChipDN {
         let outer_container = reader.enter_container()?;
 
         while reader.next().is_ok() {
+            chip_log_detail!(Inet, "in loop");
             let tlv_tag = reader.get_tag();
             verify_or_return_error!(is_context_tag(&tlv_tag), Err(chip_error_invalid_tlv_tag!()));
 
@@ -306,7 +312,9 @@ impl ChipDN {
             }
         }
 
+        chip_log_detail!(Inet, "exit 1");
         reader.exit_container(outer_container)?;
+        chip_log_detail!(Inet, "exit 2");
 
         chip_ok!()
     }
@@ -662,6 +670,13 @@ mod tests {
     
     mod chip_certificate_data {
         use super::super::*;
+        use crate::chip::chip_lib::core::{
+            tlv_types::{self, TlvType},
+            tlv_tags::{self, is_context_tag, tag_num_from_tag},
+            //tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        };
+        use crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH;
 
         #[test]
         fn extract_node_id_fabrid_id() {
@@ -670,6 +685,41 @@ mod tests {
             assert_eq!(true, cert.m_subject_dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterFabricId.into(), 2).is_ok());
 
             if let Ok((node_id, fabric_id)) = extract_node_id_fabric_id_from_op_cert(&cert) {
+                assert_eq!(1, node_id);
+                assert_eq!(2, fabric_id);
+            } else {
+                assert!(false);
+            }
+        }
+
+        #[test]
+        fn extract_node_id_fabrid_id_from_bytes() {
+            const RAW_SIZE: usize = K_P256_PUBLIC_KEY_LENGTH + 128;
+            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeList, &mut outer_container);
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end container
+            writer.end_container(outer_container);
+
+            // make a stub public key
+            let fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
+            // add to cert
+            assert_eq!(true, writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), &fake_public_key[..]).inspect_err(|e| println!("{:?}", e)).is_ok());
+
+            if let Ok((node_id, fabric_id)) = extract_node_id_fabric_id_from_op_cert_byte(&raw_tlv[..writer.get_length_written()]).inspect_err(|e| println!("{:?}", e)) {
                 assert_eq!(1, node_id);
                 assert_eq!(2, fabric_id);
             } else {

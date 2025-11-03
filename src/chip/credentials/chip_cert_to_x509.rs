@@ -16,11 +16,16 @@ use crate::chip_ok;
 use crate::chip_error_not_implemented;
 use crate::chip_error_no_memory;
 
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use core::str::FromStr;
+
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
 // Just make up a X509 format to make life easier, here is the format:
-// SbujectDNs
+// SbujectDNs: [..]
 // ECPublicKey
 
 pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
@@ -32,7 +37,9 @@ pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode
 }
 
 pub fn decode_subject_public_key_info<Reader: TlvReader>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    chip_log_detail!(Inet, "key 1");
     reader.next_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8))?;
+    chip_log_detail!(Inet, "key 2");
     let raw_bytes = reader.get_bytes()?;
     verify_or_return_error!(raw_bytes.len() == cert_data.m_public_key.len(), Err(chip_error_no_memory!()));
 
@@ -42,6 +49,10 @@ pub fn decode_subject_public_key_info<Reader: TlvReader>(reader: &mut Reader, ce
 }
 
 pub fn decode_chip_cert_with_reader<Reader: TlvReader>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
+    if reader.get_type() == TlvType::KtlvTypeNotSpecified {
+        reader.next()?;
+    }
+
     // get subject DNs
     cert_data.m_subject_dn.decode_from_tlv(reader)?;
     

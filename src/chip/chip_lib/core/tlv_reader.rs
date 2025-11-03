@@ -1059,7 +1059,19 @@ where
     }
 
     fn verify_end_of_container(&mut self) -> ChipErrorResult {
-        chip_ok!()
+        match self.next() {
+            Err(e) => {
+                let end_of_tlv = chip_error_end_of_tlv!();
+                if e == end_of_tlv {
+                    return chip_ok!();
+                } else {
+                    return Err(e);
+                }
+            },
+            _ => {
+                return Err(chip_error_unexpected_tlv_element!());
+            }
+        }
     }
 
     fn get_backing_store(&mut self) -> *mut Self::BackingStoreType {
