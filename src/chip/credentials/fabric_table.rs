@@ -386,7 +386,7 @@ mod fabric_info_private {
             }
         }
 
-        pub(super) fn load_from_storge<Storage: PersistentStorageDelegate>(
+        pub(super) fn load_from_storage<Storage: PersistentStorageDelegate>(
             &mut self,
             storage: *mut Storage,
             new_fabric_index: FabricIndex,
@@ -433,15 +433,70 @@ mod fabric_info_private {
         use super::*;
         use super::super::*;
         use crate::chip::{
-            credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
-            crypto::persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
-            chip_lib::support::test_persistent_storage::TestPersistentStorage,
+            credentials::{
+                persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+                chip_cert::ChipCertTag,
+            },
+            crypto::{
+                persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+                K_P256_PUBLIC_KEY_LENGTH
+            },
+            chip_lib::{
+                support::test_persistent_storage::TestPersistentStorage,
+                core::{
+                    tlv_types::{self, TlvType},
+                    tlv_tags::{self, is_context_tag, tag_num_from_tag},
+                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+                }
+            }
         };
         use core::ptr;
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
         type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
+        const CHIP_CERT_SIZE: usize = 123 + K_P256_PUBLIC_KEY_LENGTH;
+
+        fn stub_public_key() -> [u8; K_P256_PUBLIC_KEY_LENGTH] {
+            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
+            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
+                fake_public_key[i] = i as u8;
+            }
+            return fake_public_key;
+        }
+
+        fn make_chip_cert(matter_id_value: u64, fabric_id_value: u64, public_key: &[u8]) -> Result<[u8; CHIP_CERT_SIZE], ()> {
+            let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a struct
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+
+            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            // end of list conatiner
+            writer.end_container(outer_container_dn_list);
+
+            // add to cert
+            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+
+            // end struct container
+            writer.end_container(outer_container);
+
+            return Ok(raw_tlv);
+        }
 
         #[test]
         fn default_init() {
@@ -455,6 +510,25 @@ mod fabric_info_private {
             let info = FabricInfo::const_default();
             assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(true, pa.has_key(DefaultStorageKeyAllocator::fabric_metadata(0).key_name_str()));
+        }
+
+        #[test]
+        fn load() {
+            let mut pa = TestPersistentStorage::default();
+            let mut info = FabricInfo::const_default();
+            info.m_vendor_id = 0x11u16.into();
+            let label = "abc";
+            info.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
+            info.m_fabric_label_len = label.len();
+            // commit first
+            assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
+
+            let pub_key = stub_public_key();
+            let rcac = make_chip_cert(1,2, &pub_key[..]).unwrap();
+            let noc = make_chip_cert(1,2, &pub_key[..]).unwrap();
+
+            let mut info_out = FabricInfo::const_default();
+            assert_eq!(true, info_out.load_from_storage(ptr::addr_of_mut!(pa), 0, &rcac, &noc).inspect_err(|e| println!("{:?}", e)).is_ok());
         }
     } // end of mod tests
 }
