@@ -8,6 +8,7 @@ use crate::chip::{
                 KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
             }
         },
+        support::default_string::DefaultString,
     }
 };
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
@@ -42,13 +43,14 @@ use core::{ptr, str};
 
 const KFABRIC_LABEL_MAX_LENGTH_IN_BYTES: usize = 32;
 
+pub type FabricLabelString = DefaultString<KFABRIC_LABEL_MAX_LENGTH_IN_BYTES>;
+
 pub struct FabricInfo {
     m_node_id: NodeId,
     m_fabric_id: FabricId,
     m_compressed_fabric_id: CompressedFabricId,
     m_root_publick_key: P256PublicKey,
-    m_fabric_label: [u8; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES],
-    m_fabric_label_len: usize,
+    m_fabric_label: FabricLabelString,
     m_fabric_index: FabricIndex,
     m_vendor_id: VendorId,
     m_has_externally_owned_operation_key: bool,
@@ -69,8 +71,7 @@ impl FabricInfo {
             m_fabric_id: KUNDEFINED_FABRIC_ID,
             m_compressed_fabric_id: KUNDEFINED_COMPRESSED_FABRIC_ID,
             m_root_publick_key: P256PublicKey::const_default(),
-            m_fabric_label: [0; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES],
-            m_fabric_label_len: 0,
+            m_fabric_label: FabricLabelString::const_default(),
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             m_vendor_id: VendorId::NotSpecified,
             m_has_externally_owned_operation_key: false,
@@ -80,6 +81,7 @@ impl FabricInfo {
     }
 
     pub fn get_fabric_label(&self) -> Option<&str> {
+        /*
         match str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -91,6 +93,8 @@ impl FabricInfo {
                 }
             }
         }
+        */
+        Some(self.m_fabric_label.str())
     }
 
     pub fn get_node_id(&self) -> NodeId {
@@ -162,7 +166,7 @@ impl Drop for FabricInfo {
 // assignment. For examle, let info2 = info1
 
 mod fabric_info_private {
-    use super::FabricInfo;
+    use super::{FabricInfo, FabricLabelString};
     use super::KFABRIC_LABEL_MAX_LENGTH_IN_BYTES;
 
     use crate::chip::{
@@ -319,8 +323,7 @@ mod fabric_info_private {
             self.m_compressed_fabric_id = KUNDEFINED_COMPRESSED_FABRIC_ID;
 
             self.m_vendor_id = VendorId::NotSpecified;
-            self.m_fabric_label = [0; KFABRIC_LABEL_MAX_LENGTH_IN_BYTES];
-            self.m_fabric_label_len = 0;
+            self.m_fabric_label = FabricLabelString::default();
 
             if !self.m_has_externally_owned_operation_key
                 && self.m_operation_key.is_null() == false
@@ -375,9 +378,12 @@ mod fabric_info_private {
             )?;
 
             writer.put_u16(vendor_id_tag(), self.m_vendor_id as u16)?;
+            /*
             let label = str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]).map_err(|_| {
                 chip_error_internal!()
             })?;
+            */
+            let label = self.m_fabric_label.str();
             writer.put_string(fabric_label_tag(), label)?;
 
             writer.end_container(outer_type)?;
@@ -424,8 +430,11 @@ mod fabric_info_private {
                 let label = reader.get_string()?.ok_or(chip_error_internal!())?;
 
                 verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
+                /*
                 self.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
                 self.m_fabric_label_len = label.len();
+                */
+                self.m_fabric_label = FabricLabelString::from(label);
 
                 reader.verify_end_of_container()?;
                 reader.exit_container(container_type)?;
@@ -526,8 +535,7 @@ mod fabric_info_private {
             let mut info = FabricInfo::const_default();
             info.m_vendor_id = VendorId::Common;
             let label = "abc";
-            info.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
-            info.m_fabric_label_len = label.len();
+            info.m_fabric_label = FabricLabelString::from(label);
             // commit first
             assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
 
@@ -540,7 +548,7 @@ mod fabric_info_private {
             assert_eq!(3, info_out.m_node_id);
             assert_eq!(4, info_out.m_fabric_id);
             assert_eq!(VendorId::Common, info_out.m_vendor_id);
-            assert_eq!("abc".as_bytes(), &info_out.m_fabric_label[..info_out.m_fabric_label_len]);
+            assert_eq!("abc", info_out.m_fabric_label.str());
         }
     } // end of mod tests
 }
