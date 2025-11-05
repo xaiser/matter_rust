@@ -37,8 +37,6 @@ use crate::verify_or_return_value;
 use crate::ChipErrorResult;
 use crate::ChipError;
 
-use core::cell::UnsafeCell;
-
 use bitflags::{bitflags, Flags};
 use core::{ptr, str};
 
@@ -201,9 +199,16 @@ mod fabric_info_private {
     use crate::tlv_estimate_struct_overhead;
     use crate::verify_or_return_error;
     use crate::verify_or_return_value;
+
+    /*
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_detail;
+    use core::str::FromStr;
+    */
+
     use crate::ChipErrorResult;
 
-    use core::cell::UnsafeCell;
     use core::{ptr, str};
 
     const K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES: u8 = 32;
@@ -421,8 +426,8 @@ mod fabric_info_private {
                 verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
                 self.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
 
-                reader.exit_container(container_type)?;
                 reader.verify_end_of_container()?;
+                reader.exit_container(container_type)?;
             }
             chip_ok!()
         }
@@ -439,7 +444,9 @@ mod fabric_info_private {
             },
             crypto::{
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
-                K_P256_PUBLIC_KEY_LENGTH
+                K_P256_PUBLIC_KEY_LENGTH,
+                P256Keypair, ECPKeyTarget, ECPKeypair, P256KeypairBase,
+                *,
             },
             chip_lib::{
                 support::test_persistent_storage::TestPersistentStorage,
@@ -459,9 +466,9 @@ mod fabric_info_private {
 
         fn stub_public_key() -> [u8; K_P256_PUBLIC_KEY_LENGTH] {
             let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
-            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
-                fake_public_key[i] = i as u8;
-            }
+            let mut keypair = P256Keypair::default();
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
+            fake_public_key.copy_from_slice(keypair.ecdsa_pubkey().const_bytes());
             return fake_public_key;
         }
 
@@ -525,10 +532,12 @@ mod fabric_info_private {
 
             let pub_key = stub_public_key();
             let rcac = make_chip_cert(1,2, &pub_key[..]).unwrap();
-            let noc = make_chip_cert(1,2, &pub_key[..]).unwrap();
+            let noc = make_chip_cert(3,4, &pub_key[..]).unwrap();
 
             let mut info_out = FabricInfo::const_default();
             assert_eq!(true, info_out.load_from_storage(ptr::addr_of_mut!(pa), 0, &rcac, &noc).inspect_err(|e| println!("{:?}", e)).is_ok());
+            assert_eq!(3, info_out.m_node_id);
+            assert_eq!(4, info_out.m_fabric_id);
         }
     } // end of mod tests
 }
