@@ -425,6 +425,7 @@ mod fabric_info_private {
 
                 verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
                 self.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
+                self.m_fabric_label_len = label.len();
 
                 reader.verify_end_of_container()?;
                 reader.exit_container(container_type)?;
@@ -523,7 +524,7 @@ mod fabric_info_private {
         fn load() {
             let mut pa = TestPersistentStorage::default();
             let mut info = FabricInfo::const_default();
-            info.m_vendor_id = 0x11u16.into();
+            info.m_vendor_id = VendorId::Common;
             let label = "abc";
             info.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
             info.m_fabric_label_len = label.len();
@@ -538,6 +539,8 @@ mod fabric_info_private {
             assert_eq!(true, info_out.load_from_storage(ptr::addr_of_mut!(pa), 0, &rcac, &noc).inspect_err(|e| println!("{:?}", e)).is_ok());
             assert_eq!(3, info_out.m_node_id);
             assert_eq!(4, info_out.m_fabric_id);
+            assert_eq!(VendorId::Common, info_out.m_vendor_id);
+            assert_eq!("abc".as_bytes(), &info_out.m_fabric_label[..info_out.m_fabric_label_len]);
         }
     } // end of mod tests
 }
