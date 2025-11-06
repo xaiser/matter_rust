@@ -46,8 +46,12 @@ impl<const N: usize> DefaultString<N> {
         &self.m_buf[..self.len]
     }
 
-    pub fn str(&self) -> &str {
+    pub fn str_uncheck(&self) -> &str {
         str::from_utf8(self.const_bytes()).unwrap_or(&"")
+    }
+
+    pub fn str(&self) -> Option<&str> {
+        str::from_utf8(self.const_bytes()).ok()
     }
 
     pub fn clear(&mut self) {
@@ -121,14 +125,14 @@ mod test {
     fn write() {
         let mut s = DefaultString::<10>::const_default();
         write!(&mut s, "123");
-        assert_eq!("123", s.str());
+        assert_eq!("123", s.str().unwrap_or(&""));
     }
 
     #[test]
     fn write_over_size() {
         let mut s = DefaultString::<1>::const_default();
         write!(&mut s, "123");
-        assert_eq!("1", s.str());
+        assert_eq!("1", s.str().unwrap_or(&""));
     }
 
     #[test]
@@ -142,6 +146,6 @@ mod test {
     fn from_str() {
         let a = "123";
         let s = DefaultString::<3>::from(a);
-        assert_eq!(a, s.str());
+        assert_eq!(a, s.str().unwrap_or(&""));
     }
 }

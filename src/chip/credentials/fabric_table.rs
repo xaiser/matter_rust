@@ -5,11 +5,18 @@ use crate::chip::{
             tlv_reader::TlvContiguousBufferReader,
             case_auth_tag::CatValues,
             data_model_types::{
-                KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+                KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
             }
         },
-        support::default_string::DefaultString,
-    }
+        support::{
+            default_string::DefaultString,
+            default_storage_key_allocator::DefaultStorageKeyAllocator,
+        }
+    },
+    crypto::{
+        self,
+        crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey},
+    },
 };
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
 use crate::chip::chip_lib::core::{
@@ -20,23 +27,26 @@ use crate::chip::{CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId};
 
 use crate::chip::chip_lib::core::data_model_types::FabricIndex;
 
-use crate::chip::crypto::{
-    self,
-    crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey},
-};
-
 use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
 certificate_validity_policy::CertificateValidityPolicy};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
+use crate::chip_error_invalid_fabric_index;
+use crate::chip_error_incorrect_state;
 use crate::chip_error_not_implemented;
+use crate::chip_error_persisted_storage_value_not_found;
 use crate::chip_ok;
 use crate::chip_sdk_error;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 use crate::ChipErrorResult;
 use crate::ChipError;
+
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_error;
+use core::str::FromStr;
 
 use bitflags::{bitflags, Flags};
 use core::{ptr, str};
@@ -55,6 +65,8 @@ pub struct FabricInfo {
     m_vendor_id: VendorId,
     m_has_externally_owned_operation_key: bool,
     m_should_advertise_identity: bool,
+    // until we implement dynamic allocate, we just use a static allocation
+    m_internal_op_key_storage: Option<P256Keypair>,
     m_operation_key: *mut P256Keypair,
 }
 
@@ -76,25 +88,19 @@ impl FabricInfo {
             m_vendor_id: VendorId::NotSpecified,
             m_has_externally_owned_operation_key: false,
             m_should_advertise_identity: true,
+            m_internal_op_key_storage: None,
             m_operation_key: ptr::null_mut(),
         }
     }
 
+    pub fn set_fabric_label(&mut self, label: &str) -> ChipErrorResult {
+        self.m_fabric_label = FabricLabelString::from(label);
+
+        chip_ok!()
+    }
+
     pub fn get_fabric_label(&self) -> Option<&str> {
-        /*
-        match str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                let valid_up_to = e.valid_up_to();
-                unsafe {
-                    Some(str::from_utf8_unchecked(
-                        &self.m_fabric_label[..valid_up_to],
-                    ))
-                }
-            }
-        }
-        */
-        Some(self.m_fabric_label.str())
+        self.m_fabric_label.str()
     }
 
     pub fn get_node_id(&self) -> NodeId {
@@ -327,8 +333,11 @@ mod fabric_info_private {
 
             if !self.m_has_externally_owned_operation_key
                 && self.m_operation_key.is_null() == false
+                && self.m_internal_op_key_storage.is_some()
             {
-                // TODO: delete by platform
+                // force to drop the internal op key
+                let mut to_drop = self.m_internal_op_key_storage.take().unwrap();
+                to_drop.clear();
             }
 
             // TODO: Also, make sure the correct when we have a = b
@@ -383,7 +392,7 @@ mod fabric_info_private {
                 chip_error_internal!()
             })?;
             */
-            let label = self.m_fabric_label.str();
+            let label = self.m_fabric_label.str().ok_or(chip_error_internal!())?;
             writer.put_string(fabric_label_tag(), label)?;
 
             writer.end_container(outer_type)?;
@@ -548,7 +557,7 @@ mod fabric_info_private {
             assert_eq!(3, info_out.m_node_id);
             assert_eq!(4, info_out.m_fabric_id);
             assert_eq!(VendorId::Common, info_out.m_vendor_id);
-            assert_eq!("abc", info_out.m_fabric_label.str());
+            assert_eq!("abc", info_out.m_fabric_label.str().unwrap_or(&""));
         }
     } // end of mod tests
 }
@@ -956,8 +965,23 @@ where
         Err(chip_error_not_implemented!())
     }
 
-    fn delete_metadata_from_storage(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+    fn delete_metadata_from_storage(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        verify_or_return_value!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+        verify_or_return_value!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+        unsafe {
+            match self.m_storage.as_mut().unwrap().sync_delete_key_value(DefaultStorageKeyAllocator::fabric_metadata(fabric_index).key_name_str()) {
+                Ok(_) => {},
+                Err(e) => {
+                    let not_found = chip_error_persisted_storage_value_not_found!();
+                    if e == not_found {
+                        chip_log_error!(FabricProvisioning, "Warning: metadata not found during delete of fabric {:#x}", fabric_index);
+                    } else {
+                        chip_log_error!(FabricProvisioning, "Error deleting metadata for fabric fabric {:#x}: {}", fabric_index, e);
+                    }
+                }
+            }
+        }
+        chip_ok!()
     }
 
     fn find_existing_fabric_by_noc_chaining(&self, _current_fabric_index: FabricIndex, _noc: &[u8]) -> Result<FabricIndex, ChipError> {
