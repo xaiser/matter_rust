@@ -28,7 +28,7 @@ use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::PublicKey;
+use p256::{CurveArithmetic, PublicKey};
 use sha2::{Digest, Sha256};
 use hkdf::Hkdf;
 
@@ -565,8 +565,12 @@ impl Default for P256KeypairContext {
     }
 }
 
+// Since we actually include ecdsa & ecdh keypair in the Keypair struct, so the length is doubled.
+//const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize =  K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH + K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize =  K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+
 pub type P256SerializedKeypair =
-    SensitiveDataBuffer<{ K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH }>;
+    SensitiveDataBuffer<SERIALIALIZED_KEYPAIR_SIZE_BYTE>;
 
 pub trait P256KeypairBase:
     ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
@@ -708,16 +712,22 @@ impl P256KeypairBase for P256Keypair {
     }
 
     fn serialize(&self, output: &mut P256SerializedKeypair) -> ChipErrorResult {
-        let len = K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+        let len = SERIALIALIZED_KEYPAIR_SIZE_BYTE;
         verify_or_return_error!(
             P256SerializedKeypair::capacity() >= len,
             Err(chip_error_internal!())
         );
+        let mut current_len: usize = 0;
         let serialized_keypair: &mut [u8] = output.bytes();
+        // ecdsa public key
         serialized_keypair[0..K_P256_PUBLIC_KEY_LENGTH]
             .copy_from_slice(self.m_ecdsa_public_key.const_bytes());
+        current_len += K_P256_PUBLIC_KEY_LENGTH;
+        // ecdsa private key
         let mut p = self.m_ecdsa_keypair.to_bytes();
-        serialized_keypair[K_P256_PUBLIC_KEY_LENGTH..len].copy_from_slice(p.as_slice());
+        serialized_keypair[current_len..(current_len + K_P256_PRIVATE_KEY_LENGTH)].copy_from_slice(p.as_slice());
+        current_len += K_P256_PRIVATE_KEY_LENGTH;
+
         output.set_length(len);
         // clear secret data
         p.fill(0);
