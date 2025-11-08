@@ -28,7 +28,7 @@ use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::{CurveArithmetic, PublicKey};
+use p256::PublicKey;
 use sha2::{Digest, Sha256};
 use hkdf::Hkdf;
 
@@ -548,7 +548,7 @@ pub trait ECPKeypair<PK, Secret, Sig> {
 
 #[repr(align(8))]
 pub struct P256KeypairContext {
-    m_bytes: [u8; K_MAX_P256_KEYPAIR_CONTEXT_SIZE],
+    pub m_bytes: [u8; K_MAX_P256_KEYPAIR_CONTEXT_SIZE],
 }
 
 impl P256KeypairContext {
