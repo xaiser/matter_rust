@@ -541,9 +541,7 @@ pub trait ECPKeypair<PK, Secret, Sig> {
         out_secret: &mut Secret,
     ) -> ChipErrorResult;
 
-    fn ecdsa_pubkey(&self) -> &PK;
-
-    fn ecdh_pubkey(&self) -> &PK;
+    fn public_key(&self) -> &PK;
 }
 
 #[repr(align(8))]
@@ -565,8 +563,6 @@ impl Default for P256KeypairContext {
     }
 }
 
-// Since we actually include ecdsa & ecdh keypair in the Keypair struct, so the length is doubled.
-//const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize =  K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH + K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
 const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize =  K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
 
 pub type P256SerializedKeypair =
@@ -675,11 +671,7 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         chip_ok!()
     }
 
-    fn ecdsa_pubkey(&self) -> &P256PublicKey {
-        return &self.m_public_key;
-    }
-
-    fn ecdh_pubkey(&self) -> &P256PublicKey {
+    fn public_key(&self) -> &P256PublicKey {
         return &self.m_public_key;
     }
 }
@@ -1392,8 +1384,8 @@ mod test {
             let _ = alice.initialize(ECPKeyTarget::Ecdh);
             let mut bob = P256Keypair::default();
             let _ = bob.initialize(ECPKeyTarget::Ecdh);
-            let alice_pub_key = alice.ecdh_pubkey();
-            let bob_pub_key = bob.ecdh_pubkey();
+            let alice_pub_key = alice.public_key();
+            let bob_pub_key = bob.public_key();
             let mut s1: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
             let mut s2: P256EcdhDeriveSecret = P256EcdhDeriveSecret::default();
             assert_eq!(true, alice.ecdh_derive_secret(bob_pub_key, &mut s1).is_ok());

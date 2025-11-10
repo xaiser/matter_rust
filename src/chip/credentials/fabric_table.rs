@@ -35,6 +35,7 @@ use crate::chip_error_invalid_argument;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_incorrect_state;
 use crate::chip_error_not_implemented;
+use crate::chip_error_key_not_found;
 use crate::chip_error_persisted_storage_value_not_found;
 use crate::chip_ok;
 use crate::chip_sdk_error;
@@ -139,8 +140,11 @@ impl FabricInfo {
         chip_ok!()
     }
 
-    pub fn fetch_root_pubkey(&self, out_public_key: &mut P256PublicKey) -> ChipErrorResult {
-        chip_ok!()
+    //pub fn fetch_root_pubkey(&self, out_public_key: &mut P256PublicKey) -> ChipErrorResult {
+    pub fn fetch_root_pubkey(&self) -> Result<&P256PublicKey, ChipError> {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_key_not_found!()));
+
+        return Ok(&self.m_root_publick_key);
     }
 
     pub fn get_vendor_id(&self) -> VendorId {
@@ -198,12 +202,13 @@ mod fabric_info_private {
     use crate::chip::{CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId};
 
     use crate::chip::crypto::crypto_pal::{
-        P256EcdsaSignature, P256Keypair, P256PublicKey, P256SerializedKeypair,
+        P256EcdsaSignature, P256Keypair, P256PublicKey, P256SerializedKeypair, P256KeypairBase, ECPKeypair
     };
     use crate::chip_core_error;
     use crate::chip_error_invalid_argument;
     use crate::chip_error_buffer_too_small;
     use crate::chip_error_internal;
+    use crate::chip_error_key_not_found;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::tlv_estimate_struct_overhead;
@@ -292,9 +297,11 @@ mod fabric_info_private {
             self.m_should_advertise_identity = init_params.m_should_advertise_identity;
 
             if init_params.m_operation_key.is_null() == false {
-                self.set_externally_owned_operational_keypair(init_params.m_operation_key)?;
-            } else {
-                self.set_operational_keypair(init_params.m_operation_key)?;
+                if init_params.m_has_externally_owned_operation_key == true {
+                    self.set_externally_owned_operational_keypair(init_params.m_operation_key)?;
+                } else {
+                    self.set_operational_keypair(init_params.m_operation_key)?;
+                }
             }
 
             chip_ok!()
@@ -304,6 +311,26 @@ mod fabric_info_private {
             &mut self,
             keypair: *const P256Keypair,
         ) -> ChipErrorResult {
+            verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
+
+            let mut serialized = P256SerializedKeypair::default();
+
+            unsafe {
+                keypair.as_ref().unwrap().serialize(&mut serialized)?;
+            }
+
+            if self.m_has_externally_owned_operation_key == true {
+                // Drop it, so we will allocate an internally owned one.
+                self.m_operation_key = ptr::null_mut();
+                self.m_has_externally_owned_operation_key = false;
+            }
+
+            let mut internal_keypair = P256Keypair::default();
+            internal_keypair.deserialize(&serialized)?;
+            self.m_operation_key = ptr::addr_of_mut!(internal_keypair);
+            self.m_internal_op_key_storage = Some(internal_keypair);
+
+
             chip_ok!()
         }
 
@@ -311,6 +338,17 @@ mod fabric_info_private {
             &mut self,
             keypair: *mut P256Keypair,
         ) -> ChipErrorResult {
+            verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
+
+            if self.m_has_externally_owned_operation_key == false && self.m_operation_key.is_null() == false && self.m_internal_op_key_storage.is_some() {
+                let mut internal_keypair = self.m_internal_op_key_storage.take().unwrap();
+                internal_keypair.clear();
+                self.m_operation_key = ptr::null_mut();
+            }
+
+            self.m_has_externally_owned_operation_key = true;
+            self.m_operation_key = keypair;
+
             chip_ok!()
         }
 
@@ -319,7 +357,11 @@ mod fabric_info_private {
             message: &mut [u8],
             out_signature: &mut P256EcdsaSignature,
         ) -> ChipErrorResult {
-            chip_ok!()
+            verify_or_return_error!(!self.m_operation_key.is_null(), Err(chip_error_key_not_found!()));
+
+            unsafe {
+                return self.m_operation_key.as_ref().unwrap().ecdsa_sign_msg(message, out_signature);
+            }
         }
 
         pub(super) fn reset(&mut self) {
@@ -487,7 +529,7 @@ mod fabric_info_private {
             let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
             let mut keypair = P256Keypair::default();
             let _ = keypair.initialize(ECPKeyTarget::Ecdh);
-            fake_public_key.copy_from_slice(keypair.ecdsa_pubkey().const_bytes());
+            fake_public_key.copy_from_slice(keypair.public_key().const_bytes());
             return fake_public_key;
         }
 
@@ -558,6 +600,16 @@ mod fabric_info_private {
             assert_eq!(4, info_out.m_fabric_id);
             assert_eq!(VendorId::Common, info_out.m_vendor_id);
             assert_eq!("abc", info_out.m_fabric_label.str().unwrap_or(&""));
+        }
+
+        #[test]
+        fn set_op_keypair() {
+            let mut info = FabricInfo::const_default();
+            let keypair = P256Keypair::default();
+
+            assert_eq!(true, info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok());
+            assert_eq!(true, info.m_internal_op_key_storage.is_some());
+            assert_eq!(keypair.public_key().const_bytes(), info.m_internal_op_key_storage.as_ref().unwrap().public_key().const_bytes());
         }
     } // end of mod tests
 }

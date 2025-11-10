@@ -332,7 +332,7 @@ where
 
         if let Some(keypair) = &self.m_pending_keypair {
             verify_or_return_error!(
-                keypair.ecdsa_pubkey().matches(noc_public_key),
+                keypair.public_key().matches(noc_public_key),
                 Err(chip_error_invalid_public_key!())
             );
         } else {
@@ -628,7 +628,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -688,7 +688,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -751,7 +751,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -801,7 +801,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -851,7 +851,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -896,7 +896,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }
@@ -958,7 +958,7 @@ mod tests {
         let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
         if let Some(keypair) = &store.m_pending_keypair {
             noc_pubkey =
-                P256PublicKey::default_with_raw_value(keypair.ecdsa_pubkey().const_bytes());
+                P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes());
         } else {
             assert!(false);
         }

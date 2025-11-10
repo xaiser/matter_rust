@@ -282,6 +282,13 @@ macro_rules! chip_error_message_too_long {
 }
 
 #[macro_export]
+macro_rules! chip_error_key_not_found {
+    () => {
+        chip_core_error!(0x10)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_no_memory {
     () => {
         chip_core_error!(0x0b)
