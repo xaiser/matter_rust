@@ -202,7 +202,7 @@ mod fabric_info_private {
     use crate::chip::{CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId};
 
     use crate::chip::crypto::crypto_pal::{
-        P256EcdsaSignature, P256Keypair, P256PublicKey, P256SerializedKeypair, P256KeypairBase, ECPKeypair
+        P256EcdsaSignature, P256Keypair, P256PublicKey, P256SerializedKeypair, P256KeypairBase, ECPKeypair, ECPKey
     };
     use crate::chip_core_error;
     use crate::chip_error_invalid_argument;
@@ -282,8 +282,14 @@ mod fabric_info_private {
         }
     }
 
+    impl Default for InitParams {
+        fn default() -> Self {
+            InitParams::const_default()
+        }
+    }
+
     impl FabricInfo {
-        pub(super) fn init(&mut self, init_params: InitParams) -> ChipErrorResult {
+        pub(super) fn init(&mut self, init_params: &InitParams) -> ChipErrorResult {
             init_params.are_valid()?;
 
             self.reset();
@@ -292,7 +298,7 @@ mod fabric_info_private {
             self.m_fabric_id = init_params.m_fabric_id;
             self.m_fabric_index = init_params.m_fabric_index;
             self.m_compressed_fabric_id = init_params.m_compressed_fabric_id;
-            self.m_root_publick_key = init_params.m_root_publick_key;
+            self.m_root_publick_key = P256PublicKey::default_with_raw_value(init_params.m_root_publick_key.const_bytes());
             self.m_vendor_id = init_params.m_vendor_id;
             self.m_should_advertise_identity = init_params.m_should_advertise_identity;
 
@@ -752,8 +758,26 @@ where
         None
     }
 
-    pub fn find_fabric_with_index(&self, _fabric_index: FabricIndex) -> Option<FabricInfo> {
-        None
+    pub fn find_fabric_with_index(&self, fabric_index: FabricIndex) -> Option<&FabricInfo> {
+        if fabric_index == KUNDEFINED_FABRIC_INDEX {
+            return None;
+        }
+
+        if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+            return Some(&self.m_pending_fabric);
+        }
+
+        for fabric in &self.m_states {
+            if !fabric.is_initialized() {
+                continue;
+            }
+
+            if fabric.get_fabric_index() == fabric_index {
+                return Some(fabric);
+            }
+        }
+
+        return None;
     }
 
     pub fn find_indentiy(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId, _node_id: NodeId) -> Option<FabricInfo> {
@@ -1107,5 +1131,25 @@ mod tests {
     fn default_init() {
         let table = TestFabricTable::const_default();
         assert_eq!(false, table.has_operational_key_for_fabric(0));
+    }
+
+    #[test]
+    fn find_no_fabric_with_index() {
+        let table = TestFabricTable::const_default();
+        assert_eq!(true, table.find_fabric_with_index(KUNDEFINED_FABRIC_INDEX).is_none());
+        assert_eq!(true, table.find_fabric_with_index(1).is_none());
+    }
+
+    #[test]
+    fn find_matched_fabric_with_index() {
+        let mut table = TestFabricTable::const_default();
+        let mut first_fabric_init_prams = fabric_info_private::InitParams::default();
+        first_fabric_init_prams.m_fabric_index = 1;
+        first_fabric_init_prams.m_fabric_id = 1;
+        first_fabric_init_prams.m_node_id = 1;
+        let mut first_fabric = FabricInfo::default();
+        assert_eq!(true, first_fabric.init(&first_fabric_init_prams).is_ok());
+        table.m_states[0] = first_fabric;
+        assert_eq!(true, table.find_fabric_with_index(1).is_some_and(|f| 1 == f.get_fabric_index()));
     }
 } // end of mod tests
