@@ -6,12 +6,18 @@ use crate::chip::{
             case_auth_tag::CatValues,
             data_model_types::{
                 KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
+                KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX,
             }
         },
         support::{
             default_string::DefaultString,
             default_storage_key_allocator::DefaultStorageKeyAllocator,
         }
+    },
+    credentials::{
+        self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+        certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
+        chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH},
     },
     crypto::{
         self,
@@ -27,8 +33,6 @@ use crate::chip::{CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId};
 
 use crate::chip::chip_lib::core::data_model_types::FabricIndex;
 
-use crate::chip::credentials::{self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
-certificate_validity_policy::CertificateValidityPolicy};
 
 use crate::chip_core_error;
 use crate::chip_error_invalid_argument;
@@ -44,9 +48,12 @@ use crate::verify_or_return_value;
 use crate::ChipErrorResult;
 use crate::ChipError;
 
+use crate::matter_trace_scope;
+
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_error;
+use crate::chip_log_progress;
 use core::str::FromStr;
 
 use bitflags::{bitflags, Flags};
@@ -671,6 +678,16 @@ pub enum AdvertiseIdentity {
     No,
 }
 
+// Increment a fabric index in a way that ensures that it stays in the valid
+// range [kMinValidFabricIndex, kMaxValidFabricIndex].
+fn next_fabric_index(fabric_index: FabricIndex) -> FabricIndex {
+    if fabric_index == KMAX_VALID_FABRIC_INDEX {
+        return KMIN_VALID_FABRIC_INDEX;
+    }
+
+    return (fabric_index + 1) as FabricIndex;
+}
+
 pub struct FabricTable<PSD, OK, OCS>
 where
     PSD: PersistentStorageDelegate,
@@ -829,8 +846,16 @@ where
         self.m_fabric_count
     }
 
-    pub fn fetch_root_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+    pub fn fetch_root_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+        matter_trace_scope!("FetchRootCert", "Fabric");
+        verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+
+        unsafe {
+            let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Krcac, out_cert.all_bytes())?;
+            out_cert.set_length(size)?;
+        }
+
+        chip_ok!()
     }
 
     pub fn fetch_pending_non_fabric_associcated_root_cert(&self, _out_cert: &mut [u8]) -> ChipErrorResult {
@@ -841,8 +866,16 @@ where
         Err(chip_error_not_implemented!())
     }
 
-    pub fn fetch_noc_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
-        Err(chip_error_not_implemented!())
+    pub fn fetch_noc_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+        matter_trace_scope!("FetchNOCCert", "Fabric");
+        verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+
+        unsafe {
+            let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Knoc, out_cert.all_bytes())?;
+            out_cert.set_length(size)?;
+        }
+
+        chip_ok!()
     }
 
     pub fn fetch_vid_verification_statement(&self, _fabric_index: FabricIndex, _out_vid_verification_statement: &mut [u8]) -> ChipErrorResult {
@@ -853,8 +886,11 @@ where
         Err(chip_error_not_implemented!())
     }
 
-    pub fn fetch_root_pubkey(&self, _fabric_index: FabricIndex) -> Result<P256PublicKey, ChipError> {
-        Err(chip_error_not_implemented!())
+    pub fn fetch_root_pubkey(&self, fabric_index: FabricIndex) -> Result<&P256PublicKey, ChipError> {
+        matter_trace_scope!("FetchRootPubkey", "Fabric");
+        let fabric_info = self.find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?;
+
+        return fabric_info.fetch_root_pubkey();
     }
 
     pub fn fetch_Cats(&self, _fabric_index: FabricIndex) -> Result<CatValues, ChipError> {
@@ -996,8 +1032,29 @@ where
         Err(chip_error_not_implemented!())
     }
 
-    fn load_from_storage(&self, _fabric_index: FabricIndex) -> Result<* mut FabricInfo, ChipError> {
-        Err(chip_error_not_implemented!())
+    fn load_from_storage(&self, fabric_index: FabricIndex, fabric: &mut FabricInfo) -> ChipErrorResult {
+        verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(!fabric.is_initialized(), Err(chip_error_incorrect_state!()));
+
+        let mut noc_buf = CertBuffer::default();
+        let mut rcac_buf = CertBuffer::default();
+
+        let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
+            self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
+                fabric.load_from_storage(self.m_storage, fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
+            })
+        });
+
+        if err.is_err() {
+            chip_log_error!(FabricProvisioning, "Failed to load fabric {:#x}: {}", fabric_index, err.err().unwrap());
+            fabric.reset();
+            return err;
+        }
+
+        chip_log_progress!(FabricProvisioning, "fabric index {:#x} was retrieved from storage. Compressed Fabric Id {:#x}, FabricId {:#x}, NodeId {:#x}, VendorId {:#x}",
+            fabric.get_fabric_index(), fabric.get_compressed_fabric_id(), fabric.get_fabric_id(), fabric.get_node_id(), fabric.get_vendor_id() as u16);
+
+        chip_ok!()
     }
 
     fn store_fabric_metadata(&mut self, _fabric_info: &FabricInfo) -> ChipErrorResult {
@@ -1033,7 +1090,22 @@ where
         return self.find_fabric_common_with_id(root_pub_key, fabric_id, KUNDEFINED_NODE_ID);
     }
 
-    fn update_next_available_fabric_index(&mut self) {}
+    fn update_next_available_fabric_index(&mut self) {
+        if self.m_next_available_fabric_index.is_none() {
+            return;
+        }
+
+        let mut candidate = self.m_next_available_fabric_index.clone().unwrap();
+
+        while self.m_next_available_fabric_index.is_some_and(|index| index != candidate) {
+            if self.find_fabric_with_index(candidate).is_none() {
+                self.m_next_available_fabric_index = Some(candidate);
+                return;
+            }
+            candidate = next_fabric_index(candidate);
+        }
+        self.m_next_available_fabric_index = None;
+    }
 
     fn ensure_next_available_fabric_index_updated(&mut self) {}
 

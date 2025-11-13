@@ -6,6 +6,7 @@ pub mod platform;
 pub mod protocols;
 pub mod system;
 pub mod transport;
+pub mod tracing;
 
 pub use chip_lib::core::chip_encoding as encoding;
 pub use chip_lib::core::chip_vendor_id::VendorId;
