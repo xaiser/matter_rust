@@ -51,6 +51,8 @@ mod fabric_info {
 
     use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
     use core::{ptr, str};
+    #[cfg(test)]
+    use mockall_derive::*;
 
     const K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES: u8 = 32;
 
