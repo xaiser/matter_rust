@@ -543,6 +543,7 @@ mod tests {
         test_persistent_storage::TestPersistentStorage,
     };
     use crate::chip::crypto::{self, P256Keypair, P256PublicKey};
+    use crate::chip::chip_lib::core::data_model_types::KMIN_VALID_FABRIC_INDEX;
 
     type Store = PersistentStorageOperationalKeystore<TestPersistentStorage>;
 
@@ -668,9 +669,9 @@ mod tests {
         let mut keypair = crypto::P256Keypair::default();
         let _ = keypair.initialize(crypto::ECPKeyTarget::Ecdh);
 
-        assert_eq!(true, store_operational_key(0, &mut pa, &keypair).is_ok());
+        assert_eq!(true, store_operational_key(KMIN_VALID_FABRIC_INDEX, &mut pa, &keypair).is_ok());
 
-        let key = DefaultStorageKeyAllocator::fabric_op_key(0);
+        let key = DefaultStorageKeyAllocator::fabric_op_key(KMIN_VALID_FABRIC_INDEX);
         let key_name = key.key_name_str();
 
         assert_eq!(true, pa.has_key(key_name));
@@ -724,7 +725,7 @@ mod tests {
         let mut keypair = crypto::P256Keypair::default();
         let _ = keypair.initialize(crypto::ECPKeyTarget::Ecdh);
 
-        assert_eq!(true, store_operational_key(0, &mut pa, &keypair).is_ok());
+        assert_eq!(true, store_operational_key(KMIN_VALID_FABRIC_INDEX, &mut pa, &keypair).is_ok());
 
         let mut expected_serialized_op_key = P256SerializedKeypair::default();
         let _ = keypair.serialize(&mut expected_serialized_op_key);
@@ -732,7 +733,7 @@ mod tests {
         let mut output_serialized_op_key = P256SerializedKeypair::default();
         assert_eq!(
             true,
-            export_stored_op_key(0, &mut pa, &mut output_serialized_op_key).is_ok()
+            export_stored_op_key(KMIN_VALID_FABRIC_INDEX, &mut pa, &mut output_serialized_op_key).is_ok()
         );
         assert_eq!(
             expected_serialized_op_key.const_bytes(),

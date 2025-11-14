@@ -695,6 +695,7 @@ mod tests {
     use super::*;
     use core::ptr;
     use crate::chip::chip_lib::support::test_persistent_storage::TestPersistentStorage;
+    use crate::chip::chip_lib::core::data_model_types::KMIN_VALID_FABRIC_INDEX;
 
     type Store = PersistentStorageOpCertStore<TestPersistentStorage>;
 
@@ -715,28 +716,28 @@ mod tests {
     fn add_root_cert() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
-        assert_eq!(false, store.has_any_certificate_for_fabric(0));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
+        assert_eq!(false, store.has_any_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX));
 
         let mut cert = CertBuffer::default();
         let _ = cert.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &cert.const_bytes()[..cert.length()]).is_ok());
-        assert_eq!(true, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
-        assert_eq!(true, store.has_any_certificate_for_fabric(0));
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &cert.const_bytes()[..cert.length()]).is_ok());
+        assert_eq!(true, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
+        assert_eq!(true, store.has_any_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX));
     }
 
     #[test]
     fn cannot_add_root_cert_twice() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut cert = CertBuffer::default();
         let _ = cert.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &cert.const_bytes()[..cert.length()]).is_ok());
-        assert_eq!(false, store.add_new_trusted_root_cert_for_fabric(0, &cert.const_bytes()[..cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &cert.const_bytes()[..cert.length()]).is_ok());
+        assert_eq!(false, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &cert.const_bytes()[..cert.length()]).is_ok());
     }
 
     #[test]
@@ -754,13 +755,13 @@ mod tests {
     fn add_noc_cert() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut root_cert = CertBuffer::default();
         let _ = root_cert.init(&[1]);
 
         //  must insert root first
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
 
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[1]);
@@ -768,14 +769,14 @@ mod tests {
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[1]);
 
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
     }
 
     #[test]
     fn add_noc_cert_with_root() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[1]);
@@ -783,20 +784,20 @@ mod tests {
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[1]);
 
-        assert_eq!(false, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
+        assert_eq!(false, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
     }
 
     #[test]
     fn cannot_add_noc_cert_twice() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut root_cert = CertBuffer::default();
         let _ = root_cert.init(&[1]);
 
         //  must insert root first
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
 
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[1]);
@@ -804,41 +805,41 @@ mod tests {
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[1]);
 
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
-        assert_eq!(false, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
+        assert_eq!(false, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes()[..noc_cert.length()], &icac_cert.const_bytes()[..icac_cert.length()]).is_ok());
     }
 
     #[test]
     fn add_noc_cert_without_icac() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut root_cert = CertBuffer::default();
         let _ = root_cert.init(&[1]);
 
         //  must insert root first
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
 
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[1]);
 
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes()[..noc_cert.length()], &[]).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes()[..noc_cert.length()], &[]).is_ok());
     }
 
     #[test]
     fn add_empty_noc_icac() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         let mut root_cert = CertBuffer::default();
         let _ = root_cert.init(&[1]);
 
         //  must insert root first
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &root_cert.const_bytes()[..root_cert.length()]).is_ok());
 
-        assert_eq!(false, store.add_new_op_certs_for_fabric(0, &[], &[]).is_ok());
+        assert_eq!(false, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &[], &[]).is_ok());
     }
 
     #[test]
@@ -865,206 +866,206 @@ mod tests {
     fn commit_cert_for_fabric() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_for_fabric_but_noc_save_failed() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         // posion noc key so that the pa will reject the noc key name
-        let noc_key = get_storage_key_for_cert(0, CertChainElement::Knoc).unwrap_or(StorageKeyName::default());
+        let noc_key = get_storage_key_for_cert(KMIN_VALID_FABRIC_INDEX, CertChainElement::Knoc).unwrap_or(StorageKeyName::default());
         pa.add_posion_key(noc_key.key_name_str());
 
         // commit
-        assert_eq!(false, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(false, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_for_fabric_but_icac_save_failed() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         // posion noc key so that the pa will reject the noc key name
-        let icac_key = get_storage_key_for_cert(0, CertChainElement::Kicac).unwrap_or(StorageKeyName::default());
+        let icac_key = get_storage_key_for_cert(KMIN_VALID_FABRIC_INDEX, CertChainElement::Kicac).unwrap_or(StorageKeyName::default());
         pa.add_posion_key(icac_key.key_name_str());
 
         // commit
-        assert_eq!(false, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(false, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_for_fabric_but_rcac_save_failed() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         // posion rcac key so that the pa will reject the noc key name
-        let rcac_key = get_storage_key_for_cert(0, CertChainElement::Krcac).unwrap_or(StorageKeyName::default());
+        let rcac_key = get_storage_key_for_cert(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac).unwrap_or(StorageKeyName::default());
         pa.add_posion_key(rcac_key.key_name_str());
 
         // commit
-        assert_eq!(false, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(false, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_and_vcs_vvsc_for_fabric() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_and_vcs_vvsc_for_fabric_but_vvsc_failed() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
-        let storage_key = DefaultStorageKeyAllocator::fabric_vid_verification_statement(0);
+        let storage_key = DefaultStorageKeyAllocator::fabric_vid_verification_statement(KMIN_VALID_FABRIC_INDEX);
         pa.add_posion_key(storage_key.key_name_str());
 
         // commit
-        assert_eq!(false, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(false, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
     fn commit_cert_and_vcs_vvsc_for_fabric_but_vvs_failed() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
-        let storage_key = DefaultStorageKeyAllocator::fabric_vvsc(0);
+        let storage_key = DefaultStorageKeyAllocator::fabric_vvsc(KMIN_VALID_FABRIC_INDEX);
         pa.add_posion_key(storage_key.key_name_str());
 
         // commit
-        assert_eq!(false, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(false, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
     }
 
     #[test]
@@ -1077,29 +1078,29 @@ mod tests {
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
         // remove
-        assert_eq!(true, store.remove_certs_for_fabric(0).inspect_err(|e| println!("{:?}", e)).is_ok());
-        assert_eq!(false, store.has_any_certificate_for_fabric(0));
+        assert_eq!(true, store.remove_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("{:?}", e)).is_ok());
+        assert_eq!(false, store.has_any_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX));
     }
 
     #[test]
@@ -1115,138 +1116,138 @@ mod tests {
     fn remove_pending_certs() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // remove
-        assert_eq!(true, store.remove_certs_for_fabric(0).inspect_err(|e| println!("{:?}", e)).is_ok());
-        assert_eq!(false, store.has_any_certificate_for_fabric(0));
+        assert_eq!(true, store.remove_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("{:?}", e)).is_ok());
+        assert_eq!(false, store.has_any_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX));
     }
 
     #[test]
     fn commit_and_get() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(true, store.get_certificate(0, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
+        assert_eq!(true, store.get_certificate(KMIN_VALID_FABRIC_INDEX, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
     }
 
     #[test]
     fn get_pending_noc() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(true, store.get_certificate(0, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
+        assert_eq!(true, store.get_certificate(KMIN_VALID_FABRIC_INDEX, CertChainElement::Knoc, &mut out).is_ok_and(|l| l == 1));
     }
 
     #[test]
     fn get_empty_fabric_index() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(false, store.get_certificate(1, CertChainElement::Knoc, &mut out).is_ok());
+        assert_eq!(false, store.get_certificate(KMIN_VALID_FABRIC_INDEX + 1, CertChainElement::Knoc, &mut out).is_ok());
     }
 
 
@@ -1254,104 +1255,104 @@ mod tests {
     fn commit_and_get_vvsc() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(true, store.get_vid_verification_element(0, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
+        assert_eq!(true, store.get_vid_verification_element(KMIN_VALID_FABRIC_INDEX, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
     }
 
     #[test]
     fn commit_and_get_vvsc_empty_fabric() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // commit
-        assert_eq!(true, store.commit_certs_for_fabric(0).is_ok());
+        assert_eq!(true, store.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(true, store.get_vid_verification_element(1, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 0));
+        assert_eq!(true, store.get_vid_verification_element(KMIN_VALID_FABRIC_INDEX + 1, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 0));
     }
 
     #[test]
     fn commit_and_get_pending_vvsc() {
         let mut pa = TestPersistentStorage::default();
         let mut store = setup(ptr::addr_of_mut!(pa));
-        assert_eq!(false, store.has_certificate_for_fabric(0, CertChainElement::Krcac));
+        assert_eq!(false, store.has_certificate_for_fabric(KMIN_VALID_FABRIC_INDEX, CertChainElement::Krcac));
 
         // add root
         let mut rcac = CertBuffer::default();
         let _ = rcac.init(&[1]);
 
-        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(0, &rcac.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, &rcac.const_bytes()).is_ok());
 
         // add icac and no
         let mut icac_cert = CertBuffer::default();
         let _ = icac_cert.init(&[2]);
         let mut noc_cert = CertBuffer::default();
         let _ = noc_cert.init(&[3]);
-        assert_eq!(true, store.add_new_op_certs_for_fabric(0, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, &noc_cert.const_bytes(), &icac_cert.const_bytes()).is_ok());
 
         let mut vvsc_cert = CertBuffer::default();
         let _ = vvsc_cert.init(&[4]);
-        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(0, vvsc_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_signer_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, vvsc_cert.const_bytes()).is_ok());
 
         let mut vvs_cert = CertBuffer::default();
         let _ = vvs_cert.init(&[0; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE]);
-        assert_eq!(true, store.update_vid_verification_statement_for_fabric(0, vvs_cert.const_bytes()).is_ok());
+        assert_eq!(true, store.update_vid_verification_statement_for_fabric(KMIN_VALID_FABRIC_INDEX, vvs_cert.const_bytes()).is_ok());
         assert_eq!(true, store.has_pending_vid_verification_elements());
 
         // get
         let mut out: [u8; 1] = [0; 1];
-        assert_eq!(true, store.get_vid_verification_element(0, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
+        assert_eq!(true, store.get_vid_verification_element(KMIN_VALID_FABRIC_INDEX, VidVerificationElement::Kvvsc, &mut out).is_ok_and(|l| l == 1));
     }
 } // end of tests

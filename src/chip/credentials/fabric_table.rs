@@ -1095,7 +1095,7 @@ where
             return;
         }
 
-        let mut candidate = self.m_next_available_fabric_index.clone().unwrap();
+        let mut candidate = next_fabric_index(self.m_next_available_fabric_index.clone().unwrap());
 
         while self.m_next_available_fabric_index.is_some_and(|index| index != candidate) {
             if self.find_fabric_with_index(candidate).is_none() {
@@ -1190,10 +1190,14 @@ where
 mod tests {
     use super::*;
     use crate::chip::{
-        credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+        credentials::{
+            operational_certificate_store::{OperationalCertificateStore, MockOperationalCertificateStore},
+            persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+        },
         crypto::persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
         chip_lib::support::test_persistent_storage::TestPersistentStorage,
     };
+    use mockall::*;
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -1223,5 +1227,45 @@ mod tests {
         assert_eq!(true, first_fabric.init(&first_fabric_init_prams).is_ok());
         table.m_states[0] = first_fabric;
         assert_eq!(true, table.find_fabric_with_index(1).is_some_and(|f| 1 == f.get_fabric_index()));
+    }
+
+    #[test]
+    fn update_next_available_fabric_index() {
+        let mut table = TestFabricTable::const_default();
+        table.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
+        table.update_next_available_fabric_index();
+        assert_eq!(true, table.m_next_available_fabric_index.is_some_and(|index| index == (KMIN_VALID_FABRIC_INDEX + 1)));
+    }
+
+    #[test]
+    fn update_next_available_fabric_index_next_one_more() {
+        let mut table = TestFabricTable::const_default();
+        table.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
+
+        let mut first_fabric_init_prams = fabric_info_private::InitParams::default();
+        first_fabric_init_prams.m_fabric_index = 2;
+        first_fabric_init_prams.m_fabric_id = 1;
+        first_fabric_init_prams.m_node_id = 1;
+        let mut first_fabric = FabricInfo::default();
+        assert_eq!(true, first_fabric.init(&first_fabric_init_prams).is_ok());
+        table.m_states[0] = first_fabric;
+        table.update_next_available_fabric_index();
+        assert_eq!(true, table.m_next_available_fabric_index.is_some_and(|index| index == (KMIN_VALID_FABRIC_INDEX + 2)));
+    }
+
+    #[test]
+    fn load_from_stroage_successfully() {
+        let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::const_default();
+        let mut mock_op_cert_store = MockOperationalCertificateStore::new();
+        mock_op_cert_store.expect_get_certificate().
+            times(1).
+            withf(|index, element, out_cert| {
+                (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
+            }).
+            return_const(Ok(1));
+        table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+        let mut buf = CertBuffer::default();
+
+        assert_eq!(true, table.fetch_noc_cert(KMIN_VALID_FABRIC_INDEX, &mut buf).is_ok());
     }
 } // end of mod tests

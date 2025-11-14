@@ -6,6 +6,9 @@ use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
 
+#[cfg(test)]
+use mockall::*;
+
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum CertChainElement {
@@ -21,6 +24,7 @@ pub enum VidVerificationElement {
     Kvvsc = 1,
 }
 
+#[cfg_attr(test, mockall::automock)]
 pub trait OperationalCertificateStore {
     fn has_pending_root_cert(&self) -> bool;
     fn has_pending_noc_chain(&self) -> bool;
