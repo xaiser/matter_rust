@@ -52,7 +52,9 @@ mod fabric_info {
     use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
     use core::{ptr, str};
     #[cfg(test)]
-    use mockall_derive::*;
+    use mockall::*;
+    //#[cfg(test)]
+    //use mockall_derive::*;
 
     const K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES: u8 = 32;
 
@@ -64,9 +66,11 @@ mod fabric_info {
         tlv_tags::context_tag(1)
     }
 
+    /*
     const fn metadata_tlv_max_size() -> usize {
         tlv_estimate_struct_overhead!(core::mem::size_of::<u16>(), K_FABRIC_LABEL_MAX_LENGTH_IN_BYTES as usize)
     }
+    */
 
     pub(super) struct InitParams {
         pub m_node_id: NodeId,
@@ -131,36 +135,104 @@ mod fabric_info {
         m_operation_key: *mut P256Keypair,
     }
 
+    #[cfg(test)]
+    mock! {
+        pub FabricInfo {
+            fn set_fabric_label(&mut self, label: &str) -> ChipErrorResult;
+            fn get_fabric_label<'a>(&'a self) -> Option<&'a str>;
+            pub fn get_node_id(&self) -> NodeId;
+            pub fn get_scoped_node_id(&self) -> ScopedNodeId;
+            pub fn get_scoped_node_id_for_node(&self, node: NodeId) -> ScopedNodeId;
+            pub fn get_fabric_id(&self) -> FabricId;
+            pub fn get_fabric_index(&self) -> FabricIndex;
+            pub fn get_compressed_fabric_id(&self) -> CompressedFabricId;
+            pub fn get_compressed_fabric_id_bytes(
+                &self,
+                compressed_fabric_id: &mut [u8],
+            ) -> ChipErrorResult;
+            pub fn fetch_root_pubkey<'a>(&'a self) -> Result<&'a P256PublicKey, ChipError>;
+            pub fn get_vendor_id(&self) -> VendorId;
+            pub fn is_initialized(&self) -> bool;
+            pub fn has_operational_key(&self) -> bool;
+            pub fn should_advertise_identity(&self) -> bool;
+            pub(super) fn init(&mut self, init_params: &super::fabric_info::InitParams) -> ChipErrorResult;
+            pub(super) fn set_operational_keypair(
+                &mut self,
+                keypair: *const P256Keypair,
+            ) -> ChipErrorResult;
+            pub(super) fn set_externally_owned_operational_keypair(
+                &mut self,
+                keypair: *mut P256Keypair,
+            ) -> ChipErrorResult;
+            pub(super) fn sign_with_op_keypair(
+                &self,
+                message: &mut [u8],
+                out_signature: &mut P256EcdsaSignature,
+            ) -> ChipErrorResult;
+            pub(super) fn reset(&mut self);
+            pub(super) fn set_should_advertise_identity(&mut self, advertise_identity: bool);
+            pub(super) fn commit_to_storge<Storage: PersistentStorageDelegate + 'static>(
+                &self,
+                storage: &'static mut Storage,
+            ) -> ChipErrorResult;
+            pub(super) fn load_from_storage<Storage: PersistentStorageDelegate + 'static>(
+                &mut self,
+                storage: &'static mut Storage,
+                new_fabric_index: FabricIndex,
+                rcac: &[u8],
+                noc: &[u8],
+            ) -> ChipErrorResult;
+        } // end of FabricInfo declear
+
+        impl Drop for FabricInfo {
+            fn drop(&mut self);
+        }
+    } // end of FabricInfo mock
+
     impl Default for FabricInfo {
         fn default() -> Self {
-            FabricInfo::const_default()
+            fabric_info_const_default()
         }
     }
 
-    impl FabricInfo {
-        pub const fn const_default() -> Self {
-            Self {
-                m_node_id: KUNDEFINED_NODE_ID,
-                m_fabric_id: KUNDEFINED_FABRIC_ID,
-                m_compressed_fabric_id: KUNDEFINED_COMPRESSED_FABRIC_ID,
-                m_root_publick_key: P256PublicKey::const_default(),
-                m_fabric_label: FabricLabelString::const_default(),
-                m_fabric_index: KUNDEFINED_FABRIC_INDEX,
-                m_vendor_id: VendorId::NotSpecified,
-                m_has_externally_owned_operation_key: false,
-                m_should_advertise_identity: true,
-                m_internal_op_key_storage: None,
-                m_operation_key: ptr::null_mut(),
-            }
+    pub const fn fabric_info_const_default() -> FabricInfo {
+        FabricInfo {
+            m_node_id: KUNDEFINED_NODE_ID,
+            m_fabric_id: KUNDEFINED_FABRIC_ID,
+            m_compressed_fabric_id: KUNDEFINED_COMPRESSED_FABRIC_ID,
+            m_root_publick_key: P256PublicKey::const_default(),
+            m_fabric_label: FabricLabelString::const_default(),
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            m_vendor_id: VendorId::NotSpecified,
+            m_has_externally_owned_operation_key: false,
+            m_should_advertise_identity: true,
+            m_internal_op_key_storage: None,
+            m_operation_key: ptr::null_mut(),
         }
+    }
 
+    pub(super) const fn metadata_tlv_max_size() -> usize {
+        tlv_estimate_struct_overhead!(
+            core::mem::size_of::<u16>(),
+            KFABRIC_LABEL_MAX_LENGTH_IN_BYTES
+        )
+    }
+
+    pub(super) const fn op_key_tlv_max_size() -> usize {
+        tlv_estimate_struct_overhead!(
+            core::mem::size_of::<u16>(),
+            P256SerializedKeypair::capacity()
+        )
+    }
+
+    impl FabricInfo {
         pub fn set_fabric_label(&mut self, label: &str) -> ChipErrorResult {
             self.m_fabric_label = FabricLabelString::from(label);
 
             chip_ok!()
         }
 
-        pub fn get_fabric_label(&self) -> Option<&str> {
+        pub fn get_fabric_label<'a>(&'a self) -> Option<&'a str> {
             self.m_fabric_label.str()
         }
 
@@ -201,7 +273,7 @@ mod fabric_info {
         }
 
         //pub fn fetch_root_pubkey(&self, out_public_key: &mut P256PublicKey) -> ChipErrorResult {
-        pub fn fetch_root_pubkey(&self) -> Result<&P256PublicKey, ChipError> {
+        pub fn fetch_root_pubkey<'a>(&'a self) -> Result<&'a P256PublicKey, ChipError> {
             verify_or_return_error!(self.is_initialized(), Err(chip_error_key_not_found!()));
 
             return Ok(&self.m_root_publick_key);
@@ -339,6 +411,7 @@ mod fabric_info {
             self.m_should_advertise_identity = advertise_identity;
         }
 
+        /*
         pub(super) const fn metadata_tlv_max_size() -> usize {
             tlv_estimate_struct_overhead!(
                 core::mem::size_of::<u16>(),
@@ -352,15 +425,17 @@ mod fabric_info {
                 P256SerializedKeypair::capacity()
             )
         }
+        */
 
-        pub(super) fn commit_to_storge<Storage: PersistentStorageDelegate>(
-            &self,
-            storage: *mut Storage,
-        ) -> ChipErrorResult {
-            let mut buf: [u8; FabricInfo::metadata_tlv_max_size()] = [0; {FabricInfo::metadata_tlv_max_size()}];
+        pub(super) fn commit_to_storge<'a, Storage: PersistentStorageDelegate>(
+            &'a self,
+            storage: &'a mut Storage,
+        ) -> ChipErrorResult
+        {
+            let mut buf: [u8; metadata_tlv_max_size()] = [0; {metadata_tlv_max_size()}];
             let mut writer = TlvContiguousBufferWriter::const_default();
 
-            writer.init(buf.as_mut_ptr(), FabricInfo::metadata_tlv_max_size() as u32);
+            writer.init(buf.as_mut_ptr(), metadata_tlv_max_size() as u32);
 
             let mut outer_type = TlvType::KtlvTypeNotSpecified;
 
@@ -385,19 +460,22 @@ mod fabric_info {
                 chip_error_buffer_too_small!()
             })?;
 
+            /*
             unsafe {
                 return storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
             }
+            */
+            return storage.sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
         }
 
-        pub(super) fn load_from_storage<Storage: PersistentStorageDelegate>(
-            &mut self,
-            storage: *mut Storage,
+        pub(super) fn load_from_storage<'a, Storage: PersistentStorageDelegate>(
+            &'a mut self,
+            storage: &'a mut Storage,
             new_fabric_index: FabricIndex,
-            rcac: &[u8],
-            noc: &[u8],
+            rcac: &'a [u8],
+            noc: &'a [u8],
         ) -> ChipErrorResult {
-            verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
+            //verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
             self.m_fabric_index = new_fabric_index;
             {
                 (self.m_node_id, self.m_fabric_id) = extract_node_id_fabric_id_from_op_cert_byte(noc)?;
@@ -408,9 +486,12 @@ mod fabric_info {
             {
                 const size: usize = metadata_tlv_max_size();
                 let mut buffer: [u8; size] = [0; size];
+                /*
                 unsafe {
                     storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 }
+                */
+                storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 let mut reader = TlvContiguousBufferReader::const_default();
                 reader.init(buffer.as_ptr(), size);
                 reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
@@ -515,34 +596,34 @@ mod fabric_info {
 
         #[test]
         fn default_init() {
-            let info = FabricInfo::const_default();
+            let info = fabric_info_const_default();
             assert_eq!(false, info.has_operational_key());
         }
 
         #[test]
         fn commit() {
             let mut pa = TestPersistentStorage::default();
-            let info = FabricInfo::const_default();
-            assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
+            let info = fabric_info_const_default();
+            assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
             assert_eq!(true, pa.has_key(DefaultStorageKeyAllocator::fabric_metadata(0).key_name_str()));
         }
 
         #[test]
         fn load() {
             let mut pa = TestPersistentStorage::default();
-            let mut info = FabricInfo::const_default();
+            let mut info = fabric_info_const_default();
             info.m_vendor_id = VendorId::Common;
             let label = "abc";
             info.m_fabric_label = FabricLabelString::from(label);
             // commit first
-            assert_eq!(true, info.commit_to_storge(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
 
             let pub_key = stub_public_key();
             let rcac = make_chip_cert(1,2, &pub_key[..]).unwrap();
             let noc = make_chip_cert(3,4, &pub_key[..]).unwrap();
 
-            let mut info_out = FabricInfo::const_default();
-            assert_eq!(true, info_out.load_from_storage(ptr::addr_of_mut!(pa), 0, &rcac, &noc).inspect_err(|e| println!("{:?}", e)).is_ok());
+            let mut info_out = fabric_info_const_default();
+            assert_eq!(true, info_out.load_from_storage(&mut pa, 0, &rcac, &noc).inspect_err(|e| println!("{:?}", e)).is_ok());
             assert_eq!(3, info_out.m_node_id);
             assert_eq!(4, info_out.m_fabric_id);
             assert_eq!(VendorId::Common, info_out.m_vendor_id);
@@ -551,7 +632,7 @@ mod fabric_info {
 
         #[test]
         fn set_op_keypair() {
-            let mut info = FabricInfo::const_default();
+            let mut info = fabric_info_const_default();
             let keypair = P256Keypair::default();
 
             assert_eq!(true, info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok());
@@ -622,8 +703,9 @@ mod fabric_table {
     use crate::chip_log_progress;
 
     use bitflags::{bitflags, Flags};
-    use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo}};
+    use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, fabric_info_const_default}};
     use core::{ptr, str::{self, FromStr}};
+
     bitflags! {
         #[derive(Clone, Copy)]
         struct StateFlags: u16 {
@@ -746,8 +828,8 @@ mod fabric_table {
     {
         pub const fn const_default() -> Self {
             Self {
-                m_states: [const { FabricInfo::const_default() }; CHIP_CONFIG_MAX_FABRICS],
-                m_pending_fabric: FabricInfo::const_default(),
+                m_states: [const {fabric_info_const_default()}; CHIP_CONFIG_MAX_FABRICS],
+                m_pending_fabric: fabric_info_const_default(),
                 m_storage: ptr::null_mut(),
                 m_operational_keystore: ptr::null_mut(),
                 m_op_cert_store: ptr::null_mut(),
@@ -1038,7 +1120,9 @@ mod fabric_table {
 
             let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
                 self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
-                    fabric.load_from_storage(self.m_storage, fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
+                    unsafe {
+                        fabric.load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
+                    }
                 })
             });
 
@@ -1185,15 +1269,52 @@ mod fabric_table {
 
     #[cfg(test)]
     mod tests {
-        use super::*;
         use crate::chip::{
-            credentials::{
-                operational_certificate_store::{OperationalCertificateStore, MockOperationalCertificateStore},
-                persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+            CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
+            system::system_clock::Seconds32,
+            chip_lib::{
+                core::{
+                    tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+                    case_auth_tag::CatValues,
+                    tlv_types::TlvType,
+                    tlv_tags::{self, anonymous_tag},
+                    data_model_types::{
+                        KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
+                        KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX, FabricIndex,
+                    },
+                    chip_persistent_storage_delegate::PersistentStorageDelegate,
+                    node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
+                    chip_encoding,
+                    chip_config::CHIP_CONFIG_MAX_FABRICS,
+                },
+                support::{
+                    default_string::DefaultString,
+                    default_storage_key_allocator::DefaultStorageKeyAllocator,
+                    test_persistent_storage::TestPersistentStorage,
+                }
             },
-            crypto::persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
-            chip_lib::support::test_persistent_storage::TestPersistentStorage,
+            credentials::{
+                self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+                certificate_validity_policy::CertificateValidityPolicy,
+                operational_certificate_store::{CertChainElement, OperationalCertificateStore, MockOperationalCertificateStore},
+                chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
+                persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+                fabric_table::{
+                    fabric_table::FabricTable,
+                    fabric_info::{self, FabricInfo},
+                },
+            },
+            crypto::{
+                self,
+                generate_compressed_fabric_id,
+                crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair},
+                persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+            },
         };
+        use crate::ChipErrorResult;
+        use crate::ChipError;
+        use core::ptr;
         use mockall::*;
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
