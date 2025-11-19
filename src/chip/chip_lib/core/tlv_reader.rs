@@ -35,6 +35,10 @@ use core::str::FromStr;
 
 use core::{fmt, ptr};
 
+#[cfg(test)]
+use mockall::*;
+
+#[cfg_attr(test, mockall::automock(type BackingStoreType=u8;))]
 pub trait TlvReader {
     type BackingStoreType;
 
@@ -77,7 +81,7 @@ pub trait TlvReader {
 
     fn get_u64(&self) -> Result<u64, ChipError>;
 
-    fn get_bytes(&mut self) -> Result<&[u8], ChipError>;
+    fn get_bytes(&mut self) -> Result<&'a [u8], ChipError>;
 
     fn get_bytes_raw(&mut self, buf: *mut u8, buf_len: usize) -> ChipErrorResult;
 

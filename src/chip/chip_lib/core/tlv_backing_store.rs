@@ -1,4 +1,5 @@
-use super::tlv_reader::TlvReader;
+//use super::tlv_reader::TlvReader;
+use crate::chip::chip_lib::core::tlv_reader::TlvReader;
 use super::tlv_writer::TlvWriter;
 use crate::chip_ok;
 use crate::ChipErrorResult;
