@@ -49,8 +49,13 @@ mod fabric_info {
     use crate::ChipErrorResult;
     use crate::ChipError;
 
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_error;
+    use crate::chip_log_progress;
+
     use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
-    use core::{ptr, str};
+    use core::{ptr, str::{self, FromStr}};
     #[cfg(test)]
     use mockall::*;
     //#[cfg(test)]
@@ -432,11 +437,6 @@ mod fabric_info {
             )?;
 
             writer.put_u16(vendor_id_tag(), self.m_vendor_id as u16)?;
-            /*
-            let label = str::from_utf8(&self.m_fabric_label[..self.m_fabric_label_len]).map_err(|_| {
-                chip_error_internal!()
-            })?;
-            */
             let label = self.m_fabric_label.str().ok_or(chip_error_internal!())?;
             writer.put_string(fabric_label_tag(), label)?;
 
@@ -445,12 +445,6 @@ mod fabric_info {
             let meta_data_len = u16::try_from(writer.get_length_written()).map_err(|_| {
                 chip_error_buffer_too_small!()
             })?;
-
-            /*
-            unsafe {
-                return storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
-            }
-            */
             return storage.sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
         }
 
@@ -477,9 +471,9 @@ mod fabric_info {
                     storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 }
                 */
-                storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
+                let data_size = storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 let mut reader = TlvContiguousBufferReader::const_default();
-                reader.init(buffer.as_ptr(), size);
+                reader.init(buffer.as_ptr(), data_size);
                 reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
                 let container_type = reader.enter_container()?;
 
@@ -490,14 +484,10 @@ mod fabric_info {
                 let label = reader.get_string()?.ok_or(chip_error_internal!())?;
 
                 verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
-                /*
-                self.m_fabric_label[..label.len()].copy_from_slice(label.as_bytes());
-                self.m_fabric_label_len = label.len();
-                */
                 self.m_fabric_label = FabricLabelString::from(label);
 
-                reader.verify_end_of_container()?;
                 reader.exit_container(container_type)?;
+                reader.verify_end_of_container()?;
             }
             chip_ok!()
         }
@@ -880,10 +870,9 @@ mod fabric_table {
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-
-        fn load_from_storage(&self, fabric_index: FabricIndex, fabric: &mut FabricInfo) -> ChipErrorResult {
+        fn load_from_storage(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
             verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!fabric.is_initialized(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(!self.m_states[index].is_initialized(), Err(chip_error_incorrect_state!()));
 
             let mut noc_buf = CertBuffer::default();
             let mut rcac_buf = CertBuffer::default();
@@ -891,19 +880,65 @@ mod fabric_table {
             let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
                 self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
                     unsafe {
-                        fabric.load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
+                        self.m_states[index].load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
                     }
                 })
             });
 
             if err.is_err() {
                 chip_log_error!(FabricProvisioning, "Failed to load fabric {:#x}: {}", fabric_index, err.err().unwrap());
-                fabric.reset();
+                self.m_states[index].reset();
                 return err;
             }
 
             chip_log_progress!(FabricProvisioning, "fabric index {:#x} was retrieved from storage. Compressed Fabric Id {:#x}, FabricId {:#x}, NodeId {:#x}, VendorId {:#x}",
-                fabric.get_fabric_index(), fabric.get_compressed_fabric_id(), fabric.get_fabric_id(), fabric.get_node_id(), fabric.get_vendor_id() as u16);
+                self.m_states[index].get_fabric_index(), self.m_states[index].get_compressed_fabric_id(), self.m_states[index].get_fabric_id(), self.m_states[index].get_node_id(), self.m_states[index].get_vendor_id() as u16);
+
+            chip_ok!()
+        }
+
+        fn read_fabric_info<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
+            let container_type = reader.enter_container()?;
+            reader.next_tag(next_available_fabric_index_tag())?;
+
+            if reader.get_type() == TlvType::KtlvTypeNull {
+                self.m_next_available_fabric_index = None;
+            } else {
+                self.m_next_available_fabric_index = Some(reader.get_u8()?);
+            }
+
+            reader.next_type_tag(TlvType::KtlvTypeArray, fabric_indices_tag())?;
+            let array_type = reader.enter_container()?;
+            let mut err: ChipError = chip_error_internal!();
+            while reader.next().inspect_err(|e| err = *e).is_ok() {
+                if (self.m_fabric_count as usize) >= self.m_states.len() {
+                    return Err(chip_error_no_memory!());
+                }
+
+                let current_fabric_index = reader.get_u8()?;
+
+                //if self.load_from_storage(current_fabric_index, &mut self.m_states[self.m_fabric_count as usize]).is_ok() {
+                if self.load_from_storage(current_fabric_index, self.m_fabric_count as usize).is_ok() {
+                    self.m_fabric_count += 1;
+                } else {
+                    // This could happen if we failed to store our fabric index info
+                    // after we deleted the fabric from storage.  Just ignore this
+                    // fabric index and keep going.
+                }
+            }
+
+            if err != chip_error_end_of_tlv!() {
+                return Err(err);
+            }
+
+            reader.exit_container(array_type)?;
+
+            reader.exit_container(container_type)?;
+
+            reader.verify_end_of_container()?;
+
+            self.ensure_next_available_fabric_index_updated();
 
             chip_ok!()
         }
@@ -919,9 +954,9 @@ mod fabric_table {
         OCS: credentials::OperationalCertificateStore,
     {
 
-        fn load_from_storage(&self, fabric_index: FabricIndex, fabric: &mut FabricInfo) -> ChipErrorResult {
+        fn load_from_storage(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
             verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!fabric.is_initialized(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(!self.m_states[index].is_initialized(), Err(chip_error_incorrect_state!()));
 
             let mut noc_buf = CertBuffer::default();
             let mut rcac_buf = CertBuffer::default();
@@ -929,10 +964,12 @@ mod fabric_table {
             let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
                 self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
                     unsafe {
-                        fabric.load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
+                        self.m_states[index].load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
                     }
                 })
             });
+
+            let fabric = &mut self.m_states[index];
 
             if err.is_err() {
                 chip_log_error!(FabricProvisioning, "Failed to load fabric {:#x}: {}", fabric_index, err.err().unwrap());
@@ -942,6 +979,52 @@ mod fabric_table {
 
             chip_log_progress!(FabricProvisioning, "fabric index {:#x} was retrieved from storage. Compressed Fabric Id {:#x}, FabricId {:#x}, NodeId {:#x}, VendorId {:#x}",
                 fabric.get_fabric_index(), fabric.get_compressed_fabric_id(), fabric.get_fabric_id(), fabric.get_node_id(), fabric.get_vendor_id() as u16);
+
+            chip_ok!()
+        }
+
+        fn read_fabric_info<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
+            let container_type = reader.enter_container()?;
+            reader.next_tag(next_available_fabric_index_tag())?;
+
+            if reader.get_type() == TlvType::KtlvTypeNull {
+                self.m_next_available_fabric_index = None;
+            } else {
+                self.m_next_available_fabric_index = Some(reader.get_u8()?);
+            }
+
+            reader.next_type_tag(TlvType::KtlvTypeArray, fabric_indices_tag())?;
+            let array_type = reader.enter_container()?;
+            let mut err: ChipError = chip_error_internal!();
+            while reader.next().inspect_err(|e| err = *e).is_ok() {
+                if (self.m_fabric_count as usize) >= self.m_states.len() {
+                    return Err(chip_error_no_memory!());
+                }
+
+                let current_fabric_index = reader.get_u8()?;
+
+                //if self.load_from_storage(current_fabric_index, &mut self.m_states[self.m_fabric_count as usize]).is_ok() {
+                if self.load_from_storage(current_fabric_index, self.m_fabric_count as usize).is_ok() {
+                    self.m_fabric_count += 1;
+                } else {
+                    // This could happen if we failed to store our fabric index info
+                    // after we deleted the fabric from storage.  Just ignore this
+                    // fabric index and keep going.
+                }
+            }
+
+            if err != chip_error_end_of_tlv!() {
+                return Err(err);
+            }
+
+            reader.exit_container(array_type)?;
+
+            reader.exit_container(container_type)?;
+
+            reader.verify_end_of_container()?;
+
+            self.ensure_next_available_fabric_index_updated();
 
             chip_ok!()
         }
@@ -1327,51 +1410,6 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        fn read_fabric_info<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
-            reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
-            let container_type = reader.enter_container()?;
-            reader.next_tag(next_available_fabric_index_tag())?;
-
-            if reader.get_type() == TlvType::KtlvTypeNull {
-                self.m_next_available_fabric_index = None;
-            } else {
-                self.m_next_available_fabric_index = Some(reader.get_u8()?);
-            }
-
-            reader.next_type_tag(TlvType::KtlvTypeArray, fabric_indices_tag())?;
-            let array_type = reader.enter_container()?;
-            let mut err: ChipError = chip_error_internal!();
-            while reader.next().inspect_err(|e| err = *e).is_ok() {
-                if (self.m_fabric_count as usize) >= self.m_states.len() {
-                    return Err(chip_error_no_memory!());
-                }
-
-                let current_fabric_index = reader.get_u8()?;
-
-                if self.load_from_storage(current_fabric_index, &mut self.m_states[self.m_fabric_count as usize]).is_ok() {
-                    self.m_fabric_count += 1;
-                } else {
-                    // This could happen if we failed to store our fabric index info
-                    // after we deleted the fabric from storage.  Just ignore this
-                    // fabric index and keep going.
-                }
-            }
-
-            if err != chip_error_end_of_tlv!() {
-                return Err(err);
-            }
-
-            reader.exit_container(array_type)?;
-
-            reader.exit_container(container_type)?;
-
-            reader.verify_end_of_container()?;
-
-            self.ensure_next_available_fabric_index_updated();
-
-            chip_ok!()
-        }
-
         fn notify_fabric_updated(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
@@ -1609,6 +1647,7 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by laod_from_stgorage at fabric info
+            /*
             let mut fabric = FabricInfo::default();
             fabric.expect_is_initialized().
                 return_const(false);
@@ -1626,6 +1665,23 @@ mod fabric_table {
             fabric.expect_get_vendor_id().return_const(VendorId::Common);
 
             assert_eq!(true, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
+            */
+            table.m_states[0].expect_is_initialized().
+                return_const(false);
+            table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
+                withf(|_, index, noc_len, rcac_len| {
+                    (*index == KMIN_VALID_FABRIC_INDEX) && noc_len.len() == 1 && rcac_len.len() == 1
+                }).
+                return_const(Ok(()));
+
+            // calls used by the log
+            table.m_states[0].expect_get_fabric_index().return_const(1);
+            table.m_states[0].expect_get_compressed_fabric_id().return_const(1u64);
+            table.m_states[0].expect_get_fabric_id().return_const(1u64);
+            table.m_states[0].expect_get_node_id().return_const(1u64);
+            table.m_states[0].expect_get_vendor_id().return_const(VendorId::Common);
+
+            assert_eq!(true, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
@@ -1647,12 +1703,19 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by reset at fabric info
+            /*
             let mut fabric = FabricInfo::default();
             fabric.expect_is_initialized().
                 return_const(false);
             fabric.expect_reset().return_const(());
 
             assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
+            */
+            table.m_states[0].expect_is_initialized().
+                return_const(false);
+            table.m_states[0].expect_reset().return_const(());
+
+            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
@@ -1681,12 +1744,11 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by reset at fabric info
-            let mut fabric = FabricInfo::default();
-            fabric.expect_is_initialized().
+            table.m_states[0].expect_is_initialized().
                 return_const(false);
-            fabric.expect_reset().return_const(());
+            table.m_states[0].expect_reset().return_const(());
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
+            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
@@ -1715,15 +1777,14 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by laod_from_stgorage at fabric info
-            let mut fabric = FabricInfo::default();
-            fabric.expect_is_initialized().
+            table.m_states[0].expect_is_initialized().
                 return_const(false);
-            fabric.expect_load_from_storage::<TestPersistentStorage>().
+            table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
                 return_const(Err(chip_error_internal!()));
 
-            fabric.expect_reset().return_const(());
+            table.m_states[0].expect_reset().return_const(());
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
+            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
