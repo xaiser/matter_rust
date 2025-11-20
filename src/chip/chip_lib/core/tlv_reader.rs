@@ -38,8 +38,7 @@ use core::{fmt, ptr};
 #[cfg(test)]
 use mockall::*;
 
-#[cfg_attr(test, mockall::automock(type BackingStoreType=u8;))]
-pub trait TlvReader {
+pub trait TlvReader<'a> {
     type BackingStoreType;
 
     fn init(&mut self, data: *const u8, data_len: usize);
@@ -85,7 +84,7 @@ pub trait TlvReader {
 
     fn get_bytes_raw(&mut self, buf: *mut u8, buf_len: usize) -> ChipErrorResult;
 
-    fn get_string(&mut self) -> Result<Option<&str>, ChipError>;
+    fn get_string(&mut self) -> Result<Option<&'a str>, ChipError>;
 
     fn get_string_raw(&mut self, buf: *mut u8, buf_size: usize) -> ChipErrorResult;
 
@@ -93,7 +92,6 @@ pub trait TlvReader {
 
     fn exit_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult;
 
-    //fn open_container(&mut self) -> Result<Self, ChipError> where Self: Sized;
     fn open_container(&mut self, reader: &mut Self) -> ChipErrorResult;
 
     fn close_container(&mut self, reader: &mut Self) -> ChipErrorResult;
@@ -109,6 +107,81 @@ pub trait TlvReader {
     fn skip(&mut self) -> ChipErrorResult;
 
     fn count_remaining_in_container(&self) -> Result<usize, ChipError>;
+}
+
+#[cfg(test)]
+mock! {
+    pub TlvReader {}
+
+    impl TlvReader<'static> for TlvReader {
+        type BackingStoreType = u8;
+        fn init(&mut self, data: *const u8, data_len: usize);
+
+        fn init_backing_store(
+            &mut self,
+            backing_store: *mut <Self as TlvReader<'static>>::BackingStoreType,
+            max_len: u32,
+        ) -> ChipErrorResult;
+
+        fn next(&mut self) -> ChipErrorResult;
+
+        fn next_tag(&mut self, expected_tag: Tag) -> ChipErrorResult;
+
+        fn expect(&mut self, expected_tag: Tag) -> ChipErrorResult;
+
+        fn next_type_tag(&mut self, expected_type: TlvType, expected_tag: Tag) -> ChipErrorResult;
+
+        fn expect_type_tag(&mut self, expected_type: TlvType, expected_tag: Tag) -> ChipErrorResult;
+
+        fn get_type(&self) -> TlvType;
+
+        fn get_tag(&self) -> Tag;
+
+        fn get_length(&self) -> usize;
+
+        fn get_control_byte(&self) -> u16;
+
+        fn get_boolean(&self) -> Result<bool, ChipError>;
+
+        fn get_i8(&self) -> Result<i8, ChipError>;
+        fn get_i16(&self) -> Result<i16, ChipError>;
+        fn get_i32(&self) -> Result<i32, ChipError>;
+        fn get_u8(&self) -> Result<u8, ChipError>;
+        fn get_u16(&self) -> Result<u16, ChipError>;
+        fn get_u32(&self) -> Result<u32, ChipError>;
+
+        fn get_i64(&self) -> Result<i64, ChipError>;
+
+        fn get_u64(&self) -> Result<u64, ChipError>;
+
+        fn get_bytes(&mut self) -> Result<&'static [u8], ChipError>;
+
+        fn get_bytes_raw(&mut self, buf: *mut u8, buf_len: usize) -> ChipErrorResult;
+
+        fn get_string(&mut self) -> Result<Option<&'static str>, ChipError>;
+
+        fn get_string_raw(&mut self, buf: *mut u8, buf_size: usize) -> ChipErrorResult;
+
+        fn enter_container(&mut self) -> Result<TlvType, ChipError>;
+
+        fn exit_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult;
+
+        fn open_container(&mut self, reader: &mut Self) -> ChipErrorResult;
+
+        fn close_container(&mut self, reader: &mut Self) -> ChipErrorResult;
+
+        fn get_container_type(&self) -> TlvType;
+
+        fn verify_end_of_container(&mut self) -> ChipErrorResult;
+
+        fn get_backing_store(&mut self) -> *mut <Self as TlvReader<'static>>::BackingStoreType;
+
+        fn get_read_point(&self) -> *const u8;
+
+        fn skip(&mut self) -> ChipErrorResult;
+
+        fn count_remaining_in_container(&self) -> Result<usize, ChipError>;
+    }
 }
 
 pub struct TlvReaderBasic<BackingStoreType>
@@ -693,7 +766,7 @@ where
     }
 }
 
-impl<BackingStoreType> TlvReader for TlvReaderBasic<BackingStoreType>
+impl<'a, BackingStoreType> TlvReader<'a> for TlvReaderBasic<BackingStoreType>
 where
     BackingStoreType: TlvBackingStore,
 {
@@ -922,7 +995,7 @@ where
         }
     }
 
-    fn get_bytes(&mut self) -> Result<&[u8], ChipError> {
+    fn get_bytes(&mut self) -> Result<&'a [u8], ChipError> {
         let val = self.get_data_ptr()?;
 
         unsafe {
@@ -952,7 +1025,7 @@ where
         chip_ok!()
     }
 
-    fn get_string(&mut self) -> Result<Option<&str>, ChipError> {
+    fn get_string(&mut self) -> Result<Option<&'a str>, ChipError> {
         verify_or_return_error!(
             tlv_types::tlv_type_is_utf8_string(self.get_element_type()),
             Err(chip_error_wrong_tlv_type!())
@@ -1906,7 +1979,7 @@ mod test {
         }
 
         impl TlvBackingStore for VecBackingStore {
-            fn on_init_reader<TlvReaderType: TlvReader>(
+            fn on_init_reader<'a, TlvReaderType: TlvReader<'a>>(
                 &mut self,
                 reader: *mut TlvReaderType,
                 buf: *mut *const u8,
@@ -1915,7 +1988,7 @@ mod test {
                 return self.get_next_buffer(reader, buf, buf_len);
             }
 
-            fn get_next_buffer<TlvReaderType: TlvReader>(
+            fn get_next_buffer<'a, TlvReaderType: TlvReader<'a>>(
                 &mut self,
                 _reader: *mut TlvReaderType,
                 buf: *mut *const u8,

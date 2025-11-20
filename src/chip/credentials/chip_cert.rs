@@ -268,7 +268,7 @@ impl ChipDN {
         self.rdn.iter().take_while(|r| r.is_empty() == false).count() as u8
     }
 
-    pub fn decode_from_tlv<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+    pub fn decode_from_tlv<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
         const KoidAttributeIsPrintableStringFlag: u32 = 0x00000080;
         const KoidAttributeTypeMask: u32 = 0x0000007F;
 

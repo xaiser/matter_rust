@@ -14,7 +14,7 @@ pub trait TlvBackingStore {
         chip_ok!()
     }
 
-    fn on_init_reader<TlvReaderType: TlvReader>(
+    fn on_init_reader<'a, TlvReaderType: TlvReader<'a>>(
         &mut self,
         reader: *mut TlvReaderType,
         buf: *mut *const u8,
@@ -32,7 +32,7 @@ pub trait TlvBackingStore {
         chip_ok!()
     }
 
-    fn get_next_buffer<TlvReaderType: TlvReader>(
+    fn get_next_buffer<'a, TlvReaderType: TlvReader<'a>>(
         &mut self,
         reader: *mut TlvReaderType,
         buf: *mut *const u8,

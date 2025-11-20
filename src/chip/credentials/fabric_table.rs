@@ -897,7 +897,7 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn read_fabric_info<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+        fn read_fabric_info<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
             reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
             let container_type = reader.enter_container()?;
             reader.next_tag(next_available_fabric_index_tag())?;
@@ -983,7 +983,7 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn read_fabric_info<Reader: TlvReader>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+        fn read_fabric_info<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
             reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
             let container_type = reader.enter_container()?;
             reader.next_tag(next_available_fabric_index_tag())?;
@@ -1446,7 +1446,7 @@ mod fabric_table {
             system::system_clock::Seconds32,
             chip_lib::{
                 core::{
-                    tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                    tlv_reader::{TlvContiguousBufferReader, TlvReader, MockTlvReader},
                     tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                     case_auth_tag::CatValues,
                     tlv_types::TlvType,
@@ -1488,6 +1488,7 @@ mod fabric_table {
         use crate::ChipError;
         use crate::chip_error_internal;
         use crate::chip_error_key_not_found;
+        use crate::chip_error_end_of_tlv;
         use crate::chip_core_error;
         use crate::chip_ok;
         use crate::chip_sdk_error;
@@ -1647,25 +1648,6 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by laod_from_stgorage at fabric info
-            /*
-            let mut fabric = FabricInfo::default();
-            fabric.expect_is_initialized().
-                return_const(false);
-            fabric.expect_load_from_storage::<TestPersistentStorage>().
-                withf(|_, index, noc_len, rcac_len| {
-                    (*index == KMIN_VALID_FABRIC_INDEX) && noc_len.len() == 1 && rcac_len.len() == 1
-                }).
-                return_const(Ok(()));
-
-            // calls used by the log
-            fabric.expect_get_fabric_index().return_const(1);
-            fabric.expect_get_compressed_fabric_id().return_const(1u64);
-            fabric.expect_get_fabric_id().return_const(1u64);
-            fabric.expect_get_node_id().return_const(1u64);
-            fabric.expect_get_vendor_id().return_const(VendorId::Common);
-
-            assert_eq!(true, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
-            */
             table.m_states[0].expect_is_initialized().
                 return_const(false);
             table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
@@ -1785,6 +1767,81 @@ mod fabric_table {
             table.m_states[0].expect_reset().return_const(());
 
             assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
+        }
+
+        #[test]
+        fn read_fabric_info_successfully() {
+            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
+            // prepare load_from_storage call
+            // mock noc fetch
+            mock_op_cert_store.expect_get_certificate().
+                times(1).
+                withf(|index, element, out_cert| {
+                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
+                }).
+                return_const(Ok(1));
+            // mock root fetch
+            mock_op_cert_store.expect_get_certificate().
+                times(1).
+                withf(|index, element, out_cert| {
+                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Krcac) && (out_cert.len() > 0)
+                }).
+                return_const(Ok(1));
+            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+
+            // update the persistent storage
+            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
+            let pa = PA.init(TestPersistentStorage::default());
+            table.m_storage = pa;
+
+            // calls used by laod_from_stgorage at fabric info
+            table.m_states[0].expect_is_initialized().
+                return_const(false);
+            table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
+                withf(|_, index, noc_len, rcac_len| {
+                    (*index == KMIN_VALID_FABRIC_INDEX) && noc_len.len() == 1 && rcac_len.len() == 1
+                }).
+                return_const(Ok(()));
+
+            // calls used by the log
+            table.m_states[0].expect_get_fabric_index().return_const(1);
+            table.m_states[0].expect_get_compressed_fabric_id().return_const(1u64);
+            table.m_states[0].expect_get_fabric_id().return_const(1u64);
+            table.m_states[0].expect_get_node_id().return_const(1u64);
+            table.m_states[0].expect_get_vendor_id().return_const(VendorId::Common);
+
+
+            let mut reader = MockTlvReader::new();
+            reader.expect_next_type_tag().
+                return_const(Ok(()));
+            reader.expect_enter_container().
+                return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().
+                return_const(Ok(()));
+            reader.expect_get_type().
+                return_const(TlvType::KtlvTypeNull);
+            let mut num_next: usize = 0;
+            reader.expect_next().
+                returning(move || {
+                    if num_next < 1 {
+                        return Ok(());
+                    } else {
+                        return Err(chip_error_end_of_tlv!());
+                    }
+                    num_next += 1;
+                });
+            reader.expect_get_u8().
+                return_const(Ok(0u8));
+            reader.expect_exit_container().
+                return_const(Ok(()));
+            reader.expect_verify_end_of_container().
+                return_const(Ok(()));
+
+            // to make the ensure_next_available_fabric_index_updated pass
+            table.m_next_available_fabric_index = Some(1);
+
+            assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
