@@ -674,11 +674,13 @@ mod fabric_table {
     use crate::ChipErrorResult;
     use crate::ChipError;
     use crate::matter_trace_scope;
+    use crate::chip_static_assert;
 
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
     use crate::chip_log_error;
     use crate::chip_log_progress;
+    use crate::chip_log_detail;
 
     use bitflags::{bitflags, Flags};
     //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, fabric_info_const_default}};
@@ -1099,7 +1101,18 @@ mod fabric_table {
             None
         }
 
-        pub fn init(&mut self, _init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
+        pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
+            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
+
+            self.m_storage = init_params.storage;
+            self.m_operational_keystore = init_params.operational_keystore;
+            self.m_op_cert_store = init_params.op_certs_store;
+
+            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
+
+            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
+
             Err(chip_error_not_implemented!())
         }
 
