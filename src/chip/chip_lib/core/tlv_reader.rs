@@ -1191,6 +1191,12 @@ impl TlvBackingStore for DummyBackStore {
 
 pub type TlvContiguousBufferReader = TlvReaderBasic<DummyBackStore>;
 
+impl Default for TlvContiguousBufferReader {
+    fn default() -> Self {
+        TlvReaderBasic::<DummyBackStore>::const_default()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::chip::chip_lib::core::tlv_backing_store::TlvBackingStore;

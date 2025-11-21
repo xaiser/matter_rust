@@ -144,6 +144,10 @@ impl DefaultStorageKeyAllocator {
         StorageKeyName::formatted(format_args!("f/{}/m", index))
     }
 
+    pub fn fabric_table_commit_marker_key() -> StorageKeyName {
+        StorageKeyName::from("g/fs/c")
+    }
+
     // LastKnownGoodTime
     pub fn last_known_good_time_key() -> StorageKeyName {
         StorageKeyName::formatted(format_args!("g/lkgt"))

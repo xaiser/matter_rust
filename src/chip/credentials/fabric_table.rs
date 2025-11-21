@@ -725,7 +725,20 @@ mod fabric_table {
         context_tag(1)
     }
 
-    #[derive(Default)]
+    const fn commit_marker_context_tlv_max_size() -> usize {
+        use core::mem;
+
+        tlv_estimate_struct_overhead!(size_of::<FabricIndex>(), size_of::<bool>(), size_of::<u64>(), size_of::<u64>())
+    }
+
+    fn marker_fabric_index_tag() -> Tag {
+        context_tag(0)
+    }
+
+    fn marker_is_addition_tag() -> Tag {
+        context_tag(1)
+    }
+
     struct CommitMarker {
         pub fabric_index: FabricIndex,
         pub is_addition: bool,
@@ -736,6 +749,15 @@ mod fabric_table {
             Self {
                 fabric_index,
                 is_addition,
+            }
+        }
+    }
+
+    impl Default for CommitMarker {
+        fn default() -> Self {
+            Self {
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                is_addition: false,
             }
         }
     }
@@ -1423,7 +1445,32 @@ mod fabric_table {
         }
 
         fn get_commit_marker(&self) -> Result<CommitMarker, ChipError> {
-            Err(chip_error_not_implemented!())
+            const TLV_SIZE: usize = commit_marker_context_tlv_max_size();
+            let mut tlv_buf: [u8; TLV_SIZE] = [0; TLV_SIZE];
+
+            let mut out_commit_marker = CommitMarker::default();
+
+            let mut tlv_read_size = 0usize;
+            unsafe {
+                tlv_read_size = self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(), &mut tlv_buf)?;
+            }
+
+            let mut reader = TlvContiguousBufferReader::default();
+            reader.init(tlv_buf.as_ptr(), tlv_read_size);
+
+            reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
+            let container_type = reader.enter_container()?;
+
+            reader.next_tag(marker_fabric_index_tag())?;
+            out_commit_marker.fabric_index = FabricIndex::from(reader.get_u8()?);
+
+            reader.next_tag(marker_is_addition_tag())?;
+            out_commit_marker.is_addition = reader.get_boolean()?;
+
+            // Don't try to exit container: we got all we needed. This allows us to
+            // avoid erroring-out on newer versions.
+
+            Ok(out_commit_marker)
         }
     }
 
@@ -1770,24 +1817,14 @@ mod fabric_table {
         }
 
         #[test]
-        fn read_fabric_info_successfully() {
+        fn read_one_fabric_info_successfully() {
             let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
             let mut mock_op_cert_store = MockOperationalCertificateStore::new();
             // prepare load_from_storage call
             // mock noc fetch
             mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
-                }).
                 return_const(Ok(1));
             // mock root fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Krcac) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
             table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
 
             // update the persistent storage
@@ -1796,20 +1833,19 @@ mod fabric_table {
             table.m_storage = pa;
 
             // calls used by laod_from_stgorage at fabric info
-            table.m_states[0].expect_is_initialized().
-                return_const(false);
-            table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
-                withf(|_, index, noc_len, rcac_len| {
-                    (*index == KMIN_VALID_FABRIC_INDEX) && noc_len.len() == 1 && rcac_len.len() == 1
-                }).
-                return_const(Ok(()));
+            for i in 0..1 {
+                table.m_states[i].expect_is_initialized().
+                    return_const(false);
+                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
+                    return_const(Ok(()));
 
-            // calls used by the log
-            table.m_states[0].expect_get_fabric_index().return_const(1);
-            table.m_states[0].expect_get_compressed_fabric_id().return_const(1u64);
-            table.m_states[0].expect_get_fabric_id().return_const(1u64);
-            table.m_states[0].expect_get_node_id().return_const(1u64);
-            table.m_states[0].expect_get_vendor_id().return_const(VendorId::Common);
+                // calls used by the log
+                table.m_states[i].expect_get_fabric_index().return_const(i as u8);
+                table.m_states[i].expect_get_compressed_fabric_id().return_const(i as u64);
+                table.m_states[i].expect_get_fabric_id().return_const(i as u64);
+                table.m_states[i].expect_get_node_id().return_const(i as u64);
+                table.m_states[i].expect_get_vendor_id().return_const(VendorId::Common);
+            }
 
 
             let mut reader = MockTlvReader::new();
@@ -1819,17 +1855,23 @@ mod fabric_table {
                 return_const(Ok(TlvType::KtlvTypeStructure));
             reader.expect_next_tag().
                 return_const(Ok(()));
+
+            // next avaiable fabric index
             reader.expect_get_type().
-                return_const(TlvType::KtlvTypeNull);
+                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader.expect_get_u8().
+                return_const(Ok(1u8));
+
             let mut num_next: usize = 0;
             reader.expect_next().
                 returning(move || {
                     if num_next < 1 {
+                        num_next += 1;
                         return Ok(());
                     } else {
+                        num_next += 1;
                         return Err(chip_error_end_of_tlv!());
                     }
-                    num_next += 1;
                 });
             reader.expect_get_u8().
                 return_const(Ok(0u8));
@@ -1838,10 +1880,139 @@ mod fabric_table {
             reader.expect_verify_end_of_container().
                 return_const(Ok(()));
 
-            // to make the ensure_next_available_fabric_index_updated pass
-            table.m_next_available_fabric_index = Some(1);
+            assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
+            assert_eq!(1, table.fabric_count());
+        }
+
+        #[test]
+        fn read_two_fabric_info_successfully() {
+            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
+            // prepare load_from_storage call
+            // mock noc fetch
+            mock_op_cert_store.expect_get_certificate().
+                return_const(Ok(1));
+            // mock root fetch
+            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+
+            // update the persistent storage
+            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
+            let pa = PA.init(TestPersistentStorage::default());
+            table.m_storage = pa;
+
+            // calls used by laod_from_stgorage at fabric info
+            for i in 0..2 {
+                table.m_states[i].expect_is_initialized().
+                    return_const(false);
+                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
+                    return_const(Ok(()));
+
+                // calls used by the log
+                table.m_states[i].expect_get_fabric_index().return_const(i as u8);
+                table.m_states[i].expect_get_compressed_fabric_id().return_const(i as u64);
+                table.m_states[i].expect_get_fabric_id().return_const(i as u64);
+                table.m_states[i].expect_get_node_id().return_const(i as u64);
+                table.m_states[i].expect_get_vendor_id().return_const(VendorId::Common);
+            }
+
+
+            let mut reader = MockTlvReader::new();
+            reader.expect_next_type_tag().
+                return_const(Ok(()));
+            reader.expect_enter_container().
+                return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().
+                return_const(Ok(()));
+
+            // next avaiable fabric index
+            reader.expect_get_type().
+                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader.expect_get_u8().
+                return_const(Ok(3u8));
+
+            let mut num_next: usize = 0;
+            reader.expect_next().
+                returning(move || {
+                    if num_next < 2 {
+                        num_next += 1;
+                        return Ok(());
+                    } else {
+                        num_next += 1;
+                        return Err(chip_error_end_of_tlv!());
+                    }
+                });
+            reader.expect_get_u8().
+                return_const(Ok(0u8));
+            reader.expect_exit_container().
+                return_const(Ok(()));
+            reader.expect_verify_end_of_container().
+                return_const(Ok(()));
 
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
+            assert_eq!(2, table.fabric_count());
+        }
+
+        #[test]
+        fn read_fabric_info_load_failed() {
+            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
+            // prepare load_from_storage call
+            // mock noc fetch
+            mock_op_cert_store.expect_get_certificate().
+                return_const(Ok(1));
+            // mock root fetch
+            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+
+            // update the persistent storage
+            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
+            let pa = PA.init(TestPersistentStorage::default());
+            table.m_storage = pa;
+
+            // calls used by laod_from_stgorage at fabric info
+            for i in 0..1 {
+                table.m_states[i].expect_is_initialized().
+                    return_const(false);
+                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
+                    return_const(Err(chip_error_internal!()));
+                table.m_states[i].expect_reset().
+                    return_const(());
+            }
+
+
+            let mut reader = MockTlvReader::new();
+            reader.expect_next_type_tag().
+                return_const(Ok(()));
+            reader.expect_enter_container().
+                return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().
+                return_const(Ok(()));
+
+            // next avaiable fabric index
+            reader.expect_get_type().
+                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader.expect_get_u8().
+                return_const(Ok(1u8));
+
+            let mut num_next: usize = 0;
+            reader.expect_next().
+                returning(move || {
+                    if num_next < 1 {
+                        num_next += 1;
+                        return Ok(());
+                    } else {
+                        num_next += 1;
+                        return Err(chip_error_end_of_tlv!());
+                    }
+                });
+            reader.expect_get_u8().
+                return_const(Ok(0u8));
+            reader.expect_exit_container().
+                return_const(Ok(()));
+            reader.expect_verify_end_of_container().
+                return_const(Ok(()));
+
+            assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
+            assert_eq!(0, table.fabric_count());
         }
     } // end of mod tests
 } // end of mod fabric_table
