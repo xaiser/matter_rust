@@ -733,6 +733,17 @@ mod fabric_table {
         tlv_estimate_struct_overhead!(size_of::<FabricIndex>(), size_of::<bool>(), size_of::<u64>(), size_of::<u64>())
     }
 
+    const fn index_info_tlv_max_size() -> usize {
+        use core::mem;
+        // We have a single next-available index and an array of anonymous-tagged
+        // fabric indices.
+        //
+        // The max size of the list is (1 byte control + bytes for actual value)
+        // times max number of list items, plus one byte for the list terminator.
+
+        tlv_estimate_struct_overhead!(size_of::<FabricIndex>(), CHIP_CONFIG_MAX_FABRICS * (1 + size_of::<FabricIndex>()) + 1)
+    }
+
     fn marker_fabric_index_tag() -> Tag {
         context_tag(0)
     }
@@ -820,6 +831,7 @@ mod fabric_table {
         m_state_flag: StateFlags,
     }
 
+    #[derive(Default)]
     pub struct InitParams<PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
@@ -966,6 +978,72 @@ mod fabric_table {
 
             chip_ok!()
         }
+
+        pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
+            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
+
+            self.m_storage = init_params.storage;
+            self.m_operational_keystore = init_params.operational_keystore;
+            self.m_op_cert_store = init_params.op_certs_store;
+
+            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
+
+            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
+
+            self.m_fabric_count = 0;
+            for f in &mut self.m_states {
+                f.reset();
+            }
+            self.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
+            // Init failure of Last Known Good Time is non-fatal.  If Last Known Good
+            // Time is unknown during incoming certificate validation for CASE and
+            // current time is also unknown, the certificate validity policy will see
+            // this condition and can act appropriately.
+            self.m_last_known_good_time.init(self.m_storage);
+
+            const SIZE: usize = index_info_tlv_max_size();
+            let mut buf: [u8; SIZE] = [0; SIZE];
+
+            unsafe {
+                match self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &mut buf) {
+                    Ok(data_size) => {
+                        let mut reader = TlvContiguousBufferReader::default();
+                        reader.init(buf.as_ptr(), data_size);
+
+                        self.read_fabric_info(&mut reader).inspect_err(|e| {
+                            chip_log_error!(FabricProvisioning, "Error loading fabric table {}, we are in a bad state!", e);
+                        })?;
+                    },
+                    Err(e) => {
+                        if e == chip_error_persisted_storage_value_not_found!() {
+                            // No fabrics yet.  Nothing to be done here.
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+
+            match self.get_commit_marker() {
+                Ok(commit_marker) => {
+                    // Found a commit marker! We need to possibly delete a loaded fabric
+                    chip_log_error!(FabricProvisioning, "Found a FabricTable aborted commit for index {:#x} (isAddition: {}), removing!", commit_marker.fabric_index as u32, commit_marker.is_addition);
+                    self.m_deleted_fabric_index_from_init = commit_marker.fabric_index;
+
+                    // Can't do better on error. We just have to hope for the best.
+                    self.delete(commit_marker.fabric_index);
+                },
+                Err(e) => {
+                    // Got an error, but somehow value is not missing altogether: inconsistent state but touch nothing.
+                    if e != chip_error_persisted_storage_value_not_found!() {
+                        chip_log_error!(FabricProvisioning, "Error loading Table commit marker {}, hope for the best", e);
+                    }
+                }
+            }
+
+            chip_ok!()
+        }
     }
 
     // To be able to mock FabricInfo::load_from_storage, the most easy way is to make the generic
@@ -1052,6 +1130,72 @@ mod fabric_table {
 
             chip_ok!()
         }
+
+        pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
+            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
+
+            self.m_storage = init_params.storage;
+            self.m_operational_keystore = init_params.operational_keystore;
+            self.m_op_cert_store = init_params.op_certs_store;
+
+            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
+
+            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
+
+            self.m_fabric_count = 0;
+            for f in &mut self.m_states {
+                f.reset();
+            }
+            self.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
+            // Init failure of Last Known Good Time is non-fatal.  If Last Known Good
+            // Time is unknown during incoming certificate validation for CASE and
+            // current time is also unknown, the certificate validity policy will see
+            // this condition and can act appropriately.
+            self.m_last_known_good_time.init(self.m_storage);
+
+            const SIZE: usize = index_info_tlv_max_size();
+            let mut buf: [u8; SIZE] = [0; SIZE];
+
+            unsafe {
+                match self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &mut buf) {
+                    Ok(data_size) => {
+                        let mut reader = TlvContiguousBufferReader::default();
+                        reader.init(buf.as_ptr(), data_size);
+
+                        self.read_fabric_info(&mut reader).inspect_err(|e| {
+                            chip_log_error!(FabricProvisioning, "Error loading fabric table {}, we are in a bad state!", e);
+                        })?;
+                    },
+                    Err(e) => {
+                        if e == chip_error_persisted_storage_value_not_found!() {
+                            // No fabrics yet.  Nothing to be done here.
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+
+            match self.get_commit_marker() {
+                Ok(commit_marker) => {
+                    // Found a commit marker! We need to possibly delete a loaded fabric
+                    chip_log_error!(FabricProvisioning, "Found a FabricTable aborted commit for index {:#x} (isAddition: {}), removing!", commit_marker.fabric_index as u32, commit_marker.is_addition);
+                    self.m_deleted_fabric_index_from_init = commit_marker.fabric_index;
+
+                    // Can't do better on error. We just have to hope for the best.
+                    self.delete(commit_marker.fabric_index);
+                },
+                Err(e) => {
+                    // Got an error, but somehow value is not missing altogether: inconsistent state but touch nothing.
+                    if e != chip_error_persisted_storage_value_not_found!() {
+                        chip_log_error!(FabricProvisioning, "Error loading Table commit marker {}, hope for the best", e);
+                    }
+                }
+            }
+
+            chip_ok!()
+        }
     }
 
 
@@ -1099,21 +1243,6 @@ mod fabric_table {
 
         pub fn find_fabric_with_compressed_id(&self, _compressed_fabric_id: CompressedFabricId) -> Option<FabricInfo> {
             None
-        }
-
-        pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
-            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
-
-            self.m_storage = init_params.storage;
-            self.m_operational_keystore = init_params.operational_keystore;
-            self.m_op_cert_store = init_params.op_certs_store;
-
-            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
-
-            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
-
-            Err(chip_error_not_implemented!())
         }
 
         pub fn shutdown(&mut self) {}
@@ -1533,7 +1662,7 @@ mod fabric_table {
                 chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
                 fabric_table::{
-                    fabric_table::FabricTable,
+                    fabric_table::{FabricTable, InitParams},
                     fabric_info,
                 },
             },
@@ -2026,6 +2155,24 @@ mod fabric_table {
 
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
             assert_eq!(0, table.fabric_count());
+        }
+
+        #[test]
+        fn init_with_no_index_info_successfull() {
+            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut init_params = InitParams::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.op_certs_store = ptr::addr_of_mut!(mock_op_cert_store);
+
+            // reset all fabric
+            for i in 0..table.m_states.len() {
+                table.m_states[i].expect_reset().
+                    return_const(());
+            }
+
+            assert_eq!(true, table.init(&init_params).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
