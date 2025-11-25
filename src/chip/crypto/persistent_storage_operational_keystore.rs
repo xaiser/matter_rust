@@ -12,7 +12,7 @@ use crate::chip::chip_lib::{
 
 use crate::chip::crypto::{
     self, ECPKey, ECPKeypair, OperationalKeystore, P256EcdsaSignature, P256Keypair,
-    P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer,
+    P256KeypairBase, P256SerializedKeypair, SensitiveDataBuffer, P256PublicKey,
 };
 
 use crate::chip_core_error;
@@ -235,6 +235,15 @@ where
         self.m_pending_keypair = None;
         self.m_is_pending_keypair_active = false;
         self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
+    }
+
+    // TODO: add this for test, remove this once we complete the commit process
+    pub fn get_pending_pub_key(&self) -> Option<P256PublicKey> {
+        if let Some(keypair) = &self.m_pending_keypair {
+            return Some(P256PublicKey::default_with_raw_value(keypair.public_key().const_bytes()));
+        }
+
+        None
     }
 }
 
