@@ -1667,7 +1667,7 @@ mod fabric_table {
                 operational_certificate_store::{CertChainElement, OperationalCertificateStore, MockOperationalCertificateStore},
                 chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
                 fabric_table::{
-                    fabric_table::{FabricTable, InitParams},
+                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag},
                     fabric_info,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
@@ -1712,6 +1712,70 @@ mod fabric_table {
 
             fabric_info
         }
+
+        fn set_up_stub_fabric(fabric_index: FabricIndex, pos: &mut OCS, ks: &mut OK, pa: * mut TestPersistentStorage) {
+            const OFFSET: u8 = 50;
+            // commit public key to storage
+            ks.init(pa);
+            let mut out_csr: [u8; 256] = [0; 256];
+            let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
+            let pub_key = ks.get_pending_pub_key();
+            assert!(pub_key.is_some());
+            let pub_key = pub_key.unwrap();
+            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+
+            // commit fabric info to storage
+            let mut info = get_stub_fabric_info_with_index(fabric_index);
+            unsafe {
+                assert_eq!(true, info.commit_to_storge(pa.as_mut().unwrap()).is_ok());
+            }
+
+            // commit certs to storage
+            pos.init(pa);
+            let rcac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
+            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 2) as u64, (fabric_index + OFFSET + 3) as u64, pub_key.const_bytes()).unwrap();
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), &[]);
+            assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
+        }
+
+        fn add_fabric_index_info(pa: &mut TestPersistentStorage, next_index: Option<FabricIndex>, indices: &[FabricIndex]) {
+            const SIZE: usize = index_info_tlv_max_size();
+            let mut raw_tlv: [u8; SIZE] = [0; SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+            let mut outer_container = TlvType::KtlvTypeNotSpecified;
+            // start a struct
+            writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_container);
+
+            if let Some(next_index) = next_index {
+                // put next available fabric index
+                writer.put_u8(next_available_fabric_index_tag(), next_index);
+            } else {
+                writer.put_null(next_available_fabric_index_tag());
+            }
+
+            let mut outer_container_indices_array = TlvType::KtlvTypeNotSpecified;
+
+            // start a index array
+            writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut outer_container_indices_array).inspect_err(|e| println!("{:?}", e));
+
+            for i in indices {
+                // put a fabric index
+                writer.put_u8(anonymous_tag(), *i);
+            }
+
+            // end of array conatiner
+            writer.end_container(outer_container_indices_array);
+
+            // end of struct conatiner
+            writer.end_container(outer_container);
+
+            assert_eq!(true, pa.sync_set_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &raw_tlv[..writer.get_length_written()]).is_ok());
+        }
+
 
         #[test]
         fn default_init() {
@@ -1798,30 +1862,10 @@ mod fabric_table {
         fn load_one_fabric_info_from_storage_successfully() {
             let mut table = TestFabricTable::default();
             let mut pa = TestPersistentStorage::default();
-
-            // commit public key to storage
             let mut ks = OK::default();
-            ks.init(ptr::addr_of_mut!(pa));
-            let mut out_csr: [u8; 256] = [0; 256];
-            let _ = ks.new_op_keypair_for_fabric(KMIN_VALID_FABRIC_INDEX, &mut out_csr);
-            let pub_key = ks.get_pending_pub_key();
-            assert!(pub_key.is_some());
-            let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(KMIN_VALID_FABRIC_INDEX, &pub_key);
-            assert_eq!(true, ks.commit_op_keypair_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
-
-            // commit fabric info to storage
-            let mut info = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
-            assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
-
-            // commit certs to storage
             let mut pos = OCS::default();
-            pos.init(ptr::addr_of_mut!(pa));
-            let rcac = FabricInfoTest::make_chip_cert(1,2, pub_key.const_bytes()).unwrap();
-            let noc = FabricInfoTest::make_chip_cert(3,4, pub_key.const_bytes()).unwrap();
-            pos.add_new_trusted_root_cert_for_fabric(KMIN_VALID_FABRIC_INDEX, rcac.const_bytes());
-            pos.add_new_op_certs_for_fabric(KMIN_VALID_FABRIC_INDEX, noc.const_bytes(), &[]);
-            assert_eq!(true, pos.commit_certs_for_fabric(KMIN_VALID_FABRIC_INDEX).is_ok());
+
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -1833,140 +1877,88 @@ mod fabric_table {
             assert_eq!(true, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
-        /*
         #[test]
         fn load_from_storage_fetch_noc_failed() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
-                }).
-                return_const(Err(chip_error_internal!()));
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by reset at fabric info
-            /*
-            let mut fabric = FabricInfo::default();
-            fabric.expect_is_initialized().
-                return_const(false);
-            fabric.expect_reset().return_const(());
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            assert_eq!(true, table.init(&init_params).is_ok());
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, &mut fabric).is_ok());
-            */
-            table.m_states[0].expect_is_initialized().
-                return_const(false);
-            table.m_states[0].expect_reset().return_const(());
+            // inject posion key to corrupt noc op key storage
+            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_noc(KMIN_VALID_FABRIC_INDEX).key_name_str());
 
             assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
         fn load_from_storage_fetch_root_failed() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
-            // mock root fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Krcac) && (out_cert.len() > 0)
-                }).
-                return_const(Err(chip_error_internal!()));
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by reset at fabric info
-            table.m_states[0].expect_is_initialized().
-                return_const(false);
-            table.m_states[0].expect_reset().return_const(());
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            assert_eq!(true, table.init(&init_params).is_ok());
+
+            // inject posion key to corrupt rcac op key storage
+            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_rcac(KMIN_VALID_FABRIC_INDEX).key_name_str());
 
             assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
         fn load_from_storage_fabric_failed() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
-            // mock root fetch
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Krcac) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by laod_from_stgorage at fabric info
-            table.m_states[0].expect_is_initialized().
-                return_const(false);
-            table.m_states[0].expect_load_from_storage::<TestPersistentStorage>().
-                return_const(Err(chip_error_internal!()));
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            assert_eq!(true, table.init(&init_params).is_ok());
 
-            table.m_states[0].expect_reset().return_const(());
+            // inject posion key to corrupt fabric metadata
+            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str());
 
             assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
         }
 
         #[test]
         fn read_one_fabric_info_successfully() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // prepare load_from_storage call
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                return_const(Ok(1));
-            // mock root fetch
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by laod_from_stgorage at fabric info
-            for i in 0..1 {
-                table.m_states[i].expect_is_initialized().
-                    return_const(false);
-                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
-                    return_const(Ok(()));
-
-                // calls used by the log
-                table.m_states[i].expect_get_fabric_index().return_const(i as u8);
-                table.m_states[i].expect_get_compressed_fabric_id().return_const(i as u64);
-                table.m_states[i].expect_get_fabric_id().return_const(i as u64);
-                table.m_states[i].expect_get_node_id().return_const(i as u64);
-                table.m_states[i].expect_get_vendor_id().return_const(VendorId::Common);
-            }
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            // the fabric_index_info is empty, so this init call won't call read_fabric_info
+            assert_eq!(true, table.init(&init_params).is_ok());
 
 
             let mut reader = MockTlvReader::new();
@@ -1980,8 +1972,11 @@ mod fabric_table {
             // next avaiable fabric index
             reader.expect_get_type().
                 return_const(TlvType::KtlvTypeUnsignedInteger);
-            reader.expect_get_u8().
-                return_const(Ok(1u8));
+            let mut seq = Sequence::new();
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(2u8));
 
             let mut num_next: usize = 0;
             reader.expect_next().
@@ -1994,8 +1989,10 @@ mod fabric_table {
                         return Err(chip_error_end_of_tlv!());
                     }
                 });
-            reader.expect_get_u8().
-                return_const(Ok(0u8));
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
             reader.expect_exit_container().
                 return_const(Ok(()));
             reader.expect_verify_end_of_container().
@@ -2007,35 +2004,21 @@ mod fabric_table {
 
         #[test]
         fn read_two_fabric_info_successfully() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // prepare load_from_storage call
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                return_const(Ok(1));
-            // mock root fetch
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX + 1, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by laod_from_stgorage at fabric info
-            for i in 0..2 {
-                table.m_states[i].expect_is_initialized().
-                    return_const(false);
-                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
-                    return_const(Ok(()));
-
-                // calls used by the log
-                table.m_states[i].expect_get_fabric_index().return_const(i as u8);
-                table.m_states[i].expect_get_compressed_fabric_id().return_const(i as u64);
-                table.m_states[i].expect_get_fabric_id().return_const(i as u64);
-                table.m_states[i].expect_get_node_id().return_const(i as u64);
-                table.m_states[i].expect_get_vendor_id().return_const(VendorId::Common);
-            }
-
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            // the fabric_index_info is empty, so this init call won't call read_fabric_info
+            assert_eq!(true, table.init(&init_params).is_ok());
 
             let mut reader = MockTlvReader::new();
             reader.expect_next_type_tag().
@@ -2048,8 +2031,11 @@ mod fabric_table {
             // next avaiable fabric index
             reader.expect_get_type().
                 return_const(TlvType::KtlvTypeUnsignedInteger);
-            reader.expect_get_u8().
-                return_const(Ok(3u8));
+            let mut seq = Sequence::new();
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(3u8));
 
             let mut num_next: usize = 0;
             reader.expect_next().
@@ -2062,8 +2048,14 @@ mod fabric_table {
                         return Err(chip_error_end_of_tlv!());
                     }
                 });
-            reader.expect_get_u8().
-                return_const(Ok(0u8));
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok((KMIN_VALID_FABRIC_INDEX + 1) as u8));
             reader.expect_exit_container().
                 return_const(Ok(()));
             reader.expect_verify_end_of_container().
@@ -2075,29 +2067,20 @@ mod fabric_table {
 
         #[test]
         fn read_fabric_info_load_failed() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            // prepare load_from_storage call
-            // mock noc fetch
-            mock_op_cert_store.expect_get_certificate().
-                return_const(Ok(1));
-            // mock root fetch
-            table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
 
-            // update the persistent storage
-            static PA: StaticCell<TestPersistentStorage> = StaticCell::new();
-            let pa = PA.init(TestPersistentStorage::default());
-            table.m_storage = pa;
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
 
-            // calls used by laod_from_stgorage at fabric info
-            for i in 0..1 {
-                table.m_states[i].expect_is_initialized().
-                    return_const(false);
-                table.m_states[i].expect_load_from_storage::<TestPersistentStorage>().
-                    return_const(Err(chip_error_internal!()));
-                table.m_states[i].expect_reset().
-                    return_const(());
-            }
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            // the fabric_index_info is empty, so this init call won't call read_fabric_info
+            assert_eq!(true, table.init(&init_params).is_ok());
 
 
             let mut reader = MockTlvReader::new();
@@ -2111,8 +2094,11 @@ mod fabric_table {
             // next avaiable fabric index
             reader.expect_get_type().
                 return_const(TlvType::KtlvTypeUnsignedInteger);
-            reader.expect_get_u8().
-                return_const(Ok(1u8));
+            let mut seq = Sequence::new();
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(2u8));
 
             let mut num_next: usize = 0;
             reader.expect_next().
@@ -2125,17 +2111,43 @@ mod fabric_table {
                         return Err(chip_error_end_of_tlv!());
                     }
                 });
-            reader.expect_get_u8().
-                return_const(Ok(0u8));
+            reader.expect_get_u8()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
             reader.expect_exit_container().
                 return_const(Ok(()));
             reader.expect_verify_end_of_container().
                 return_const(Ok(()));
 
+            // inject posion key to corrupt fabric metadata
+            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str());
+
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
             assert_eq!(0, table.fabric_count());
         }
 
+        #[test]
+        fn init_with_one_index_info_successfull() {
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+
+            add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX,]);
+
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            assert_eq!(true, table.init(&init_params).is_ok());
+            assert_eq!(1, table.fabric_count());
+        }
+
+        /*
         #[test]
         fn init_with_no_index_info_successfull() {
             let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
