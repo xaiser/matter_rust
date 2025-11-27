@@ -781,8 +781,14 @@ mod fabric_table {
         }
     }
 
-    struct Delegate {
-        next: *mut Self,
+    trait Delegate<PSD, OK, OCS> 
+    where
+        PSD: PersistentStorageDelegate,
+        OK: crypto::OperationalKeystore,
+        OCS: credentials::OperationalCertificateStore,
+    {
+        fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
+        fn next(&self) -> * mut dyn Delegate<PSD, OK, OCS>;
     }
 
     #[repr(u8)]
@@ -816,7 +822,8 @@ mod fabric_table {
         m_op_cert_store: *mut OCS,
         // FabricTable::Delegate link to first node, since FabricTable::Delegate is a form
         // of intrusive linked-list item.
-        m_delegate_list_root: *mut Delegate,
+        m_delegate_list_root: Option<* mut dyn Delegate<PSD, OK, OCS>>,
+        //m_delegate_list_root: * mut dyn Delegate<PSD, OK, OCS>,
 
         // When mStateFlags.Has(kIsPendingFabricDataPresent) is true, this holds the index of the fabric
         // for which there is currently pending data.
@@ -870,7 +877,8 @@ mod fabric_table {
             m_storage: ptr::null_mut(),
             m_operational_keystore: ptr::null_mut(),
             m_op_cert_store: ptr::null_mut(),
-            m_delegate_list_root: ptr::null_mut(),
+            //m_delegate_list_root: ptr::null_mut(),
+            m_delegate_list_root: None,
             m_fabric_index_with_pending_state: KUNDEFINED_FABRIC_INDEX,
             m_deleted_fabric_index_from_init: KUNDEFINED_FABRIC_INDEX,
             m_last_known_good_time: LastKnownGoodTime::<PSD>::const_default(),
@@ -894,7 +902,8 @@ mod fabric_table {
             m_storage: ptr::null_mut(),
             m_operational_keystore: ptr::null_mut(),
             m_op_cert_store: ptr::null_mut(),
-            m_delegate_list_root: ptr::null_mut(),
+            //m_delegate_list_root: ptr::null_mut(),
+            m_delegate_list_root: None,
             m_fabric_index_with_pending_state: KUNDEFINED_FABRIC_INDEX,
             m_deleted_fabric_index_from_init: KUNDEFINED_FABRIC_INDEX,
             m_last_known_good_time: LastKnownGoodTime::<PSD>::const_default(),
@@ -905,7 +914,6 @@ mod fabric_table {
         }
     }
 
-    #[cfg(not(test))]
     impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
@@ -1052,158 +1060,6 @@ mod fabric_table {
         }
     }
 
-    // To be able to mock FabricInfo::load_from_storage, the most easy way is to make the generic
-    // parameter static. So we have a different implement for this function with test cfg.
-    #[cfg(test)]
-    impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
-    where
-        PSD: PersistentStorageDelegate + 'static,
-        OK: crypto::OperationalKeystore,
-        OCS: credentials::OperationalCertificateStore,
-    {
-
-        fn load_from_storage(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!self.m_states[index].is_initialized(), Err(chip_error_incorrect_state!()));
-
-            let mut noc_buf = CertBuffer::default();
-            let mut rcac_buf = CertBuffer::default();
-
-            let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
-                self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
-                    unsafe {
-                        self.m_states[index].load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
-                    }
-                })
-            });
-
-            let fabric = &mut self.m_states[index];
-
-            if err.is_err() {
-                chip_log_error!(FabricProvisioning, "Failed to load fabric {:#x}: {}", fabric_index, err.err().unwrap());
-                fabric.reset();
-                return err;
-            }
-
-            chip_log_progress!(FabricProvisioning, "fabric index {:#x} was retrieved from storage. Compressed Fabric Id {:#x}, FabricId {:#x}, NodeId {:#x}, VendorId {:#x}",
-                fabric.get_fabric_index(), fabric.get_compressed_fabric_id(), fabric.get_fabric_id(), fabric.get_node_id(), fabric.get_vendor_id() as u16);
-
-            chip_ok!()
-        }
-
-        fn read_fabric_info<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
-            reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
-            let container_type = reader.enter_container()?;
-            reader.next_tag(next_available_fabric_index_tag())?;
-
-            if reader.get_type() == TlvType::KtlvTypeNull {
-                self.m_next_available_fabric_index = None;
-            } else {
-                self.m_next_available_fabric_index = Some(reader.get_u8()?);
-            }
-
-            reader.next_type_tag(TlvType::KtlvTypeArray, fabric_indices_tag())?;
-            let array_type = reader.enter_container()?;
-            let mut err: ChipError = chip_error_internal!();
-            while reader.next().inspect_err(|e| err = *e).is_ok() {
-                if (self.m_fabric_count as usize) >= self.m_states.len() {
-                    return Err(chip_error_no_memory!());
-                }
-
-                let current_fabric_index = reader.get_u8()?;
-
-                //if self.load_from_storage(current_fabric_index, &mut self.m_states[self.m_fabric_count as usize]).is_ok() {
-                if self.load_from_storage(current_fabric_index, self.m_fabric_count as usize).is_ok() {
-                    self.m_fabric_count += 1;
-                } else {
-                    // This could happen if we failed to store our fabric index info
-                    // after we deleted the fabric from storage.  Just ignore this
-                    // fabric index and keep going.
-                }
-            }
-
-            if err != chip_error_end_of_tlv!() {
-                return Err(err);
-            }
-
-            reader.exit_container(array_type)?;
-
-            reader.exit_container(container_type)?;
-
-            reader.verify_end_of_container()?;
-
-            self.ensure_next_available_fabric_index_updated();
-
-            chip_ok!()
-        }
-
-        pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
-            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
-
-            self.m_storage = init_params.storage;
-            self.m_operational_keystore = init_params.operational_keystore;
-            self.m_op_cert_store = init_params.op_certs_store;
-
-            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
-
-            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
-
-            self.m_fabric_count = 0;
-            for f in &mut self.m_states {
-                f.reset();
-            }
-            self.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
-            // Init failure of Last Known Good Time is non-fatal.  If Last Known Good
-            // Time is unknown during incoming certificate validation for CASE and
-            // current time is also unknown, the certificate validity policy will see
-            // this condition and can act appropriately.
-            self.m_last_known_good_time.init(self.m_storage);
-
-            const SIZE: usize = index_info_tlv_max_size();
-            let mut buf: [u8; SIZE] = [0; SIZE];
-
-            unsafe {
-                match self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &mut buf) {
-                    Ok(data_size) => {
-                        let mut reader = TlvContiguousBufferReader::default();
-                        reader.init(buf.as_ptr(), data_size);
-
-                        self.read_fabric_info(&mut reader).inspect_err(|e| {
-                            chip_log_error!(FabricProvisioning, "Error loading fabric table {}, we are in a bad state!", e);
-                        })?;
-                    },
-                    Err(e) => {
-                        if e == chip_error_persisted_storage_value_not_found!() {
-                            // No fabrics yet.  Nothing to be done here.
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                }
-            }
-
-            match self.get_commit_marker() {
-                Ok(commit_marker) => {
-                    // Found a commit marker! We need to possibly delete a loaded fabric
-                    chip_log_error!(FabricProvisioning, "Found a FabricTable aborted commit for index {:#x} (isAddition: {}), removing!", commit_marker.fabric_index as u32, commit_marker.is_addition);
-                    self.m_deleted_fabric_index_from_init = commit_marker.fabric_index;
-
-                    // Can't do better on error. We just have to hope for the best.
-                    self.delete(commit_marker.fabric_index);
-                },
-                Err(e) => {
-                    // Got an error, but somehow value is not missing altogether: inconsistent state but touch nothing.
-                    if e != chip_error_persisted_storage_value_not_found!() {
-                        chip_log_error!(FabricProvisioning, "Error loading Table commit marker {}, hope for the best", e);
-                    }
-                }
-            }
-
-            chip_ok!()
-        }
-    }
-
 
     impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
     where
@@ -1211,7 +1067,30 @@ mod fabric_table {
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        pub fn delete(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        pub fn delete(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+            matter_trace_scope!("Delete", "Fabric");
+            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+
+            if let Some(mut delegate) = self.m_delegate_list_root {
+                unsafe {
+                    while !delegate.is_null() {
+                        let delegate_ref = delegate.as_mut().unwrap();
+                        let next_delegate = delegate_ref.next();
+                        delegate_ref.fabric_will_be_removed(self, fabric_index);
+                        delegate = next_delegate;
+                    }
+                }
+            }
+
+            let mut fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
+
+            if let Some(fabric_info) = fabric_info_option {
+                if ptr::eq(fabric_info, &mut self.m_pending_fabric) {
+                    self.revert_pending_fabric_data();
+                    fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
+                }
+            }
             Err(chip_error_not_implemented!())
         }
 
@@ -1261,11 +1140,11 @@ mod fabric_table {
 
         pub fn forget(&mut self, _fabric_index: FabricIndex) {}
 
-        pub fn add_fabric_delegate(&mut self, _delegate: * mut Delegate) -> ChipErrorResult {
+        pub fn add_fabric_delegate(&mut self, _delegate: * mut dyn Delegate<PSD, OK, OCS>) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn remove_fabric_delegate(&mut self, _delegate: * mut Delegate) {
+        pub fn remove_fabric_delegate(&mut self, _delegate: * mut dyn Delegate<PSD, OK, OCS>) {
         }
 
         pub fn set_fabric_label(&mut self, _fabric_index: FabricIndex, _fabric_label: &str) -> ChipErrorResult {
@@ -1411,9 +1290,54 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn revert_pending_fabric_data(&mut self) { }
+        pub fn revert_pending_fabric_data(&mut self) {
+            matter_trace_scope!("RevertPendingFabricData", "Fabric");
+            // Will clear pending UpdateNoc/AddNOC
+            self.revert_pending_op_certs_except_root();
 
-        pub fn revert_pending_op_certs_except_root(&mut self) { }
+            if !self.m_operational_keystore.is_null() {
+                unsafe {
+                    self.m_operational_keystore.as_mut().unwrap().revert_pending_keypair();
+                }
+            }
+
+            if !self.m_op_cert_store.is_null() {
+                unsafe {
+                    self.m_op_cert_store.as_mut().unwrap().revert_pending_op_certs_except_root();
+                }
+            }
+
+            self.m_last_known_good_time.revert_pending_last_known_good_chip_epoch_time();
+
+            self.m_state_flag.clear();
+            self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
+        }
+
+        pub fn revert_pending_op_certs_except_root(&mut self) {
+            matter_trace_scope!("RevertPendingOpCertsExceptRoot", "Fabric");
+            self.m_pending_fabric.reset();
+
+            if self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent) {
+                chip_log_error!(FabricProvisioning, "Reverting pending fabric data for fabric {:#x}", self.m_fabric_index_with_pending_state);
+            }
+
+            if !self.m_op_cert_store.is_null() {
+                unsafe {
+                    self.m_op_cert_store.as_mut().unwrap().revert_pending_op_certs_except_root();
+                }
+            }
+
+            if self.m_state_flag.contains(StateFlags::KisAddPending) {
+                self.delete(self.m_fabric_index_with_pending_state);
+            }
+
+            self.m_state_flag.remove(StateFlags::KisAddPending);
+            self.m_state_flag.remove(StateFlags::KisUpdatePending);
+
+            if self.m_state_flag.contains(StateFlags::KisTrustedRootPending) {
+                self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
+            }
+        }
 
         pub fn verify_credentials(&self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
             ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
@@ -1470,8 +1394,26 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        fn get_mutable_fabric_by_index(&mut self, _fabric_index: FabricIndex) -> Result<&mut FabricInfo, ChipError> {
-            Err(chip_error_not_implemented!())
+        fn get_mutable_fabric_by_index(&mut self, fabric_index: FabricIndex) -> Option<&mut FabricInfo> {
+            if fabric_index == KUNDEFINED_FABRIC_INDEX {
+                return None;
+            }
+
+            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+                return Some(&mut self.m_pending_fabric);
+            }
+
+            for fabric in &mut self.m_states {
+                if !fabric.is_initialized() {
+                    continue;
+                }
+
+                if fabric.get_fabric_index() == fabric_index {
+                    return Some(fabric);
+                }
+            }
+
+            return None;
         }
 
         fn store_fabric_metadata(&mut self, _fabric_info: &FabricInfo) -> ChipErrorResult {
@@ -2146,6 +2088,29 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
             assert_eq!(1, table.fabric_count());
         }
+
+        #[test]
+        fn init_with_two_index_info_successfull() {
+            let mut table = TestFabricTable::default();
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX + 1, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+
+            add_fabric_index_info(&mut pa, Some(3), &[KMIN_VALID_FABRIC_INDEX, KMIN_VALID_FABRIC_INDEX + 1]);
+
+            // init the table with all the stroages
+            let mut init_params = InitParams::default();
+            init_params.storage = ptr::addr_of_mut!(pa);
+            init_params.operational_keystore = ptr::addr_of_mut!(ks);
+            init_params.op_certs_store = ptr::addr_of_mut!(pos);
+            assert_eq!(true, table.init(&init_params).is_ok());
+            assert_eq!(2, table.fabric_count());
+        }
+
+        // TODO: test with commit marker after delete implement
 
         /*
         #[test]
