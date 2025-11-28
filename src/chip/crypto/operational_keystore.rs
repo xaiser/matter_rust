@@ -42,7 +42,7 @@ pub trait OperationalKeystore {
         Err(chip_error_not_implemented!())
     }
 
-    fn remove_op_keyapir_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
+    fn remove_op_keypair_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
 
     fn revert_pending_keypair(&mut self);
 

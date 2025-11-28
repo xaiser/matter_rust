@@ -874,6 +874,12 @@ impl TlvBackingStore for DummyBackStore {
 
 pub type TlvContiguousBufferWriter = TlvWriterBasic<DummyBackStore>;
 
+impl Default for TlvContiguousBufferWriter {
+    fn default() -> Self {
+        TlvWriterBasic::<DummyBackStore>::const_default()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

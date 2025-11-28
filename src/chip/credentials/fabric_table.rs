@@ -672,6 +672,7 @@ mod fabric_table {
     use crate::chip_error_key_not_found;
     use crate::chip_error_no_memory;
     use crate::chip_error_end_of_tlv;
+    use crate::chip_error_not_found;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::tlv_estimate_struct_overhead;
@@ -788,6 +789,7 @@ mod fabric_table {
         OCS: credentials::OperationalCertificateStore,
     {
         fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
+        fn on_fabric_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
         fn next(&self) -> * mut dyn Delegate<PSD, OK, OCS>;
     }
 
@@ -1083,15 +1085,88 @@ mod fabric_table {
                 }
             }
 
-            let mut fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
+            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+                self.revert_pending_fabric_data();
+            }
 
-            if let Some(fabric_info) = fabric_info_option {
-                if ptr::eq(fabric_info, &mut self.m_pending_fabric) {
-                    self.revert_pending_fabric_data();
-                    fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
+            let metadata_err = self.delete_metadata_from_storage(fabric_index);
+
+            let mut op_key_err = chip_ok!();
+
+            let handle_not_having_data = |e: ChipError| -> Result<(), ChipError> {
+                if e == chip_error_invalid_fabric_index!() {
+                    chip_ok!()
+                } else {
+                    Err(e)
+                }
+            };
+
+            if !self.m_operational_keystore.is_null() {
+                unsafe {
+                    op_key_err = self.m_operational_keystore.as_mut().unwrap().remove_op_keypair_for_fabric(fabric_index).or_else(|e| {
+                        // Not having found data is not an error, we may just have gotten here
+                        // on a fail-safe expiry after `RevertPendingFabricData`.
+                        handle_not_having_data(e)
+                    });
+
                 }
             }
-            Err(chip_error_not_implemented!())
+
+            let mut op_certs_err = chip_ok!();
+
+            if !self.m_op_cert_store.is_null() {
+                unsafe {
+                    op_certs_err = self.m_op_cert_store.as_mut().unwrap().remove_certs_for_fabric(fabric_index).or_else(|e| {
+                        handle_not_having_data(e)
+                    });
+                }
+            }
+
+            let fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
+            let fabric_is_initialized = fabric_info_option.as_ref().is_some_and(|info| info.is_initialized());
+
+            if fabric_is_initialized {
+                let fabric_info = fabric_info_option.unwrap();
+                fabric_info.reset();
+
+                if self.m_next_available_fabric_index.is_none() {
+                    // We must have been in a situation where CHIP_CONFIG_MAX_FABRICS is 254
+                    // and our fabric table was full, so there was no valid next index.  We
+                    // have a single available index now, though; use it as
+                    // mNextAvailableFabricIndex.
+                    self.m_next_available_fabric_index = Some(fabric_index);
+                }
+
+                // If StoreFabricIndexInfo fails here, that's probably OK.  When we try to
+                // read things from storage later we will realize there is nothing for this
+                // index.
+                self.store_fabric_index_info();
+
+                if self.m_fabric_count == 0 {
+                    chip_log_error!(FabricProvisioning, "Trying to delete a fabric, but the current fabric count is already 0");
+                } else {
+                    self.m_fabric_count -= 1;
+                    chip_log_progress!(FabricProvisioning, "Fabric {:#x} deleted", fabric_index);
+                }
+            }
+
+            if let Some(mut delegate) = self.m_delegate_list_root {
+                unsafe {
+                    while !delegate.is_null() {
+                        let delegate_ref = delegate.as_mut().unwrap();
+                        let next_delegate = delegate_ref.next();
+                        delegate_ref.on_fabric_removed(self, fabric_index);
+                        delegate = next_delegate;
+                    }
+                }
+            }
+
+            if fabric_is_initialized {
+                // Only return error after trying really hard to remove everything we could
+                return metadata_err.and(op_key_err).and(op_certs_err);
+            }
+
+            Err(chip_error_not_found!())
         }
 
         pub fn delete_all_fabric(&mut self) {}
@@ -1479,7 +1554,37 @@ mod fabric_table {
         }
 
         fn store_fabric_index_info(&mut self) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            const SIZE: usize = index_info_tlv_max_size();
+            let mut buf: [u8; SIZE] = [0; SIZE];
+
+            let mut writer = TlvContiguousBufferWriter::default();
+            writer.init(buf.as_mut_ptr(), buf.len() as u32);
+            let mut outer_type = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_type)?;
+
+            if let Some(index) = self.m_next_available_fabric_index {
+                writer.put_u8(next_available_fabric_index_tag(), index);
+            } else {
+                writer.put_null(next_available_fabric_index_tag());
+            }
+
+            let mut inner_container_type = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut inner_container_type)?;
+
+            for f in &self.m_states {
+                writer.put_u8(anonymous_tag(), f.get_fabric_index());
+            }
+
+            writer.end_container(inner_container_type)?;
+            writer.end_container(outer_type)?;
+
+            let index_info_length = u16::try_from(writer.get_length_written()).map_err(|_| chip_error_buffer_too_small!())?;
+
+            unsafe {
+                self.m_storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &buf[0..index_info_length as usize]);
+            }
+
+            chip_ok!()
         }
 
         fn delete_metadata_from_storage(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {

@@ -435,7 +435,7 @@ where
                     _ => {}
                 }
             }
-            match operational_keystore.remove_op_keyapir_for_fabric(fabric_index) {
+            match operational_keystore.remove_op_keypair_for_fabric(fabric_index) {
                 Err(e) => {
                     keypair.clear();
                     return Err(e);
@@ -443,13 +443,13 @@ where
                 _ => {}
             }
         } else if self.has_op_keypair_for_fabric(fabric_index) {
-            operational_keystore.remove_op_keyapir_for_fabric(fabric_index)?;
+            operational_keystore.remove_op_keypair_for_fabric(fabric_index)?;
         }
 
         chip_ok!()
     }
 
-    fn remove_op_keyapir_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+    fn remove_op_keypair_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
         verify_or_return_error!(
             self.m_storage.is_null() == false,
             Err(chip_error_incorrect_state!())
@@ -838,7 +838,7 @@ mod tests {
         );
 
         // removed it
-        assert_eq!(true, store.remove_op_keyapir_for_fabric(2).is_ok());
+        assert_eq!(true, store.remove_op_keypair_for_fabric(2).is_ok());
 
         // try to export it, should fail
         let mut output_serialized_op_key = P256SerializedKeypair::default();
