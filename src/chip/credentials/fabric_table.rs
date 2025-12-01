@@ -846,7 +846,6 @@ mod fabric_table {
         m_state_flag: StateFlags,
     }
 
-    #[derive(Default)]
     pub struct InitParams<PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
@@ -856,6 +855,21 @@ mod fabric_table {
         pub storage: * mut PSD,
         pub operational_keystore: * mut OK,
         pub op_certs_store: * mut OCS,
+    }
+
+    impl<PSD, OK, OCS> Default for InitParams<PSD, OK, OCS> 
+    where
+        PSD: PersistentStorageDelegate,
+        OK: crypto::OperationalKeystore,
+        OCS: credentials::OperationalCertificateStore,
+    {
+        fn default() -> Self {
+            Self {
+                storage: ptr::null_mut(),
+                operational_keystore: ptr::null_mut(),
+                op_certs_store: ptr::null_mut(),
+            }
+        }
     }
 
     pub struct SignVidVerificationResponseData {
@@ -1571,8 +1585,11 @@ mod fabric_table {
             let mut inner_container_type = TlvType::KtlvTypeNotSpecified;
             writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut inner_container_type)?;
 
+            // TODO: use iterator once we implement it.
             for f in &self.m_states {
-                writer.put_u8(anonymous_tag(), f.get_fabric_index());
+                if f.is_initialized() {
+                    writer.put_u8(anonymous_tag(), f.get_fabric_index());
+                }
             }
 
             writer.end_container(inner_container_type)?;
@@ -1714,13 +1731,14 @@ mod fabric_table {
                 operational_certificate_store::{CertChainElement, OperationalCertificateStore, MockOperationalCertificateStore},
                 chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
                 fabric_table::{
-                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag},
+                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag, StateFlags},
                     fabric_info,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
             crypto::{
                 self,
+                operational_keystore::MockOperationalKeystore,
                 generate_compressed_fabric_id,
                 crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair},
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
@@ -1731,7 +1749,9 @@ mod fabric_table {
         use crate::ChipError;
         use crate::chip_error_internal;
         use crate::chip_error_key_not_found;
+        use crate::chip_error_not_found;
         use crate::chip_error_end_of_tlv;
+        use crate::chip_error_invalid_fabric_index;
         use crate::chip_core_error;
         use crate::chip_ok;
         use crate::chip_sdk_error;
@@ -1747,6 +1767,8 @@ mod fabric_table {
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
         type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
+
+        type MockStorageTestFabricTable = FabricTable<TestPersistentStorage, MockOperationalKeystore, MockOperationalCertificateStore>;
 
         fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo {
             let mut init_pas = fabric_info::InitParams::default();
@@ -1821,6 +1843,25 @@ mod fabric_table {
             writer.end_container(outer_container);
 
             assert_eq!(true, pa.sync_set_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &raw_tlv[..writer.get_length_written()]).is_ok());
+        }
+
+        pub fn create_table_with_param<PSD, OK, OCS>(pa: * mut PSD, ks: * mut OK, pos: * mut OCS) -> FabricTable<PSD, OK, OCS>
+            where
+                PSD: PersistentStorageDelegate,
+                OK: crypto::OperationalKeystore,
+                OCS: credentials::OperationalCertificateStore,
+        {
+            // init the table with all the stroages
+            let mut init_params = InitParams::<PSD, OK, OCS>::default();
+            init_params.storage = pa;
+            init_params.operational_keystore = ks;
+            init_params.op_certs_store = pos;
+
+            let mut table = FabricTable::<PSD, OK, OCS>::default();
+
+            assert_eq!(true, table.init(&init_params).is_ok());
+
+            return table;
         }
 
 
@@ -2216,25 +2257,85 @@ mod fabric_table {
         }
 
         // TODO: test with commit marker after delete implement
-
-        /*
+        
         #[test]
-        fn init_with_no_index_info_successfull() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
-            let mut init_params = InitParams::default();
+        fn delete_one_fabric_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            init_params.storage = ptr::addr_of_mut!(pa);
-            init_params.op_certs_store = ptr::addr_of_mut!(mock_op_cert_store);
+            let mut ks = MockOperationalKeystore::new();
+            let mut pos = MockOperationalCertificateStore::new();
+            
+            // expect remove one keypair
+            ks.expect_remove_op_keypair_for_fabric()
+                .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
+                .return_const(Ok(()));
 
-            // reset all fabric
-            for i in 0..table.m_states.len() {
-                table.m_states[i].expect_reset().
-                    return_const(());
-            }
+            // expect remove one certification
+            pos.expect_remove_certs_for_fabric()
+                .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
+                .return_const(Ok(()));
 
-            assert_eq!(true, table.init(&init_params).is_ok());
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            // to simulate an existed fabric info
+            table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_fabric_count = 1;
+
+            assert_eq!(true, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("error {}", e)).is_ok());
+            assert_eq!(0, table.fabric_count());
         }
-        */
+
+        #[test]
+        fn delete_pending_fabric_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = MockOperationalKeystore::new();
+            let mut pos = MockOperationalCertificateStore::new();
+
+            let mut seq = Sequence::new();
+
+            // expect revert certification except root
+            // called in revert_root_cert
+            pos.expect_revert_pending_op_certs_except_root()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(());
+
+            // expect revert key pair
+            // called in revert pending fabric
+            ks.expect_revert_pending_keypair()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(());
+            // expect revert certification except root once again
+            pos.expect_revert_pending_op_certs_except_root()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(());
+
+            // expect remove one keypair
+            // called in delete regardless the above result
+            ks.expect_remove_op_keypair_for_fabric()
+                .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Err(chip_error_invalid_fabric_index!()));
+            // expect remove one certification
+            pos.expect_remove_certs_for_fabric()
+                .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_const(Err(chip_error_invalid_fabric_index!()));
+
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            // to simulate an existed pending fabric info
+            table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            assert_eq!(false, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| assert_eq!(true, *e == chip_error_not_found!())).is_ok());
+            assert_eq!(KUNDEFINED_FABRIC_INDEX, table.m_pending_fabric.get_fabric_index());
+        }
     } // end of mod tests
 } // end of mod fabric_table

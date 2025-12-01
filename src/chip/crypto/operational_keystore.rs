@@ -7,6 +7,10 @@ use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
 
+#[cfg(test)]
+use mockall::*;
+
+#[cfg_attr(test, mockall::automock)]
 pub trait OperationalKeystore {
     fn has_pending_op_keypair(&self) -> bool;
 
