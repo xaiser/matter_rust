@@ -1585,11 +1585,8 @@ mod fabric_table {
             let mut inner_container_type = TlvType::KtlvTypeNotSpecified;
             writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut inner_container_type)?;
 
-            // TODO: use iterator once we implement it.
-            for f in &self.m_states {
-                if f.is_initialized() {
-                    writer.put_u8(anonymous_tag(), f.get_fabric_index());
-                }
+            for f in & *self {
+                writer.put_u8(anonymous_tag(), f.get_fabric_index());
             }
 
             writer.end_container(inner_container_type)?;
@@ -1699,6 +1696,7 @@ mod fabric_table {
 
     pub struct FabricIterator<'a> {
         m_next: core::slice::Iter<'a, FabricInfo>,
+        m_pending: Option<&'a FabricInfo>,
     }
 
     impl<'a, PSD, OK, OCS> IntoIterator for &'a FabricTable<PSD, OK, OCS>
@@ -1711,8 +1709,14 @@ mod fabric_table {
         type IntoIter = FabricIterator<'a>;
 
         fn into_iter(self) -> Self::IntoIter {
+            let pending = if self.has_pending_fabric_update() {
+                    Some(&self.m_pending_fabric)
+                } else {
+                    None
+                };
             FabricIterator {
-                m_next: self.m_states.as_slice().iter()
+                m_next: self.m_states.iter(),
+                m_pending: pending,
             }
         }
     }
@@ -1722,7 +1726,61 @@ mod fabric_table {
         type Item = &'a FabricInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
-            if let Some(info) = &self.m_next.next() {
+            if let Some(info) = self.m_next.next() {
+                // check if this info is shadowed first
+                if self.m_pending.as_ref().is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index()) {
+                    return self.m_pending.take();
+                }
+
+                if info.is_initialized() {
+                    Some(info)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct FabricIteratorMut<'a> {
+        m_next: core::slice::IterMut<'a, FabricInfo>,
+        m_pending: Option<&'a mut FabricInfo>,
+    }
+
+    impl<'a, PSD, OK, OCS> IntoIterator for &'a mut FabricTable<PSD, OK, OCS>
+    where
+        PSD: PersistentStorageDelegate,
+        OK: crypto::OperationalKeystore,
+        OCS: credentials::OperationalCertificateStore,
+    {
+        type Item = &'a mut FabricInfo;
+        type IntoIter = FabricIteratorMut<'a>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            let pending = if self.has_pending_fabric_update() {
+                    Some(&mut self.m_pending_fabric)
+                } else {
+                    None
+                };
+            FabricIteratorMut {
+                m_next: self.m_states.iter_mut(),
+                m_pending: pending,
+            }
+        }
+    }
+
+    impl<'a> Iterator for FabricIteratorMut<'a>
+    {
+        type Item = &'a mut FabricInfo;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(info) = self.m_next.next() {
+                // check if this info is shadowed first
+                if self.m_pending.as_ref().is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index()) {
+                    return self.m_pending.take();
+                }
+
                 if info.is_initialized() {
                     Some(info)
                 } else {
@@ -2497,6 +2555,57 @@ mod fabric_table {
             let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
 
             assert_eq!(false, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("error {}", e)).is_ok());
+        }
+
+        #[test]
+        fn iter_one_info_table() {
+            let mut table = TestFabricTable::default();
+
+            // to simulate an existed fabric info
+            table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+
+            assert_eq!(true, table.into_iter().next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX));
+
+            for info in &table {
+                assert_eq!(KMIN_VALID_FABRIC_INDEX, info.get_fabric_index());
+            }
+        }
+
+        #[test]
+        fn iter_two_info_table() {
+            let mut table = TestFabricTable::default();
+
+            // to simulate existed fabric info
+            table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_states[1] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX + 1);
+
+            let mut iter = table.into_iter();
+
+            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX));
+            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1));
+        }
+
+        #[test]
+        fn iter_two_info_with_pending_shadow() {
+            let mut table = TestFabricTable::default();
+
+            // to simulate existed fabric info
+            table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_states[1] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX + 1);
+
+            // to set up a name for fabric info at 0
+            table.m_states[0].set_fabric_label("should be removed");
+
+            // to simulate an existed pending fabric info
+            table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_pending_fabric.set_fabric_label("pending");
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            let mut iter = table.into_iter();
+
+            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX && info.get_fabric_label() == Some("pending")));
+            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1));
         }
     } // end of mod tests
 } // end of mod fabric_table
