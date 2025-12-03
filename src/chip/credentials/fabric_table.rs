@@ -1183,7 +1183,28 @@ mod fabric_table {
             Err(chip_error_not_found!())
         }
 
-        pub fn delete_all_fabric(&mut self) {}
+        pub fn delete_all_fabric(&mut self) {
+            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
+
+            self.revert_pending_fabric_data();
+
+            let mut to_be_deleted: [bool; CHIP_CONFIG_MAX_FABRICS] = [false; CHIP_CONFIG_MAX_FABRICS];
+
+            for fabric in &mut *self {
+                let index = fabric.get_fabric_index() as usize;
+                if index <= CHIP_CONFIG_MAX_FABRICS {
+                    to_be_deleted[index] = true;
+                } else {
+                    chip_log_error!(FabricProvisioning, "cannot delete {}", index);
+                }
+            }
+
+            for (index, deleted) in to_be_deleted.into_iter().enumerate() {
+                if deleted {
+                    self.delete(index as u8);
+                }
+            }
+        }
 
         pub fn find_fabric(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId) -> Option<FabricInfo> {
             None
