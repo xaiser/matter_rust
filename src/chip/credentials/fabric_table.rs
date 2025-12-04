@@ -155,7 +155,7 @@ mod fabric_info {
                 &self,
                 compressed_fabric_id: &mut [u8],
             ) -> ChipErrorResult;
-            pub fn fetch_root_pubkey<'a>(&'a self) -> Result<&'a P256PublicKey, ChipError>;
+            pub fn fetch_root_pubkey(&self) -> Result<P256PublicKey, ChipError>;
             pub fn get_vendor_id(&self) -> VendorId;
             pub fn is_initialized(&self) -> bool;
             pub fn has_operational_key(&self) -> bool;
@@ -279,11 +279,10 @@ mod fabric_info {
             chip_ok!()
         }
 
-        //pub fn fetch_root_pubkey(&self, out_public_key: &mut P256PublicKey) -> ChipErrorResult {
-        pub fn fetch_root_pubkey<'a>(&'a self) -> Result<&'a P256PublicKey, ChipError> {
+        pub fn fetch_root_pubkey(&self) -> Result<P256PublicKey, ChipError> {
             verify_or_return_error!(self.is_initialized(), Err(chip_error_key_not_found!()));
 
-            return Ok(&self.m_root_publick_key);
+            return Ok(self.m_root_publick_key.clone());
         }
 
         pub fn get_vendor_id(&self) -> VendorId {
@@ -1206,8 +1205,8 @@ mod fabric_table {
             }
         }
 
-        pub fn find_fabric(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId) -> Option<FabricInfo> {
-            None
+        pub fn find_fabric(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId) -> Option<&FabricInfo> {
+            return self.find_fabric_common(root_pub_key, fabric_id);
         }
 
         pub fn find_fabric_with_index(&self, fabric_index: FabricIndex) -> Option<&FabricInfo> {
@@ -1232,8 +1231,8 @@ mod fabric_table {
             return None;
         }
 
-        pub fn find_indentiy(&self, _root_pub_key: &P256PublicKey, _fabric_id: FabricId, _node_id: NodeId) -> Option<FabricInfo> {
-            None
+        pub fn find_indentiy(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId, node_id: NodeId) -> Option<&FabricInfo> {
+            return self.find_fabric_common_with_id(root_pub_key, fabric_id, Some(node_id));
         }
 
         pub fn find_fabric_with_compressed_id(&self, _compressed_fabric_id: CompressedFabricId) -> Option<FabricInfo> {
@@ -1317,7 +1316,7 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn fetch_root_pubkey(&self, fabric_index: FabricIndex) -> Result<&P256PublicKey, ChipError> {
+        pub fn fetch_root_pubkey(&self, fabric_index: FabricIndex) -> Result<P256PublicKey, ChipError> {
             matter_trace_scope!("FetchRootPubkey", "Fabric");
             let fabric_info = self.find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?;
 
@@ -1551,12 +1550,46 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        fn find_fabric_common_with_id(&self, _root_pub_key: &P256EcdsaSignature, _fabric_id: FabricId, _node_id: NodeId) -> Option<&FabricInfo> {
+        fn find_fabric_common_with_id(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId, node_id: Option<NodeId>) -> Option<&FabricInfo> {
+            // Try to match pending fabric first if available
+            if self.has_pending_fabric_update() {
+                let candidate_pub_key = self.m_pending_fabric.fetch_root_pubkey();
+                let matching_node_id = if let Some(id) = node_id {
+                    id
+                } else {
+                    self.m_pending_fabric.get_node_id()
+                };
+
+                if candidate_pub_key.as_ref().is_ok_and(|key| root_pub_key.matches(key)) && 
+                    fabric_id == self.m_pending_fabric.get_fabric_id() && matching_node_id == self.m_pending_fabric.get_node_id() {
+                        return Some(&self.m_pending_fabric);
+                }
+            }
+
+            for fabric in &self.m_states {
+                let matching_node_id = if let Some(id) = node_id {
+                    id
+                } else {
+                    fabric.get_node_id()
+                };
+
+                if !fabric.is_initialized() {
+                    continue;
+                }
+
+                if let Ok(key) = fabric.fetch_root_pubkey() {
+                    if root_pub_key.matches(&key) && fabric_id == fabric.get_fabric_id() && 
+                        matching_node_id == fabric.get_node_id() {
+                            return Some(fabric);
+                    }
+                }
+            }
+
             None
         }
 
-        fn find_fabric_common(&self, root_pub_key: &P256EcdsaSignature, fabric_id: FabricId) -> Option<&FabricInfo> {
-            return self.find_fabric_common_with_id(root_pub_key, fabric_id, KUNDEFINED_NODE_ID);
+        fn find_fabric_common(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId) -> Option<&FabricInfo> {
+            return self.find_fabric_common_with_id(root_pub_key, fabric_id, None);
         }
 
         fn update_next_available_fabric_index(&mut self) {
@@ -1855,7 +1888,7 @@ mod fabric_table {
                 self,
                 operational_keystore::MockOperationalKeystore,
                 generate_compressed_fabric_id,
-                crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair},
+                crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair, ECPKeyTarget},
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
                 operational_keystore::OperationalKeystore,
             },
@@ -1997,6 +2030,21 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
 
             return table;
+        }
+
+        pub fn add_stub_pending_fabric<PSD, OK, OCS>(table: &mut FabricTable<PSD, OK, OCS>, index: FabricIndex) 
+            where
+                PSD: PersistentStorageDelegate,
+                OK: crypto::OperationalKeystore,
+                OCS: credentials::OperationalCertificateStore,
+        {
+            // to simulate an existed pending fabric info
+            table.m_pending_fabric = get_stub_fabric_info_with_index(index);
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            // set up the label to compare the result
+            table.m_pending_fabric.set_fabric_label("pending");
         }
 
 
@@ -2627,6 +2675,266 @@ mod fabric_table {
 
             assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX && info.get_fabric_label() == Some("pending")));
             assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1));
+        }
+
+        #[test]
+        fn find_fabric_common_on_pending_fabric_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("pending");
+            table.m_pending_fabric = fabric_info;
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            // get the root public key
+            let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
+
+            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+        }
+
+        #[test]
+        fn find_fabric_common_on_pending_fabric_wrong_node_id() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("pending");
+            table.m_pending_fabric = fabric_info;
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            // get the root public key
+            let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id + 1)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+        }
+
+        #[test]
+        fn find_fabric_common_on_pending_fabric_wrong_fabric_id() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("pending");
+            table.m_pending_fabric = fabric_info;
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            // get the root public key
+            let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id + 1, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+        }
+
+        #[test]
+        fn find_fabric_common_on_pending_fabric_wrong_pub_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("pending");
+            table.m_pending_fabric = fabric_info;
+            table.m_state_flag.insert(StateFlags::KisUpdatePending);
+            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            // get other random public key
+            let mut keypair = P256Keypair::default();
+            keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key = keypair.public_key().clone();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+        }
+
+        #[test]
+        fn find_fabric_common_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("at0");
+
+            table.m_states[0] = fabric_info;
+
+            // get the root public key
+            let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
+
+            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+        }
+
+        #[test]
+        fn find_fabric_common_wrong_public_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("at0");
+
+            table.m_states[0] = fabric_info;
+
+            // get other random public key
+            let mut keypair = P256Keypair::default();
+            keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key = keypair.public_key().clone();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+        }
+
+        #[test]
+        fn find_fabric_common_wrong_fabric_id() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("at0");
+
+            table.m_states[0] = fabric_info;
+
+            // get the root public key
+            let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id + 1, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+        }
+
+        #[test]
+        fn find_fabric_common_wrong_node_id() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("at0");
+
+            table.m_states[0] = fabric_info;
+
+            // get the root public key
+            let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
+
+            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id + 1)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+        }
+
+        #[test]
+        fn find_fabric_common_no_node_id_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let expected_fabric_id: FabricId = 10u64;
+            let expected_node_id: NodeId = 11u64;
+
+            // create and insert the pending fabric
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = KMIN_VALID_FABRIC_INDEX;
+            init_pas.m_fabric_id = expected_fabric_id;
+            init_pas.m_node_id = expected_node_id;
+            let mut fabric_info = FabricInfo::default();
+            fabric_info.init(&init_pas);
+            fabric_info.set_fabric_label("at0");
+
+            table.m_states[0] = fabric_info;
+
+            // get the root public key
+            let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
+
+            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, None).is_some_and(|info| info.get_fabric_label() == Some("at0")));
         }
     } // end of mod tests
 } // end of mod fabric_table

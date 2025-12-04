@@ -402,6 +402,7 @@ pub type IdentityProtectionKey = SensitiveDataFixedBuffer<CHIP_CRYPTO_SYMMETRIC_
 pub type IdentityProtectionKeySpan = [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
 pub type AttestationChallenge = SensitiveDataFixedBuffer<CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES>;
 
+#[derive(Clone)]
 pub struct P256PublicKey {
     m_bytes: [u8; K_P256_PUBLIC_KEY_LENGTH],
 }
