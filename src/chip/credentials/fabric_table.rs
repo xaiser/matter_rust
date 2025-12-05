@@ -1397,12 +1397,37 @@ mod fabric_table {
             }
         }
 
-        pub fn set_fabric_label(&mut self, _fabric_index: FabricIndex, _fabric_label: &str) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        pub fn set_fabric_label(&mut self, fabric_index: FabricIndex, fabric_label: &str) -> ChipErrorResult {
+            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+            verify_or_return_error!(fabric_label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_invalid_argument!()));
+
+            if !self.find_fabric_with_index(fabric_index).is_some_and(|info| info.is_initialized()) {
+                return Err(chip_error_invalid_fabric_index!());
+            }
+
+            if let Some(info) = self.get_mutable_fabric_by_index(fabric_index) {
+                info.set_fabric_label(fabric_label)?;
+            }
+
+            // we cannot borrow mut info and call the store_fabric_meta. So we have to borrow
+            // immutable info once again to store the data
+            if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                if !self.m_state_flag.intersects(StateFlags::KisAddPending | StateFlags::KisUpdatePending) &&
+                    info.get_fabric_index() != self.m_pending_fabric.get_fabric_index() {
+                        self.store_fabric_metadata(info)?;
+                }
+            }
+
+            chip_ok!()
         }
 
-        pub fn get_fabric_label(&self, _fabric_index: FabricIndex) -> Result<&str, ChipError> {
-            Err(chip_error_not_implemented!())
+        pub fn get_fabric_label(&self, fabric_index: FabricIndex) -> Result<Option<&str>, ChipError> {
+            if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                Ok(info.get_fabric_label())
+            } else {
+                Err(chip_error_invalid_fabric_index!())
+            }
         }
 
         pub fn get_last_known_good_chip_epoch_time(&self) -> Result<Seconds32, ChipError> {
@@ -1666,8 +1691,19 @@ mod fabric_table {
             return None;
         }
 
-        fn store_fabric_metadata(&mut self, _fabric_info: &FabricInfo) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn store_fabric_metadata(&self, fabric_info: &FabricInfo) -> ChipErrorResult {
+            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+
+            let fabric_index = fabric_info.get_fabric_index();
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_internal!()));
+
+            unsafe {
+                fabric_info.commit_to_storge(self.m_storage.as_mut().unwrap())?;
+            }
+
+            chip_log_progress!(FabricProvisioning, "Metadata for fabric {:#x} persisted to storage.", fabric_index as u32);
+
+            chip_ok!()
         }
 
         fn set_pending_data_fabric_index(&mut self, _fabric_index: FabricIndex) -> bool {
@@ -3130,6 +3166,8 @@ mod fabric_table {
             let mut d = NoMockFabricTableDelegate::default();
 
             assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
         }
 
         #[test]
@@ -3147,6 +3185,81 @@ mod fabric_table {
             let mut d2 = NoMockFabricTableDelegate::default();
 
             assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d2))).is_ok());
+            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+            assert_eq!(d2.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+        }
+
+        #[test]
+        fn add_and_delete_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let mut d = NoMockFabricTableDelegate::default();
+
+            // add
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            // delete
+            table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d)));
+
+            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+
+            assert_ne!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+        }
+
+        #[test]
+        fn add_three_and_delete_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let mut d = NoMockFabricTableDelegate::default();
+            let mut d2 = NoMockFabricTableDelegate::default();
+            let mut d3 = NoMockFabricTableDelegate::default();
+
+            // add
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d2))).is_ok());
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d3))).is_ok());
+            // delete
+            table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d2)));
+
+            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+
+            assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+            assert_ne!(d2.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+            assert_eq!(d3.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
+        }
+
+        #[test]
+        fn set_fabric_label_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            // to simulate an existed fabric info
+            table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
+            table.m_fabric_count = 1;
+
+            assert_eq!(true, table.set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0").is_ok());
+        }
+
+        #[test]
+        fn set_fabric_label_to_not_init_one() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            assert_eq!(false, table.set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0").is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
