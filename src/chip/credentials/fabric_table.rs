@@ -781,7 +781,7 @@ mod fabric_table {
         }
     }
 
-    trait Delegate<PSD, OK, OCS> 
+    pub trait Delegate<PSD, OK, OCS> 
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
@@ -1369,9 +1369,31 @@ mod fabric_table {
             chip_ok!()
         }
 
-        pub fn remove_fabric_delegate(&mut self, delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
+        pub fn remove_fabric_delegate(&mut self, mut delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
             if delegate.is_none() {
                 return;
+            }
+
+            unsafe {
+                if self.m_delegate_list_root.is_some() && self.m_delegate_list_root == delegate {
+                    let root = self.m_delegate_list_root.take().unwrap();
+                    self.m_delegate_list_root = root.clone().as_mut().unwrap().next();
+                } else {
+                    let mut current = self.m_delegate_list_root;
+
+                    while current.is_some() {
+                        let peek_next = current.clone().take().unwrap().as_ref().unwrap().next();
+                        let next = current.clone().take().unwrap().as_ref().unwrap().next();
+                        if peek_next == delegate {
+                            let temp = delegate.clone().take().unwrap().as_ref().unwrap().next();
+                            current.take().unwrap().as_mut().unwrap().set_next(temp);
+                            delegate.take().unwrap().as_mut().unwrap().set_next(None);
+                            return;
+                        }
+
+                        current = next;
+                    }
+                }
             }
         }
 
@@ -1998,7 +2020,7 @@ mod fabric_table {
                 operational_certificate_store::{CertChainElement, OperationalCertificateStore, MockOperationalCertificateStore},
                 chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
                 fabric_table::{
-                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag, StateFlags, commit_marker_context_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag},
+                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag, StateFlags, commit_marker_context_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag, Delegate},
                     fabric_info,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
@@ -2036,6 +2058,47 @@ mod fabric_table {
         type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
 
         type MockStorageTestFabricTable = FabricTable<TestPersistentStorage, MockOperationalKeystore, MockOperationalCertificateStore>;
+
+        #[derive(Default)]
+        struct TestFabricTableDelegate<PSD, OK, OCS> 
+        where
+            PSD: PersistentStorageDelegate,
+            OK: crypto::OperationalKeystore,
+            OCS: credentials::OperationalCertificateStore,
+        {
+            pub will_be_removed: FabricIndex,
+            pub on_removed: FabricIndex,
+            pub next: Option<* mut dyn Delegate<PSD, OK, OCS>>,
+        }
+
+        type NoMockFabricTableDelegate = TestFabricTableDelegate<TestPersistentStorage, OK, OCS>;
+
+        impl<PSD, OK, OCS> Delegate<PSD, OK, OCS> for TestFabricTableDelegate<PSD, OK, OCS>
+        where
+            PSD: PersistentStorageDelegate,
+            OK: crypto::OperationalKeystore,
+            OCS: credentials::OperationalCertificateStore,
+        {
+            fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex) {
+                self.will_be_removed = fabric_index;
+            }
+
+            fn on_fabric_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex) {
+                self.on_removed = fabric_index;
+            }
+
+            fn next(&self) -> Option<* mut dyn Delegate<PSD, OK, OCS>> {
+                return self.next.clone();
+            }
+
+            fn remove_next(&mut self) {
+                self.next = None;
+            }
+
+            fn set_next(&mut self, next: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
+                self.next = next;
+            }
+        }
 
         fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo {
             let mut init_pas = fabric_info::InitParams::default();
@@ -3054,6 +3117,36 @@ mod fabric_table {
             let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
 
             assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, None).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+        }
+
+        #[test]
+        fn add_one_delegate_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let mut d = NoMockFabricTableDelegate::default();
+
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+        }
+
+        #[test]
+        fn add_two_delegate_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let mut d = NoMockFabricTableDelegate::default();
+
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+
+            let mut d2 = NoMockFabricTableDelegate::default();
+
+            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d2))).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
