@@ -789,7 +789,9 @@ mod fabric_table {
     {
         fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
         fn on_fabric_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
-        fn next(&self) -> * mut dyn Delegate<PSD, OK, OCS>;
+        fn next(&self) -> Option<* mut dyn Delegate<PSD, OK, OCS>>;
+        fn remove_next(&mut self);
+        fn set_next(&mut self, next: Option<* mut dyn Delegate<PSD, OK, OCS>>);
     }
 
     #[repr(u8)]
@@ -1087,6 +1089,17 @@ mod fabric_table {
             verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
             verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
 
+            let mut delegate = self.m_delegate_list_root;
+            unsafe {
+                while delegate.is_some() {
+                    let d = delegate.take().unwrap().as_mut().unwrap();
+                    let next = d.next();
+                    d.fabric_will_be_removed(self, fabric_index);
+                    delegate = next;
+                }
+            }
+
+            /*
             if let Some(mut delegate) = self.m_delegate_list_root {
                 unsafe {
                     while !delegate.is_null() {
@@ -1097,6 +1110,7 @@ mod fabric_table {
                     }
                 }
             }
+            */
 
             if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
                 self.revert_pending_fabric_data();
@@ -1163,6 +1177,16 @@ mod fabric_table {
                 }
             }
 
+            let mut delegate = self.m_delegate_list_root;
+            unsafe {
+                while delegate.is_some() {
+                    let d = delegate.take().unwrap().as_mut().unwrap();
+                    let next = d.next();
+                    d.on_fabric_removed(self, fabric_index);
+                    delegate = next;
+                }
+            }
+            /*
             if let Some(mut delegate) = self.m_delegate_list_root {
                 unsafe {
                     while !delegate.is_null() {
@@ -1173,6 +1197,7 @@ mod fabric_table {
                     }
                 }
             }
+            */
 
             if fabric_is_initialized {
                 // Only return error after trying really hard to remove everything we could
@@ -1235,25 +1260,119 @@ mod fabric_table {
             return self.find_fabric_common_with_id(root_pub_key, fabric_id, Some(node_id));
         }
 
-        pub fn find_fabric_with_compressed_id(&self, _compressed_fabric_id: CompressedFabricId) -> Option<FabricInfo> {
-            None
+        pub fn find_fabric_with_compressed_id(&self, compressed_fabric_id: CompressedFabricId) -> Option<&FabricInfo> {
+            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_compressed_fabric_id() == compressed_fabric_id) {
+                return Some(&self.m_pending_fabric);
+            }
+
+            for fabric in &self.m_states {
+                if !fabric.is_initialized() {
+                    continue;
+                }
+
+                // Don't need peer id, I guess?
+                // if (compressedFabricId == fabric.GetPeerId().GetCompressedFabricId())
+                if compressed_fabric_id == fabric.get_compressed_fabric_id() {
+                    return Some(fabric);
+                }
+            }
+
+            return None;
         }
 
-        pub fn shutdown(&mut self) {}
+        pub fn shutdown(&mut self) {
+            if self.m_storage.is_null() {
+                return;
+            }
+            chip_log_progress!(FabricProvisioning, "Shutting down FabricTable");
 
-        pub fn get_deleted_fabric_from_commit_marker(&self) -> FabricIndex {
-            0
+            let mut delegate = self.m_delegate_list_root;
+            unsafe {
+                while delegate.is_some() {
+                    let d = delegate.take().unwrap().as_mut().unwrap();
+                    let next = d.next();
+                    d.remove_next();
+                    delegate = next;
+                }
+            }
+            /*
+            if let Some(mut delegate) = self.m_delegate_list_root {
+                unsafe {
+                    while !delegate.is_null() {
+                        let delegate_ref = delegate.as_mut().unwrap();
+                        let next_delegate = delegate_ref.next();
+                        delegate_ref.remove_next();
+                        delegate = next_delegate;
+                    }
+                }
+            }
+            */
+
+            self.revert_pending_fabric_data();
+
+            for fabric in &mut self.m_states {
+                fabric.reset();
+            }
+
+            self.m_storage = ptr::null_mut();
         }
 
-        pub fn clear_commit_marker(&mut self) {}
+        pub fn get_deleted_fabric_from_commit_marker(&mut self) -> FabricIndex {
+            let ret_val = self.m_deleted_fabric_index_from_init;
 
-        pub fn forget(&mut self, _fabric_index: FabricIndex) {}
+            self.m_deleted_fabric_index_from_init = KUNDEFINED_FABRIC_INDEX;
 
-        pub fn add_fabric_delegate(&mut self, _delegate: * mut dyn Delegate<PSD, OK, OCS>) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            ret_val
         }
 
-        pub fn remove_fabric_delegate(&mut self, _delegate: * mut dyn Delegate<PSD, OK, OCS>) {
+        pub fn clear_commit_marker(&mut self) {
+            if self.m_storage.is_null() {
+                return;
+            }
+            unsafe {
+                self.m_storage.as_mut().unwrap().sync_delete_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str());
+            }
+        }
+
+        pub fn forget(&mut self, fabric_index: FabricIndex) {
+            chip_log_progress!(FabricProvisioning, "Forgetting fabirc {:#x}", fabric_index as u32);
+
+            let is_found = self.get_mutable_fabric_by_index(fabric_index).is_some();
+
+            if is_found {
+                self.revert_pending_fabric_data();
+                if let Some(info) = self.get_mutable_fabric_by_index(fabric_index) {
+                    info.reset();
+                }
+            }
+        }
+
+        pub fn add_fabric_delegate(&mut self, delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) -> ChipErrorResult {
+            verify_or_return_error!(delegate.is_some(), Err(chip_error_invalid_argument!()));
+
+            let delegate = delegate.unwrap();
+
+            unsafe {
+                let mut iter = self.m_delegate_list_root;
+                while iter.is_some() {
+                    let i = iter.take().unwrap();
+                    if delegate == i {
+                        return chip_ok!();
+                    }
+                    iter = i.as_ref().unwrap().next();
+                }
+
+                delegate.clone().as_mut().unwrap().set_next(self.m_delegate_list_root);
+                self.m_delegate_list_root = Some(delegate);
+            }
+
+            chip_ok!()
+        }
+
+        pub fn remove_fabric_delegate(&mut self, delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
+            if delegate.is_none() {
+                return;
+            }
         }
 
         pub fn set_fabric_label(&mut self, _fabric_index: FabricIndex, _fabric_label: &str) -> ChipErrorResult {
