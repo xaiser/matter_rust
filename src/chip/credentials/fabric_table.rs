@@ -507,7 +507,7 @@ mod fabric_info {
         use crate::chip::{
             credentials::{
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
-                chip_cert::ChipCertTag,
+                chip_cert::{ChipCertTag, tag_not_before, tag_not_after},
             },
             crypto::{
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
@@ -565,6 +565,11 @@ mod fabric_info {
 
             // add to cert
             writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+
+            // put a not before
+            writer.put_u32(tag_not_before(), 0);
+            // put a not after
+            writer.put_u32(tag_not_after(), 0);
 
             // end struct container
             writer.end_container(outer_container);
@@ -1186,18 +1191,6 @@ mod fabric_table {
                     delegate = next;
                 }
             }
-            /*
-            if let Some(mut delegate) = self.m_delegate_list_root {
-                unsafe {
-                    while !delegate.is_null() {
-                        let delegate_ref = delegate.as_mut().unwrap();
-                        let next_delegate = delegate_ref.next();
-                        delegate_ref.on_fabric_removed(self, fabric_index);
-                        delegate = next_delegate;
-                    }
-                }
-            }
-            */
 
             if fabric_is_initialized {
                 // Only return error after trying really hard to remove everything we could
@@ -1295,18 +1288,6 @@ mod fabric_table {
                     delegate = next;
                 }
             }
-            /*
-            if let Some(mut delegate) = self.m_delegate_list_root {
-                unsafe {
-                    while !delegate.is_null() {
-                        let delegate_ref = delegate.as_mut().unwrap();
-                        let next_delegate = delegate_ref.next();
-                        delegate_ref.remove_next();
-                        delegate = next_delegate;
-                    }
-                }
-            }
-            */
 
             self.revert_pending_fabric_data();
 

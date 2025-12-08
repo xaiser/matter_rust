@@ -7,14 +7,15 @@ use crate::chip::{
             data_model_types::is_valid_fabric_id,
             node_id::is_operational_node_id,
             tlv_types::TlvType,
-            tlv_tags::{is_context_tag, tag_num_from_tag},
+            tlv_tags::{is_context_tag, tag_num_from_tag, context_tag, Tag},
             chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
         },
         support::default_string::DefaultString,
     },
     credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
-    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH}
+    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH},
+    system::system_clock::Seconds32,
 };
 
 use crate::chip_core_error;
@@ -106,6 +107,16 @@ fn is_chip_32bit_dn_attr(oid: Oid) -> bool {
 #[inline]
 fn is_chip_dn_attr(oid: Oid) -> bool {
     return is_chip_64bit_dn_attr(oid) || is_chip_32bit_dn_attr(oid);
+}
+
+#[inline]
+pub(crate) fn tag_not_before() -> Tag {
+    context_tag(ChipCertTag::KtagNotBefore as u8)
+}
+
+#[inline]
+pub(crate) fn tag_not_after() -> Tag {
+    context_tag(ChipCertTag::KtagNotAfter as u8)
 }
 
 pub struct CertBuffer {
@@ -328,6 +339,8 @@ impl Default for ChipDN {
 pub struct ChipCertificateData {
     pub m_subject_dn: ChipDN,
     pub m_public_key: [u8; K_P256_PUBLIC_KEY_LENGTH],
+    pub m_not_before_time: u32,
+    pub m_not_after_time: u32,
 }
 
 impl ChipCertificateData {
@@ -335,6 +348,8 @@ impl ChipCertificateData {
         Self {
             m_subject_dn: ChipDN::const_default(),
             m_public_key: [0; K_P256_PUBLIC_KEY_LENGTH],
+            m_not_before_time: 0,
+            m_not_after_time: 0,
         }
     }
 }
@@ -383,6 +398,28 @@ pub fn extract_public_key_from_chip_cert_byte(opcert: &[u8]) -> Result<P256Publi
     decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
 
     extract_public_key_from_chip_cert(&op_cert)
+}
+
+pub fn extract_not_before_from_chip_cert(opcert: &ChipCertificateData) -> Result<Seconds32, ChipError> {
+    Ok(Seconds32::from_secs(opcert.m_not_before_time as u64))
+}
+
+pub fn extract_not_before_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32, ChipError> {
+    let mut op_cert: ChipCertificateData = ChipCertificateData::default();
+    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+
+    extract_not_before_from_chip_cert(&op_cert)
+}
+
+pub fn extract_not_after_from_chip_cert(opcert: &ChipCertificateData) -> Result<Seconds32, ChipError> {
+    Ok(Seconds32::from_secs(opcert.m_not_after_time as u64))
+}
+
+pub fn extract_not_after_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32, ChipError> {
+    let mut op_cert: ChipCertificateData = ChipCertificateData::default();
+    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+
+    extract_not_after_from_chip_cert(&op_cert)
 }
 
 #[cfg(test)]
@@ -722,6 +759,11 @@ mod tests {
             // add to cert
             assert_eq!(true, writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), &fake_public_key[..]).inspect_err(|e| println!("{:?}", e)).is_ok());
 
+            // put a not before
+            writer.put_u32(tag_not_before(), 0);
+            // put a not after
+            writer.put_u32(tag_not_after(), 0);
+
             // end struct container
             assert_eq!(true, writer.end_container(outer_container).is_ok());
 
@@ -766,6 +808,11 @@ mod tests {
             }
             // add to cert
             assert_eq!(true, writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), &fake_public_key[..]).inspect_err(|e| println!("{:?}", e)).is_ok());
+
+            // put a not before
+            writer.put_u32(tag_not_before(), 0);
+            // put a not after
+            writer.put_u32(tag_not_after(), 0);
 
             // end struct container
             assert_eq!(true, writer.end_container(outer_container).is_ok());

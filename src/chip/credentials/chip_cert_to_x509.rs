@@ -1,8 +1,8 @@
 use crate::chip::{
-    credentials::chip_cert::{ChipCertificateData, CertDecodeFlags, ChipCertTag},
+    credentials::chip_cert::{ChipCertificateData, CertDecodeFlags, ChipCertTag, tag_not_before, tag_not_after},
     chip_lib::core::{
         tlv_types::TlvType,
-        tlv_tags::{anonymous_tag, context_tag},
+        tlv_tags::{anonymous_tag, context_tag, Tag},
         tlv_reader::{TlvContiguousBufferReader, TlvReader},
     },
 };
@@ -30,6 +30,8 @@ use crate::verify_or_return_value;
 // struct {
 //     SbujectDNs: [..]
 //     ECPublicKey
+//     NotBeforeTime
+//     NotAfterTime
 // }
 
 pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
@@ -66,6 +68,14 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
     
     // get public key
     decode_subject_public_key_info(reader, cert_data);
+
+    // get validity
+    // not before time
+    reader.next_tag(tag_not_before())?;
+    cert_data.m_not_before_time= reader.get_u32()?;
+    // not after time
+    reader.next_tag(tag_not_after())?;
+    cert_data.m_not_after_time = reader.get_u32()?;
 
     reader.verify_end_of_container()?;
 
