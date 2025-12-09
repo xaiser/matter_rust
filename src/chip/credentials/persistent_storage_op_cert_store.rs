@@ -635,7 +635,7 @@ where
                 // now we have not_found error
                 // If we have a pending NOC and no pending ICAC, don't delegate to storage, return not found here
                 // since in the pending state, there truly is nothing.
-                if element == CertChainElement::Kicac {
+                if element == CertChainElement::Kicac && self.m_pending_noc.is_some() {
                     // Don't delegate to storage if we just have a pending NOC and are missing the ICAC
                     return Err(not_found);
                 }

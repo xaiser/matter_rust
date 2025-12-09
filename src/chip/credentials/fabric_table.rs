@@ -539,6 +539,50 @@ mod fabric_info {
             return fake_public_key;
         }
 
+        pub fn make_chip_cert_with_time(
+            matter_id_value: u64, fabric_id_value: u64, public_key: &[u8],
+            not_before: Seconds32, not_after: Seconds32
+            ) -> Result<CertBuffer, ()> {
+            let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a struct
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+
+            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            // end of list conatiner
+            writer.end_container(outer_container_dn_list);
+
+            // add to cert
+            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+
+            // put a not before
+            writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
+            // put a not after
+            writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
+
+            // end struct container
+            writer.end_container(outer_container);
+
+            let mut cert = CertBuffer::default();
+            cert.init(&raw_tlv[..writer.get_length_written()]);
+
+            return Ok(cert);
+        }
+
         pub fn make_chip_cert(matter_id_value: u64, fabric_id_value: u64, public_key: &[u8]) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -657,7 +701,7 @@ mod fabric_table {
         credentials::{
             self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
             certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
-            chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
+            chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte, extract_not_before_from_chip_cert_byte},
         },
         crypto::{
             self,
@@ -1415,8 +1459,37 @@ mod fabric_table {
             self.m_last_known_good_time.get_last_known_good_chip_epoch_time()
         }
 
-        pub fn set_last_known_good_chip_epoch_time(&mut self, _last_known_good_chip_epoch_time: Seconds32) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        pub fn set_last_known_good_chip_epoch_time(&mut self, last_known_good_chip_epoch_time: Seconds32) -> ChipErrorResult {
+            let mut latest_not_before = Seconds32::from_secs(0);
+            for fabric in &self.m_states {
+                if !fabric.is_initialized() {
+                    continue;
+                }
+                {
+                    let mut rcac = CertBuffer::default();
+                    self.fetch_root_cert(fabric.get_fabric_index(), &mut rcac)?;
+                    let rcac_not_before = extract_not_before_from_chip_cert_byte(rcac.const_bytes())?;
+                    latest_not_before = core::cmp::max(latest_not_before, rcac_not_before);
+                }
+                {
+                    let mut icac = CertBuffer::default();
+                    self.fetch_icac_cert(fabric.get_fabric_index(), &mut icac)?;
+                    if icac.length() > 0 {
+                        let icac_not_before = extract_not_before_from_chip_cert_byte(icac.const_bytes())?;
+                        latest_not_before = core::cmp::max(latest_not_before, icac_not_before);
+                    }
+                }
+                {
+                    let mut noc = CertBuffer::default();
+                    self.fetch_noc_cert(fabric.get_fabric_index(), &mut noc)?;
+                    let noc_not_before = extract_not_before_from_chip_cert_byte(noc.const_bytes())?;
+                    latest_not_before = core::cmp::max(latest_not_before, noc_not_before);
+                }
+            }
+
+            self.m_last_known_good_time.set_last_known_good_chip_epoch_time(last_known_good_chip_epoch_time, latest_not_before)?;
+
+            chip_ok!()
         }
 
         pub fn fabric_count(&self) -> u8 {
@@ -1439,8 +1512,27 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn fetch_icac_cert(&self, _fabric_index: FabricIndex, _out_cert: &mut [u8]) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        pub fn fetch_icac_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+            matter_trace_scope!("FetchICACert", "Fabric");
+            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+
+            unsafe {
+                match self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Kicac, out_cert.all_bytes()) {
+                    Ok(size) => {
+                        out_cert.set_length(size)?;
+                        return chip_ok!();
+                    },
+                    Err(e) => {
+                        if e == chip_error_not_found!() {
+                            if self.m_op_cert_store.as_ref().unwrap().has_certificate_for_fabric(fabric_index, CertChainElement::Knoc) {
+                                out_cert.set_length(0);
+                                return chip_ok!();
+                            }
+                        }
+                        return Err(e);
+                    }
+                }
+            }
         }
 
         pub fn fetch_noc_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
@@ -3241,6 +3333,119 @@ mod fabric_table {
             let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
 
             assert_eq!(false, table.set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0").is_ok());
+        }
+
+        #[test]
+        fn set_last_known_good_time_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let OFFSET = 50;
+
+            // commit public key to storage
+            ks.init(ptr::addr_of_mut!(pa));
+            let mut out_csr: [u8; 256] = [0; 256];
+            let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
+            let pub_key = ks.get_pending_pub_key();
+            assert!(pub_key.is_some());
+            let pub_key = pub_key.unwrap();
+            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+
+            // commit certs to storage
+            pos.init(ptr::addr_of_mut!(pa));
+            let rcac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
+            let icac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 1) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
+            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 2) as u64, (fabric_index + OFFSET + 3) as u64, pub_key.const_bytes()).unwrap();
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
+
+            // all the not before is 0
+            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
+        }
+
+        #[test]
+        fn set_last_known_good_time_not_before_rcac_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let OFFSET = 50;
+
+            // commit public key to storage
+            ks.init(ptr::addr_of_mut!(pa));
+            let mut out_csr: [u8; 256] = [0; 256];
+            let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
+            let pub_key = ks.get_pending_pub_key();
+            assert!(pub_key.is_some());
+            let pub_key = pub_key.unwrap();
+            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+
+            // commit certs to storage
+            pos.init(ptr::addr_of_mut!(pa));
+            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
+            let icac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 1) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes()).unwrap();
+            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 3) as u64, (fabric_index + OFFSET + 4) as u64, pub_key.const_bytes()).unwrap();
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
+
+            // to initialize the fabric
+            table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
+
+            // all the not before is 0
+            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(0)).is_ok());
+            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
+        }
+
+        #[test]
+        fn set_last_known_good_time_not_before_icac_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let OFFSET = 50;
+
+            // commit public key to storage
+            ks.init(ptr::addr_of_mut!(pa));
+            let mut out_csr: [u8; 256] = [0; 256];
+            let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
+            let pub_key = ks.get_pending_pub_key();
+            assert!(pub_key.is_some());
+            let pub_key = pub_key.unwrap();
+            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+
+            // commit certs to storage
+            pos.init(ptr::addr_of_mut!(pa));
+            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
+            let icac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(2), Seconds32::from_secs(0)).unwrap();
+            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 3) as u64, (fabric_index + OFFSET + 4) as u64, pub_key.const_bytes()).unwrap();
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
+
+            // to initialize the fabric
+            table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
+
+            // all the not before is 0
+            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
+            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(2)).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
