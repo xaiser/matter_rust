@@ -494,7 +494,7 @@ where
         false
     }
 
-    fn sign_with_op_keyapir(
+    fn sign_with_op_keypair(
         &self,
         fabric_index: FabricIndex,
         message: &[u8],
@@ -927,7 +927,7 @@ mod tests {
         assert_eq!(
             true,
             store
-                .sign_with_op_keyapir(2, &[1, 2, 3, 4], &mut sig_with_pending_keypair)
+                .sign_with_op_keypair(2, &[1, 2, 3, 4], &mut sig_with_pending_keypair)
                 .is_ok()
         );
         // commit it
@@ -947,7 +947,7 @@ mod tests {
         assert_eq!(
             true,
             store
-                .sign_with_op_keyapir(2, &[1, 2, 3, 4], &mut sig_with_stored_keypair)
+                .sign_with_op_keypair(2, &[1, 2, 3, 4], &mut sig_with_stored_keypair)
                 .is_ok()
         );
 

@@ -171,7 +171,7 @@ mod fabric_info {
             ) -> ChipErrorResult;
             pub(super) fn sign_with_op_keypair(
                 &self,
-                message: &mut [u8],
+                message: &[u8],
                 out_signature: &mut P256EcdsaSignature,
             ) -> ChipErrorResult;
             pub(super) fn reset(&mut self);
@@ -374,7 +374,7 @@ mod fabric_info {
 
         pub(super) fn sign_with_op_keypair(
             &self,
-            message: &mut [u8],
+            message: &[u8],
             out_signature: &mut P256EcdsaSignature,
         ) -> ChipErrorResult {
             verify_or_return_error!(!self.m_operation_key.is_null(), Err(chip_error_key_not_found!()));
@@ -1566,8 +1566,19 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn sign_with_op_keypair(&self, _fabric_index: FabricIndex, _message: &[u8], _out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        pub fn sign_with_op_keypair(&self, fabric_index: FabricIndex, message: &[u8], out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
+            if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                if info.has_operational_key() {
+                    return info.sign_with_op_keypair(message, out_signature);
+                }
+
+                if !self.m_operational_keystore.is_null() {
+                    unsafe {
+                        return self.m_operational_keystore.as_ref().unwrap().sign_with_op_keypair(fabric_index, message, out_signature);
+                    }
+                }
+            }
+            Err(chip_error_key_not_found!())
         }
 
         pub fn allocate_ephemeral_keypair_for_case(&self) -> Result<P256Keypair, ChipError> {
@@ -1581,19 +1592,28 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
+        pub fn has_pending_operational_key(&self, out_is_pending_key_for_update_noc: &mut bool) -> bool {
+            let has_op_key_pending = self.m_state_flag.contains(StateFlags::KisOperationalKeyPending);
 
-        /**
-         * @brief Returns whether an operational key is pending (Some if `AllocatePendingOperationalKey` was
-         *        previously successfully called, None otherwise).
-         *
-         * @return in option: this is set to true if the `AllocatePendingOperationalKey` had an
-         *                                    associated fabric index attached, indicating it's for UpdateNoc
-         */
-        pub fn has_pending_operational_key(&self) -> Option<bool> {
-            None
+            if has_op_key_pending {
+                *out_is_pending_key_for_update_noc = self.m_state_flag.contains(StateFlags::KisPendingKeyForUpdateNoc);
+            }
+
+            has_op_key_pending
         }
 
-        pub fn has_operational_key_for_fabric(&self, _fabric_index: FabricIndex) -> bool {
+        pub fn has_operational_key_for_fabric(&self, fabric_index: FabricIndex) -> bool {
+            if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                if info.has_operational_key() {
+                    return true;
+                }
+                if !self.m_operational_keystore.is_null() {
+                    unsafe {
+                        return self.m_operational_keystore.as_ref().unwrap().has_op_keypair_for_fabric(fabric_index);
+                    }
+                }
+            }
+
             false
         }
 
@@ -1779,8 +1799,23 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn set_pending_data_fabric_index(&mut self, _fabric_index: FabricIndex) -> bool {
-            false
+        fn set_pending_data_fabric_index(&mut self, fabric_index: FabricIndex) -> bool {
+            let is_legal = (self.m_fabric_index_with_pending_state == KUNDEFINED_FABRIC_INDEX) ||
+                (self.m_fabric_index_with_pending_state == fabric_index);
+
+            if is_legal {
+                self.m_fabric_index_with_pending_state = fabric_index;
+            }
+
+            is_legal
+        }
+
+        fn get_pending_new_fabric_index(&self) -> FabricIndex {
+            if self.m_state_flag.contains(StateFlags::KisAddPending) {
+                return self.m_fabric_index_with_pending_state;
+            }
+
+            KUNDEFINED_FABRIC_INDEX
         }
 
         fn add_or_update_inner(&mut self, _fabric_index: FabricIndex, _is_addition: bool, _existing_op_key: &P256Keypair,
@@ -1953,8 +1988,34 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        fn store_commit_marker(&mut self, _commit_marker: &CommitMarker) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn store_commit_marker(&mut self, commit_marker: &CommitMarker) -> ChipErrorResult {
+            const SIZE: usize = commit_marker_context_tlv_max_size();
+            let mut raw_tlv: [u8; SIZE] = [0; SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+            let mut outer_container = TlvType::KtlvTypeNotSpecified;
+
+            // start a struct
+            writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_container)?;
+
+            writer.put_u8(marker_fabric_index_tag(), commit_marker.fabric_index as u8)?;
+
+            writer.put_boolean(marker_is_addition_tag(), commit_marker.is_addition)?;
+
+            // end of struct conatiner
+            writer.end_container(outer_container)?;
+
+            match u16::try_from(writer.get_length_written()) {
+                Ok(size) => {
+                    unsafe {
+                        return self.m_storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(), &raw_tlv[..size as usize]);
+                    }
+                },
+                Err(e) => {
+                    return Err(chip_error_buffer_too_small!());
+                }
+            }
         }
 
         fn get_commit_marker(&self) -> Result<CommitMarker, ChipError> {
@@ -3446,6 +3507,163 @@ mod fabric_table {
             // all the not before is 0
             assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
             assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(2)).is_ok());
+        }
+
+        #[test]
+        fn set_last_known_good_time_not_before_noc_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let OFFSET = 50;
+
+            // commit public key to storage
+            ks.init(ptr::addr_of_mut!(pa));
+            let mut out_csr: [u8; 256] = [0; 256];
+            let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
+            let pub_key = ks.get_pending_pub_key();
+            assert!(pub_key.is_some());
+            let pub_key = pub_key.unwrap();
+            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+
+            // commit certs to storage
+            pos.init(ptr::addr_of_mut!(pa));
+            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
+            let icac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(2), Seconds32::from_secs(0)).unwrap();
+            let noc = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
+                Seconds32::from_secs(3), Seconds32::from_secs(0)).unwrap();
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
+
+            // to initialize the fabric
+            table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
+
+            // all the not before is 0
+            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(2)).is_ok());
+            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(3)).is_ok());
+        }
+
+        #[test]
+        fn has_op_key_for_fabric_true() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
+            init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
+            // create an op key
+            let mut keypair = P256Keypair::default();
+            keypair.initialize(ECPKeyTarget::Ecdh);
+            init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
+            init_pas.m_has_externally_owned_operation_key = true;
+
+            // to initialize the fabric with op key
+            table.m_states[0].init(&init_pas);
+
+            assert_eq!(true, table.has_operational_key_for_fabric(fabric_index));
+        }
+
+        #[test]
+        fn has_op_key_for_fabric_from_storage() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // to initialize the fabric without op key
+            table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
+            // commit op key to storage
+            set_up_stub_fabric(fabric_index, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+
+            assert_eq!(true, table.has_operational_key_for_fabric(fabric_index));
+        }
+
+        #[test]
+        fn has_op_key_false() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            assert_eq!(false, table.has_operational_key_for_fabric(fabric_index));
+        }
+
+        #[test]
+        fn has_op_key_fabric_no_op_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // to initialize the fabric without op key
+            table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
+
+            assert_eq!(false, table.has_operational_key_for_fabric(fabric_index));
+        }
+
+        #[test]
+        fn sign_with_op_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
+            init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
+            // create an op key
+            let mut keypair = P256Keypair::default();
+            keypair.initialize(ECPKeyTarget::Ecdh);
+            init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
+            init_pas.m_has_externally_owned_operation_key = true;
+
+            // to initialize the fabric with op key
+            table.m_states[0].init(&init_pas);
+
+            let mut sig = P256EcdsaSignature::default();
+
+            assert_eq!(true, table.sign_with_op_keypair(fabric_index, b"123", &mut sig).is_ok());
+        }
+
+        #[test]
+        fn sign_with_op_key_no_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let mut sig = P256EcdsaSignature::default();
+
+            assert_eq!(false, table.sign_with_op_keypair(fabric_index, b"123", &mut sig).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table

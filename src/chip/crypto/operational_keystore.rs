@@ -54,7 +54,7 @@ pub trait OperationalKeystore {
         false
     }
 
-    fn sign_with_op_keyapir(
+    fn sign_with_op_keypair(
         &self,
         fabric_index: FabricIndex,
         message: &[u8],
