@@ -3868,13 +3868,14 @@ mod fabric_table {
 
             pos.init(ptr::addr_of_mut!(pa));
 
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
             let fabric_id: FabricId = 2;
 
             // create a noc and a rcac
-            let pub_key = stub_public_key();
-            let rcac = make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
-            let noc = make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let pub_key = FabricInfoTest::stub_public_key();
+            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
             // only update rcac to storage
             assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
 
@@ -3891,7 +3892,151 @@ mod fabric_table {
 
             table.m_states[0].init(&init_pas);
 
-            assert_eq!(true, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == *index));
+            assert_eq!(true, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+        }
+
+        #[test]
+        fn find_existing_fabric_invalid_noc() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let node_id: NodeId = 1;
+            let fabric_id: FabricId = 2;
+
+            // create a noc and a rcac
+            let pub_key = FabricInfoTest::stub_public_key();
+            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            //let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            // only update rcac to storage
+            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // init a fabric with the same public key and node id and fabric id
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_node_id = node_id;
+            init_pas.m_fabric_id = fabric_id;
+            init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            table.m_states[0].init(&init_pas);
+
+            // use an empty noc
+            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, &[]).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+        }
+
+        #[test]
+        fn find_existing_fabric_no_root_public_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let node_id: NodeId = 1;
+            let fabric_id: FabricId = 2;
+
+            // create a noc and a rcac
+            let pub_key = FabricInfoTest::stub_public_key();
+            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+
+            // no rcac commit
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // init a fabric with the same public key and node id and fabric id
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_node_id = node_id;
+            init_pas.m_fabric_id = fabric_id;
+            init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            table.m_states[0].init(&init_pas);
+
+            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+        }
+
+        #[test]
+        fn find_existing_fabric_mismatched_fabric_id() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let node_id: NodeId = 1;
+            let fabric_id: FabricId = 2;
+
+            // create a noc and a rcac
+            let pub_key = FabricInfoTest::stub_public_key();
+            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            // use different fabric id
+            let noc = FabricInfoTest::make_chip_cert(node_id as u64,(fabric_id + 1) as u64, &pub_key[..]).unwrap();
+            // only update rcac to storage
+            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // init a fabric with the same public key and node id and fabric id
+            let mut init_pas = fabric_info::InitParams::default();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_node_id = node_id;
+            init_pas.m_fabric_id = fabric_id;
+            init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            table.m_states[0].init(&init_pas);
+
+            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+        }
+
+        #[test]
+        fn find_existing_fabric_mismatched_pub_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let node_id: NodeId = 1;
+            let fabric_id: FabricId = 2;
+
+            // create a noc and a rcac
+            let pub_key = FabricInfoTest::stub_public_key();
+            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            // only update rcac to storage
+            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            // init a fabric with the same public key and node id and fabric id
+            let mut init_pas = fabric_info::InitParams::default();
+            // use another public key to init the existed fabric info
+            let pub_key_2 = FabricInfoTest::stub_public_key();
+            init_pas.m_fabric_index = fabric_index;
+            init_pas.m_node_id = node_id;
+            init_pas.m_fabric_id = fabric_id;
+            init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key_2[..]);
+
+            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+
+            table.m_states[0].init(&init_pas);
+
+            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
         }
     } // end of mod tests
 } // end of mod fabric_table

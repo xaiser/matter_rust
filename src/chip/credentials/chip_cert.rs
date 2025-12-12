@@ -41,6 +41,8 @@ use core::str::FromStr;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
+use bitflags::bitflags;
+
 // we use this buffer to store the vid verification statement too
 pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
@@ -61,6 +63,33 @@ pub enum ChipCertTag
     KtagEllipticCurvePublicKey  = 9,  /* [ byte string ] The elliptic curve public key, in X9.62 encoded format. */
     KtagExtensions              = 10, /* [ list ] Certificate extensions. */
     KtagECDSASignature          = 11, /* [ byte string ] The ECDSA signature for the certificate. */
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct KeyPurposeFlags: u8 {
+        const KserverAuth      = 0x01; /* Extended key usage is server authentication. */
+        const KclientAuth      = 0x02; /* Extended key usage is client authentication. */
+        const KcodeSigning     = 0x04; /* Extended key usage is code signing. */
+        const KemailProtection = 0x08; /* Extended key usage is email protection. */
+        const KtimeStamping    = 0x10; /* Extended key usage is time stamping. */
+        const KoCSPSigning     = 0x20; /* Extended key usage is OCSP signing. */
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct KeyUsageFlags: u16 {
+        const KdigitalSignature = 0x0001; /* Key usage is digital signature. */
+        const KnonRepudiation   = 0x0002; /* Key usage is non-repudiation. */
+        const KkeyEncipherment  = 0x0004; /* Key usage is key encipherment. */
+        const KdataEncipherment = 0x0008; /* Key usage is data encipherment. */
+        const KkeyAgreement     = 0x0010; /* Key usage is key agreement. */
+        const KkeyCertSign      = 0x0020; /* Key usage is key cert signing. */
+        const KcRLSign          = 0x0040; /* Key usage is CRL signing. */
+        const KencipherOnly     = 0x0080; /* Key usage is encipher only. */
+        const KdecipherOnly     = 0x0100; /* Key usage is decipher only. */
+    }
 }
 
 #[derive(Copy, Clone)]
