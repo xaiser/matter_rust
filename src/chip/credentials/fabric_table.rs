@@ -26,7 +26,7 @@ mod fabric_info {
             }
         },
         credentials::{
-            self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+            self, last_known_good_time::LastKnownGoodTime,
             certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
             chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
         },
@@ -699,7 +699,7 @@ mod fabric_table {
             }
         },
         credentials::{
-            self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+            self, last_known_good_time::LastKnownGoodTime,
             certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
             chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte, extract_not_before_from_chip_cert_byte},
         },
@@ -748,6 +748,8 @@ mod fabric_table {
 
     //#[double]
     use super::fabric_info::FabricInfo;
+
+    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<'a, CertificateValidityPolicy>;
 
     bitflags! {
         #[derive(Clone, Copy)]

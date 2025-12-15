@@ -59,7 +59,10 @@ mod chip_certificate_set {
     */
     use crate::chip::{
         system::system_clock::Seconds32,
-        credentials::chip_cert::{KeyUsageFlags, KeyPurposeFlags, ChipCertificateData},
+        credentials::{
+            certificate_validity_policy::TheCertificateValidityPolicy,
+            chip_cert::{KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType},
+        }
     };
 
     enum EffectiveTime {
@@ -67,10 +70,71 @@ mod chip_certificate_set {
         LastKnownGoodChipEpochTime(Seconds32),
     }
 
-    struct TheValidationContext<'a> {
+    pub struct ValidationContext<'a, ValidityPolicy> 
+        where
+            ValidityPolicy: TheCertificateValidityPolicy,
+    {
         pub m_effective_time: EffectiveTime,
-        pub m_trust_anchor: &'a ChipCertificateData,
+        pub m_trust_anchor: Option<&'a ChipCertificateData>,
+        pub m_required_key_usages: KeyUsageFlags,
+        pub m_required_key_purpose: KeyPurposeFlags,
+        pub m_required_cert_type: CertType,
+        pub m_validity_policy: Option<&'a ValidityPolicy>,
     }
 
-    pub struct ValidationContext(u8);
+    impl<'a, ValidityPolicy> ValidationContext<'a, ValidityPolicy>
+        where
+            ValidityPolicy: TheCertificateValidityPolicy,
+    {
+        pub const fn new() -> Self {
+            Self {
+                m_effective_time: EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs(0)),
+                m_trust_anchor: None,
+                m_required_key_usages: KeyUsageFlags::KdigitalSignature,
+                m_required_key_purpose: KeyPurposeFlags::KserverAuth,
+                m_required_cert_type: CertType::KnotSpecified,
+                m_validity_policy: None,
+            }
+        }
+
+        pub fn set_effective_time(&mut self, chip_time: EffectiveTime) {
+            self.m_effective_time = chip_time;
+        }
+    }
+
+    const K_MAX_ARRAY_SIZE: usize = 3usize;
+    pub struct ChipCertificateSet {
+
+        m_certs_internal_storage: [ChipCertificateData; K_MAX_ARRAY_SIZE],
+    }
+
+    impl ChipCertificateSet {
+        pub const fn new() -> Self {
+            use core::mem::MaybeUninit;
+            let mut certs: [MaybeUninit<ChipCertificateData>; K_MAX_ARRAY_SIZE] = [ const { MaybeUninit::uninit() }; K_MAX_ARRAY_SIZE];
+            let mut index: usize = 0;
+
+            while index < K_MAX_ARRAY_SIZE {
+                certs[index].write(ChipCertificateData::const_default());
+                index += 1;
+            }
+
+            unsafe {
+                Self {
+                    m_certs_internal_storage: core::mem::transmute::<_, [ChipCertificateData; K_MAX_ARRAY_SIZE]>(certs),
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub mod tests {
+        use super::*;
+
+        #[test]
+        fn new() {
+            let sets = ChipCertificateSet::new();
+            assert!(true);
+        }
+    } // end of tests
 }

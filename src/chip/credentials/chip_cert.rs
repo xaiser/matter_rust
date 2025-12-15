@@ -65,6 +65,22 @@ pub enum ChipCertTag
     KtagECDSASignature          = 11, /* [ byte string ] The ECDSA signature for the certificate. */
 }
 
+#[derive(Copy, Clone)]
+#[repr(u8)]
+pub enum CertType {
+    KnotSpecified    = 0x00,       /* The certificate's type has not been specified. */
+    Kroot            = 0x01,       /* A Matter Root certificate (RCAC). */
+    KiCA             = 0x02,       /* A Matter Intermediate CA certificate (ICAC). */
+    Knode            = 0x03,       /* A Matter node operational certificate (NOC). */
+    KfirmwareSigning = 0x04,       /* A Matter firmware signing certificate. Note that Matter doesn't
+                                        specify how firmware images are signed and implementation of
+                                        firmware image signing is manufacturer-specific. The Matter
+                                        certificate format supports encoding of firmware signing
+                                        certificates if chosen by the manufacturer to use them. */
+    KnetworkIdentity       = 0x05, /* A Matter Network (Client) Identity. */
+    KvidVerificationSigner = 0x06  /* A Matter VendorID Verification Signer Certificate. */
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct KeyPurposeFlags: u8 {
