@@ -13,7 +13,7 @@ use crate::chip::{
         },
         support::default_string::DefaultString,
     },
-    credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
+    //credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
     crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH},
     system::system_clock::Seconds32,
 };
@@ -31,6 +31,10 @@ use crate::chip_error_not_found;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_wrong_node_id;
 
+// re-export
+pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert;
+pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert_with_reader as decode_chip_cert_with_reader;
+
 /*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
@@ -46,7 +50,9 @@ use bitflags::bitflags;
 // we use this buffer to store the vid verification statement too
 pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
+pub const K_KEY_IDENTIFIER_LENGTH: usize = crate::chip::crypto::K_SUBJECT_KEY_IDENTIFIER_LENGTH;
 pub type ChipRDNString = DefaultString<K_MAX_RDN_STRING_LENGTH>;
+pub type CertificateKeyId = [u8; K_KEY_IDENTIFIER_LENGTH];
 
 #[derive(Copy, Clone)]
 pub enum ChipCertTag
@@ -127,11 +133,19 @@ pub enum ChipCertBasicConstraintTag {
     KtagBasicConstraintsPathLenConstraint = 2, /* [ unsigned int ] Maximum number of subordinate intermediate certificates. */
 }
 
-// Not using now, just give it a type
-#[derive(Copy, Clone, Default)]
-pub enum CertDecodeFlags {
-    #[default]
-    KNone,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CertDecodeFlags: u8 {
+        const KgenerateTBSHash = 0x01; /* Indicates that to-be-signed (TBS) hash of the certificate should be calculated when certificate is
+                                    loaded. The TBS hash is then used to validate certificate signature. Normally, all certificates
+                                    (except trust anchor) in the certificate validation chain require TBS hash. */
+        const KisTrustAnchor = 0x02;   /* Indicates that the corresponding certificate is trust anchor. */
+    }
+}
+
+#[inline]
+const fn default_certificate_key_id() -> CertificateKeyId {
+    [0; K_KEY_IDENTIFIER_LENGTH]
 }
 
 #[inline]
@@ -386,6 +400,8 @@ pub struct ChipCertificateData {
     pub m_public_key: [u8; K_P256_PUBLIC_KEY_LENGTH],
     pub m_not_before_time: u32,
     pub m_not_after_time: u32,
+    pub m_subject_key_id: CertificateKeyId,
+    pub m_auth_key_id: CertificateKeyId,
 }
 
 impl ChipCertificateData {
@@ -395,7 +411,18 @@ impl ChipCertificateData {
             m_public_key: [0; K_P256_PUBLIC_KEY_LENGTH],
             m_not_before_time: 0,
             m_not_after_time: 0,
+            m_subject_key_id: default_certificate_key_id(),
+            m_auth_key_id: default_certificate_key_id(),
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.m_subject_dn = ChipDN::const_default();
+        self.m_public_key = [0; K_P256_PUBLIC_KEY_LENGTH];
+        self.m_not_before_time = 0;
+        self.m_not_after_time = 0;
+        self.m_subject_key_id = default_certificate_key_id();
+        self.m_auth_key_id = default_certificate_key_id();
     }
 }
 
@@ -429,7 +456,7 @@ pub fn extract_node_id_fabric_id_from_op_cert(opcert: &ChipCertificateData) -> R
 
 pub fn extract_node_id_fabric_id_from_op_cert_byte(opcert: &[u8]) -> Result<(NodeId, FabricId), ChipError> {
     let mut op_cert: ChipCertificateData = ChipCertificateData::default();
-    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+    decode_chip_cert(opcert, &mut op_cert, None)?;
 
     extract_node_id_fabric_id_from_op_cert(&op_cert)
 }
@@ -440,7 +467,7 @@ pub fn extract_public_key_from_chip_cert(opcert: &ChipCertificateData) -> Result
 
 pub fn extract_public_key_from_chip_cert_byte(opcert: &[u8]) -> Result<P256PublicKey, ChipError> {
     let mut op_cert: ChipCertificateData = ChipCertificateData::default();
-    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+    decode_chip_cert(opcert, &mut op_cert, None)?;
 
     extract_public_key_from_chip_cert(&op_cert)
 }
@@ -451,7 +478,7 @@ pub fn extract_not_before_from_chip_cert(opcert: &ChipCertificateData) -> Result
 
 pub fn extract_not_before_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32, ChipError> {
     let mut op_cert: ChipCertificateData = ChipCertificateData::default();
-    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+    decode_chip_cert(opcert, &mut op_cert, None)?;
 
     extract_not_before_from_chip_cert(&op_cert)
 }
@@ -462,7 +489,7 @@ pub fn extract_not_after_from_chip_cert(opcert: &ChipCertificateData) -> Result<
 
 pub fn extract_not_after_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32, ChipError> {
     let mut op_cert: ChipCertificateData = ChipCertificateData::default();
-    decode_chip_cert(opcert, &mut op_cert, CertDecodeFlags::default())?;
+    decode_chip_cert(opcert, &mut op_cert, None)?;
 
     extract_not_after_from_chip_cert(&op_cert)
 }

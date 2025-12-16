@@ -15,6 +15,7 @@ use crate::chip_ok;
 
 use crate::chip_error_not_implemented;
 use crate::chip_error_no_memory;
+use crate::chip_error_end_of_tlv;
 
 /*
 use crate::chip_internal_log;
@@ -34,7 +35,7 @@ use crate::verify_or_return_value;
 //     NotAfterTime
 // }
 
-pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
+pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
     let mut reader = TlvContiguousBufferReader::const_default();
 
     reader.init(cert.as_ptr(), cert.len());
@@ -52,7 +53,28 @@ pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(reader: &mut Re
     chip_ok!()
 }
 
-pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: CertDecodeFlags) -> ChipErrorResult {
+pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    chip_ok!()
+}
+
+pub fn decode_extensions<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    reader.next_type_tag(TlvType::KtlvTypeList, context_tag(ChipCertTag::KtagExtensions as u8))?;
+    let container_type = reader.enter_container()?;
+
+    let mut err = chip_error_end_of_tlv!();
+
+    while reader.next().inspect_err(|e| err = *e).is_ok() {
+        decode_extension(reader, cert_data)?;
+    }
+
+    verify_or_return_error!(err == chip_error_end_of_tlv!(), Err(err));
+
+    reader.exit_container(container_type)?;
+
+    Err(chip_error_end_of_tlv!())
+}
+
+pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
     if reader.get_type() == TlvType::KtlvTypeNotSpecified {
         reader.next()?;
     }

@@ -59,11 +59,24 @@ mod chip_certificate_set {
     */
     use crate::chip::{
         system::system_clock::Seconds32,
+        chip_lib::{
+            core::{
+                tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            },
+        },
         credentials::{
             certificate_validity_policy::TheCertificateValidityPolicy,
-            chip_cert::{KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType},
+            chip_cert::{KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader},
         }
     };
+
+    use crate::chip_core_error;
+    use crate::chip_ok;
+    use crate::chip_sdk_error;
+    use crate::verify_or_return_error;
+    use crate::verify_or_return_value;
+    use crate::ChipErrorResult;
+    use crate::ChipError;
 
     enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
@@ -103,9 +116,12 @@ mod chip_certificate_set {
     }
 
     const K_MAX_ARRAY_SIZE: usize = 3usize;
-    pub struct ChipCertificateSet {
 
+    // TODO: add an option to use storage from caller.
+    // Check cre/credentials/CHIPCert.cpp: Init(certsArray, certsArraySize)
+    pub struct ChipCertificateSet {
         m_certs_internal_storage: [ChipCertificateData; K_MAX_ARRAY_SIZE],
+        m_cert_count: u8,
     }
 
     impl ChipCertificateSet {
@@ -122,8 +138,36 @@ mod chip_certificate_set {
             unsafe {
                 Self {
                     m_certs_internal_storage: core::mem::transmute::<_, [ChipCertificateData; K_MAX_ARRAY_SIZE]>(certs),
+                    m_cert_count: 0,
                 }
             }
+        }
+
+        fn release(&mut self) {
+            self.clear();
+        }
+
+        fn clear(&mut self) {
+            for cert in self.m_certs_internal_storage.iter_mut() {
+                cert.clear();
+            }
+            self.m_cert_count = 0;
+        }
+
+        pub fn load_cert(&mut self, chip_cert: &[u8], decode_flags: CertDecodeFlags) -> ChipErrorResult {
+            let mut reader = TlvContiguousBufferReader::default();
+
+            reader.init(chip_cert.as_ptr(), chip_cert.len());
+
+            return self.load_cert_reader(&mut reader, decode_flags, chip_cert);
+        }
+
+        pub fn load_cert_reader<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader, decode_flags: CertDecodeFlags, chip_cert: &[u8]) -> ChipErrorResult {
+            let mut cert = ChipCertificateData::default();
+            decode_chip_cert_with_reader(reader, &mut cert, Some(decode_flags))?;
+
+
+            chip_ok!()
         }
     }
 
