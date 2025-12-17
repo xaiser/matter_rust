@@ -395,6 +395,13 @@ macro_rules! chip_error_invalid_argument {
 }
 
 #[macro_export]
+macro_rules! chip_error_unsupported_cert_format {
+    () => {
+        chip_core_error!(0x50)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_wrong_node_id {
     () => {
         chip_core_error!(0x5c)

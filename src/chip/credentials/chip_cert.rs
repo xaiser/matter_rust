@@ -45,7 +45,7 @@ use core::str::FromStr;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
-use bitflags::bitflags;
+use bitflags::{Flags, bitflags};
 
 // we use this buffer to store the vid verification statement too
 pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
@@ -90,6 +90,7 @@ pub enum CertType {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct KeyPurposeFlags: u8 {
+        const Knone            = 0x00; /* init */
         const KserverAuth      = 0x01; /* Extended key usage is server authentication. */
         const KclientAuth      = 0x02; /* Extended key usage is client authentication. */
         const KcodeSigning     = 0x04; /* Extended key usage is code signing. */
@@ -102,6 +103,7 @@ bitflags! {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct KeyUsageFlags: u16 {
+        const Knone             = 0x0000; /* init */
         const KdigitalSignature = 0x0001; /* Key usage is digital signature. */
         const KnonRepudiation   = 0x0002; /* Key usage is non-repudiation. */
         const KkeyEncipherment  = 0x0004; /* Key usage is key encipherment. */
@@ -131,6 +133,23 @@ pub enum ChipCertBasicConstraintTag {
     // ---- Context-specific Tags for BasicConstraints Structure ----
     KtagBasicConstraintsIsCA = 1,              /* [ boolean ] True if the certificate can be used to verify certificate */
     KtagBasicConstraintsPathLenConstraint = 2, /* [ unsigned int ] Maximum number of subordinate intermediate certificates. */
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CertFlags: u16 {
+        const Knone                        = 0x0000; /* nothin */
+        const KextPresentBasicConstraints = 0x0001; /* Basic constraints extension is present in the certificate. */
+        const KextPresentKeyUsage         = 0x0002; /* Key usage extension is present in the certificate. */
+        const KextPresentExtendedKeyUsage = 0x0004; /* Extended key usage extension is present in the certificate. */
+        const KextPresentSubjectKeyId     = 0x0008; /* Subject key identifier extension is present in the certificate. */
+        const KextPresentAuthKeyId        = 0x0010; /* Authority key identifier extension is present in the certificate. */
+        const KextPresentFutureIsCritical = 0x0020; /* Future extension marked as critical is present in the certificate. */
+        const KpathLenConstraintPresent    = 0x0040; /* Path length constraint is present in the certificate. */
+        const KisCA                        = 0x0080; /* Indicates that certificate is a CA certificate. */
+        const KisTrustAnchor               = 0x0100; /* Indicates that certificate is a trust anchor. */
+        const KtBSHashPresent              = 0x0200; /* Indicates that TBS hash of the certificate was generated and stored. */
+    }
 }
 
 bitflags! {
@@ -402,6 +421,9 @@ pub struct ChipCertificateData {
     pub m_not_after_time: u32,
     pub m_subject_key_id: CertificateKeyId,
     pub m_auth_key_id: CertificateKeyId,
+    pub m_cert_flags: CertFlags,
+    pub m_key_usage_flags: KeyUsageFlags,
+    pub m_key_purpose_flags: KeyPurposeFlags,
 }
 
 impl ChipCertificateData {
@@ -413,6 +435,9 @@ impl ChipCertificateData {
             m_not_after_time: 0,
             m_subject_key_id: default_certificate_key_id(),
             m_auth_key_id: default_certificate_key_id(),
+            m_cert_flags: CertFlags::Knone,
+            m_key_usage_flags: KeyUsageFlags::Knone,
+            m_key_purpose_flags: KeyPurposeFlags::Knone,
         }
     }
 
@@ -423,6 +448,9 @@ impl ChipCertificateData {
         self.m_not_after_time = 0;
         self.m_subject_key_id = default_certificate_key_id();
         self.m_auth_key_id = default_certificate_key_id();
+        self.m_cert_flags.clear();
+        self.m_key_usage_flags.clear();
+        self.m_key_purpose_flags.clear();
     }
 }
 

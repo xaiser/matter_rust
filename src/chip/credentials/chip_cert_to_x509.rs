@@ -1,8 +1,8 @@
 use crate::chip::{
-    credentials::chip_cert::{ChipCertificateData, CertDecodeFlags, ChipCertTag, tag_not_before, tag_not_after},
+    credentials::chip_cert::{ChipCertificateData, CertDecodeFlags, ChipCertTag, tag_not_before, tag_not_after, ChipCertExtensionTag, CertFlags, KeyUsageFlags, KeyPurposeFlags},
     chip_lib::core::{
         tlv_types::TlvType,
-        tlv_tags::{anonymous_tag, context_tag, Tag},
+        tlv_tags::{anonymous_tag, context_tag, Tag, is_context_tag, tag_num_from_tag},
         tlv_reader::{TlvContiguousBufferReader, TlvReader},
     },
 };
@@ -16,6 +16,8 @@ use crate::chip_ok;
 use crate::chip_error_not_implemented;
 use crate::chip_error_no_memory;
 use crate::chip_error_end_of_tlv;
+use crate::chip_error_invalid_tlv_tag;
+use crate::chip_error_unsupported_cert_format;
 
 /*
 use crate::chip_internal_log;
@@ -35,6 +37,8 @@ use crate::verify_or_return_value;
 //     NotAfterTime
 // }
 
+use bitflags::Flags;
+
 pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
     let mut reader = TlvContiguousBufferReader::const_default();
 
@@ -53,7 +57,111 @@ pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(reader: &mut Re
     chip_ok!()
 }
 
+pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    cert_data.m_cert_flags.insert(CertFlags::KextPresentAuthKeyId);
+
+    reader.expect_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8))?;
+    let key = reader.get_bytes()?;
+
+    if key.len() != cert_data.m_auth_key_id.len() {
+        return Err(chip_error_invalid_tlv_tag!());
+    }
+
+    cert_data.m_auth_key_id.copy_from_slice(key);
+
+    chip_ok!()
+}
+
+pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    cert_data.m_cert_flags.insert(CertFlags::KextPresentSubjectKeyId);
+
+    reader.expect_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8))?;
+    let key = reader.get_bytes()?;
+
+    if key.len() != cert_data.m_subject_key_id.len() {
+        return Err(chip_error_invalid_tlv_tag!());
+    }
+
+    cert_data.m_subject_key_id.copy_from_slice(key);
+
+    chip_ok!()
+}
+
+pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    cert_data.m_cert_flags.insert(CertFlags::KextPresentKeyUsage);
+
+    reader.expect(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8))?;
+    let key_usage_bits = reader.get_u16()?;
+
+    {
+        if let Some(key_usage_flags) = KeyUsageFlags::from_bits(key_usage_bits) {
+            cert_data.m_key_usage_flags = key_usage_flags;
+        } else {
+            return Err(chip_error_unsupported_cert_format!());
+        }
+    }
+
+    chip_ok!()
+}
+
+pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    cert_data.m_cert_flags.insert(CertFlags::KextPresentExtendedKeyUsage);
+
+    reader.expect_type_tag(TlvType::KtlvTypeArray, context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8))?;
+
+    let container_type = reader.enter_container()?;
+
+    let mut err = chip_error_end_of_tlv!();
+
+    while reader.next_tag(anonymous_tag()).inspect_err(|e| err = *e).is_ok() {
+        let key_purpose_id = reader.get_u8()?;
+
+        if let Some(key_purpose_flags) = KeyPurposeFlags::from_bits(key_purpose_id) {
+            cert_data.m_key_purpose_flags.insert(key_purpose_flags);
+        } else {
+            return Err(chip_error_unsupported_cert_format!());
+        }
+    }
+
+    verify_or_return_error!(err == chip_error_end_of_tlv!(), Err(err));
+
+    reader.exit_container(container_type)?;
+
+    Err(chip_error_end_of_tlv!())
+}
+
 pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+    let tlv_tag = reader.get_tag();
+
+    verify_or_return_error!(is_context_tag(&tlv_tag), Err(chip_error_invalid_tlv_tag!()));
+
+    let extension_tag_num = tag_num_from_tag(&tlv_tag);
+
+    if extension_tag_num == ChipCertExtensionTag::KtagFutureExtension as u32 {
+        return Err(chip_error_not_implemented!());
+    } else {
+        match extension_tag_num {
+            v if v == ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u32 => {
+                decode_convert_authority_key_identifier_extension(reader, cert_data)?;
+            },
+            v if v == ChipCertExtensionTag::KtagSubjectKeyIdentifier as u32 => {
+                decode_convert_subject_key_identifier_extension(reader, cert_data)?;
+            },
+            v if v == ChipCertExtensionTag::KtagKeyUsage as u32 => {
+                decode_convert_key_usage_extension(reader, cert_data)?;
+            },
+            v if v == ChipCertExtensionTag::KtagBasicConstraints as u32 => {
+                return Err(chip_error_not_implemented!());
+            },
+            v if v == ChipCertExtensionTag::KtagExtendedKeyUsage as u32 => {
+                decode_convert_extended_key_usage_extension(reader, cert_data)?;
+            },
+            _ => {
+                return Err(chip_error_unsupported_cert_format!());
+            }
+        }
+    }
+
     chip_ok!()
 }
 
