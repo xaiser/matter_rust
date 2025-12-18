@@ -127,7 +127,7 @@ pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(re
 
     reader.exit_container(container_type)?;
 
-    Err(chip_error_end_of_tlv!())
+    chip_ok!()
 }
 
 pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
@@ -179,7 +179,7 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_da
 
     reader.exit_container(container_type)?;
 
-    Err(chip_error_end_of_tlv!())
+    chip_ok!()
 }
 
 pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
@@ -211,3 +211,143 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
 
     reader.exit_container(container_type)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chip::{
+        chip_lib::core::{
+            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+            tlv_types::{self, TlvType},
+            tlv_tags::{self, anonymous_tag},
+        },
+        credentials::chip_cert,
+    };
+
+    const TEST_BUT_SIZE: usize = 512;
+
+    #[test]
+    fn decode_auth_key_id_correctly() {
+        // first, build up a fake extensions
+        let mut raw_tlv = [0; TEST_BUT_SIZE];
+        let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+        writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+        let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
+        key[0] = 1;
+        key[key.len() - 1] = 2;
+
+        let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+        // start a struct
+        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+
+        // start a list
+        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        writer.end_container(outer_container_list);
+
+        writer.end_container(outer_container);
+
+        let tlv_buffer = &raw_tlv[..writer.get_length_written()];
+
+        // create the reader
+        let mut reader = TlvContiguousBufferReader::const_default();
+        reader.init(tlv_buffer.as_ptr(), tlv_buffer.len());
+
+        let mut cert = ChipCertificateData::default();
+
+        reader.next();
+        // enter the struct to simulate what we do in decode_chip_cert
+        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        let container_type = reader.enter_container();
+
+        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert_eq!(1, cert.m_auth_key_id[0]);
+        assert_eq!(2, cert.m_auth_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
+        assert!(cert.m_cert_flags.contains(CertFlags::KextPresentAuthKeyId));
+    }
+
+    #[test]
+    fn decode_auth_key_id_with_wrong_length() {
+        // first, build up a fake extensions
+        let mut raw_tlv = [0; TEST_BUT_SIZE];
+        let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+        writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+        let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
+        key[0] = 1;
+        key[key.len() - 1] = 2;
+
+        let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+        // start a struct
+        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+
+        // start a list
+        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key[0..1]).inspect_err(|e| println!("{}", e)).is_ok());
+        writer.end_container(outer_container_list);
+
+        writer.end_container(outer_container);
+
+        let tlv_buffer = &raw_tlv[..writer.get_length_written()];
+
+        // create the reader
+        let mut reader = TlvContiguousBufferReader::const_default();
+        reader.init(tlv_buffer.as_ptr(), tlv_buffer.len());
+
+        let mut cert = ChipCertificateData::default();
+
+        reader.next();
+        // enter the struct to simulate what we do in decode_chip_cert
+        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        let container_type = reader.enter_container();
+
+        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_err());
+        // still setup
+        assert!(cert.m_cert_flags.contains(CertFlags::KextPresentAuthKeyId));
+    }
+
+    #[test]
+    fn decode_subject_key_id_correctly() {
+        // first, build up a fake extensions
+        let mut raw_tlv = [0; TEST_BUT_SIZE];
+        let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+        writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+        let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
+        key[0] = 1;
+        key[key.len() - 1] = 2;
+
+        let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+        // start a struct
+        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+
+        // start a list
+        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        writer.end_container(outer_container_list);
+
+        writer.end_container(outer_container);
+
+        let tlv_buffer = &raw_tlv[..writer.get_length_written()];
+
+        // create the reader
+        let mut reader = TlvContiguousBufferReader::const_default();
+        reader.init(tlv_buffer.as_ptr(), tlv_buffer.len());
+
+        let mut cert = ChipCertificateData::default();
+
+        reader.next();
+        // enter the struct to simulate what we do in decode_chip_cert
+        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        let container_type = reader.enter_container();
+
+        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert_eq!(1, cert.m_subject_key_id[0]);
+        assert_eq!(2, cert.m_subject_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
+        assert!(cert.m_cert_flags.contains(CertFlags::KextPresentSubjectKeyId));
+    }
+} // end of mod tests
