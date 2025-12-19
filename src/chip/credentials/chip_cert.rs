@@ -48,7 +48,8 @@ use crate::verify_or_return_value;
 use bitflags::{Flags, bitflags};
 
 // we use this buffer to store the vid verification statement too
-pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
+// As the development goes, we push more and more data to cert, so we extend 128 bytes first.
+pub const K_MAX_CHIP_CERT_LENGTH: usize = crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE + 128;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
 pub const K_KEY_IDENTIFIER_LENGTH: usize = crate::chip::crypto::K_SUBJECT_KEY_IDENTIFIER_LENGTH;
 pub type ChipRDNString = DefaultString<K_MAX_RDN_STRING_LENGTH>;
@@ -864,6 +865,11 @@ mod tests {
             // put a not after
             writer.put_u32(tag_not_after(), 0);
 
+            // put a extension 
+            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list).is_ok());
+            writer.end_container(extensions_outer_container_list);
+
             // end struct container
             assert_eq!(true, writer.end_container(outer_container).is_ok());
 
@@ -913,6 +919,11 @@ mod tests {
             writer.put_u32(tag_not_before(), 0);
             // put a not after
             writer.put_u32(tag_not_after(), 0);
+
+            // put a extension 
+            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list).is_ok());
+            writer.end_container(extensions_outer_container_list);
 
             // end struct container
             assert_eq!(true, writer.end_container(outer_container).is_ok());

@@ -11,7 +11,7 @@ mod fabric_info {
                 tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                 case_auth_tag::CatValues,
                 tlv_types::TlvType,
-                tlv_tags::{self, anonymous_tag},
+                tlv_tags::{self, anonymous_tag, context_tag},
                 data_model_types::{
                     KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
                     KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX, FabricIndex,
@@ -529,7 +529,7 @@ mod fabric_info {
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
         //type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
-        const CHIP_CERT_SIZE: usize = 123 + K_P256_PUBLIC_KEY_LENGTH;
+        const CHIP_CERT_SIZE: usize = 256 + K_P256_PUBLIC_KEY_LENGTH;
 
         pub fn stub_public_key() -> [u8; K_P256_PUBLIC_KEY_LENGTH] {
             let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
@@ -574,6 +574,12 @@ mod fabric_info {
             // put a not after
             writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
 
+            // make empty extensions
+            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            writer.end_container(extensions_outer_container_list);
+
             // end struct container
             writer.end_container(outer_container);
 
@@ -614,6 +620,12 @@ mod fabric_info {
             writer.put_u32(tag_not_before(), 0);
             // put a not after
             writer.put_u32(tag_not_after(), 0);
+
+            // make empty extensions
+            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            writer.end_container(extensions_outer_container_list);
 
             // end struct container
             writer.end_container(outer_container);
