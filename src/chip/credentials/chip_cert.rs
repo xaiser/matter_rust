@@ -425,6 +425,7 @@ pub struct ChipCertificateData {
     pub m_cert_flags: CertFlags,
     pub m_key_usage_flags: KeyUsageFlags,
     pub m_key_purpose_flags: KeyPurposeFlags,
+    pub m_sig_algo_OID: u16,
 }
 
 impl ChipCertificateData {
@@ -439,6 +440,7 @@ impl ChipCertificateData {
             m_cert_flags: CertFlags::Knone,
             m_key_usage_flags: KeyUsageFlags::Knone,
             m_key_purpose_flags: KeyPurposeFlags::Knone,
+            m_sig_algo_OID: Asn1Oid::KoidSigAlgoECDSAWithSHA256 as u16,
         }
     }
 
@@ -452,6 +454,7 @@ impl ChipCertificateData {
         self.m_cert_flags.clear();
         self.m_key_usage_flags.clear();
         self.m_key_purpose_flags.clear();
+        self.m_sig_algo_OID = 0;
     }
 }
 
