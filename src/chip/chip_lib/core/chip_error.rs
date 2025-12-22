@@ -303,6 +303,13 @@ macro_rules! chip_error_no_message_handler {
 }
 
 #[macro_export]
+macro_rules! chip_error_unsupported_signature_type {
+    () => {
+        chip_core_error!(0x17)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_buffer_too_small {
     () => {
         chip_core_error!(0x19)

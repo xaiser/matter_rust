@@ -1,7 +1,7 @@
 const KFABRIC_LABEL_MAX_LENGTH_IN_BYTES: usize = 32;
 pub type FabricLabelString = crate::chip::chip_lib::support::default_string::DefaultString<KFABRIC_LABEL_MAX_LENGTH_IN_BYTES>;
 
-mod fabric_info {
+pub mod fabric_info {
     use crate::chip::{
         CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
         system::system_clock::Seconds32,
@@ -519,7 +519,7 @@ mod fabric_info {
                 support::test_persistent_storage::TestPersistentStorage,
                 core::{
                     tlv_types::{self, TlvType},
-                    tlv_tags::{self, is_context_tag, tag_num_from_tag},
+                    tlv_tags::{self, is_context_tag, tag_num_from_tag, context_tag},
                     tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                 }
             }
@@ -625,6 +625,13 @@ mod fabric_info {
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
             writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            let mut key = [0; crate::chip::credentials::chip_cert::K_KEY_IDENTIFIER_LENGTH];
+            key[0] = 1;
+            key[key.len() - 1] = 2;
+            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+            key[0] = 3;
+            key[key.len() - 1] = 4;
+            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
             writer.end_container(extensions_outer_container_list);
 
             // end struct container

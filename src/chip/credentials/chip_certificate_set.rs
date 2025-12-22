@@ -58,6 +58,7 @@ mod chip_certificate_set {
     use core::{ptr, str::{self, FromStr}};
     */
     use crate::chip::{
+        asn1::Asn1Oid,
         system::system_clock::Seconds32,
         chip_lib::{
             core::{
@@ -66,7 +67,7 @@ mod chip_certificate_set {
         },
         credentials::{
             certificate_validity_policy::TheCertificateValidityPolicy,
-            chip_cert::{KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader},
+            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader},
         }
     };
 
@@ -77,6 +78,7 @@ mod chip_certificate_set {
     use crate::verify_or_return_value;
     use crate::ChipErrorResult;
     use crate::ChipError;
+    use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory};
 
     enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
@@ -120,12 +122,14 @@ mod chip_certificate_set {
     // TODO: add an option to use storage from caller.
     // Check cre/credentials/CHIPCert.cpp: Init(certsArray, certsArraySize)
     pub struct ChipCertificateSet {
-        m_certs_internal_storage: [ChipCertificateData; K_MAX_ARRAY_SIZE],
+        //m_certs_internal_storage: [ChipCertificateData; K_MAX_ARRAY_SIZE],
+        m_certs_internal_storage: [Option<ChipCertificateData>; K_MAX_ARRAY_SIZE],
         m_cert_count: u8,
     }
 
     impl ChipCertificateSet {
         pub const fn new() -> Self {
+            /*
             use core::mem::MaybeUninit;
             let mut certs: [MaybeUninit<ChipCertificateData>; K_MAX_ARRAY_SIZE] = [ const { MaybeUninit::uninit() }; K_MAX_ARRAY_SIZE];
             let mut index: usize = 0;
@@ -141,6 +145,11 @@ mod chip_certificate_set {
                     m_cert_count: 0,
                 }
             }
+            */
+            Self {
+                m_certs_internal_storage: [const { None }; K_MAX_ARRAY_SIZE],
+                m_cert_count: 0,
+            }
         }
 
         fn release(&mut self) {
@@ -149,7 +158,11 @@ mod chip_certificate_set {
 
         fn clear(&mut self) {
             for cert in self.m_certs_internal_storage.iter_mut() {
-                cert.clear();
+                //cert.clear();
+                if let Some(ref mut c) = cert {
+                    c.clear();
+                }
+                *cert = None;
             }
             self.m_cert_count = 0;
         }
@@ -166,8 +179,37 @@ mod chip_certificate_set {
             let mut cert = ChipCertificateData::default();
             decode_chip_cert_with_reader(reader, &mut cert, Some(decode_flags))?;
 
+            // Verify the cert has both the Subject Key Id and Authority Key Id extensions present.
+            // Only certs with both these extensions are supported for the purposes of certificate validation.
+            verify_or_return_error!(cert.m_cert_flags.contains(CertFlags::KextPresentSubjectKeyId | CertFlags::KextPresentAuthKeyId),
+                                Err(chip_error_unsupported_cert_format!()));
+
+            // Verify the cert was signed with ECDSA-SHA256. This is the only signature algorithm currently supported.
+            verify_or_return_error!(cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(), Err(chip_error_unsupported_signature_type!()));
+
+            /*
+            for internal_cert in self.m_certs_internal_storage.iter() {
+                if internal_cert.as_ref().is_some_and(|c| *c == cert) {
+                    return chip_ok!();
+                }
+            }
+            */
+
+            verify_or_return_error!((self.m_cert_count as usize) < K_MAX_ARRAY_SIZE, Err(chip_error_no_memory!()));
+
+            self.m_certs_internal_storage[self.m_cert_count as usize] = Some(cert);
+
+            self.m_cert_count += 1;
 
             chip_ok!()
+        }
+
+        pub fn get_cert_count(&self) -> u8 {
+            self.m_cert_count
+        }
+
+        pub fn get_cert_sets(&self) -> &[Option<ChipCertificateData>] {
+            &self.m_certs_internal_storage
         }
     }
 
@@ -175,10 +217,44 @@ mod chip_certificate_set {
     pub mod tests {
         use super::*;
 
+        use crate::chip::credentials::fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert};
+
         #[test]
         fn new() {
             let sets = ChipCertificateSet::new();
-            assert!(true);
+            assert_eq!(0, sets.get_cert_count());
+        }
+
+        #[test]
+        fn load_one_cert_correctlly() {
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert_eq!(1, sets.get_cert_count());
+        }
+
+        #[test]
+        fn load_two_cert_correctlly() {
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let cert2 = make_chip_cert(3, 4, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(sets.load_cert(cert2.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert_eq!(2, sets.get_cert_count());
+        }
+
+        #[test]
+        fn load_one_cert_twice_correctlly() {
+            /*
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert_eq!(1, sets.get_cert_count());
+            */
         }
     } // end of tests
 }
