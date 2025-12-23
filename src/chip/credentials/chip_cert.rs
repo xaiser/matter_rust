@@ -14,7 +14,7 @@ use crate::chip::{
         support::default_string::DefaultString,
     },
     //credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
-    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH},
+    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
     system::system_clock::Seconds32,
 };
 
@@ -149,7 +149,7 @@ bitflags! {
         const KpathLenConstraintPresent    = 0x0040; /* Path length constraint is present in the certificate. */
         const KisCA                        = 0x0080; /* Indicates that certificate is a CA certificate. */
         const KisTrustAnchor               = 0x0100; /* Indicates that certificate is a trust anchor. */
-        const KtBSHashPresent              = 0x0200; /* Indicates that TBS hash of the certificate was generated and stored. */
+        const KtbsHashPresent              = 0x0200; /* Indicates that TBS hash of the certificate was generated and stored. */
     }
 }
 
@@ -436,6 +436,8 @@ pub struct ChipCertificateData {
     pub m_key_usage_flags: KeyUsageFlags,
     pub m_key_purpose_flags: KeyPurposeFlags,
     pub m_sig_algo_OID: u16,
+    pub m_signature: P256EcdsaSignature,
+    pub m_tbs_has: [u8; K_SHA256_HASH_LENGTH],
 }
 
 impl ChipCertificateData {
@@ -554,8 +556,16 @@ pub fn extract_not_after_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32,
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+
+    pub fn make_subject_key_id(first: u8, last: u8) -> CertificateKeyId {
+        let mut key = [0; crate::chip::credentials::chip_cert::K_KEY_IDENTIFIER_LENGTH];
+        key[0] = first;
+        key[key.len() - 1] = last;
+
+        return key;
+    }
 
     mod rdn {
         use super::super::*;

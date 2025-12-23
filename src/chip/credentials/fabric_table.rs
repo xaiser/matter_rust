@@ -27,7 +27,7 @@ pub mod fabric_info {
         },
         credentials::{
             self, last_known_good_time::LastKnownGoodTime,
-            certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
+            certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
             chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
         },
         crypto::{
@@ -507,7 +507,7 @@ pub mod fabric_info {
         use crate::chip::{
             credentials::{
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
-                chip_cert::{ChipCertTag, tag_not_before, tag_not_after},
+                chip_cert::{ChipCertTag, tag_not_before, tag_not_after, tests::make_subject_key_id},
             },
             crypto::{
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
@@ -625,12 +625,9 @@ pub mod fabric_info {
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
             writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
-            let mut key = [0; crate::chip::credentials::chip_cert::K_KEY_IDENTIFIER_LENGTH];
-            key[0] = 1;
-            key[key.len() - 1] = 2;
+            let key = make_subject_key_id(1, 2);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
-            key[0] = 3;
-            key[key.len() - 1] = 4;
+            let key = make_subject_key_id(3, 4);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
             writer.end_container(extensions_outer_container_list);
 
@@ -719,7 +716,8 @@ mod fabric_table {
         },
         credentials::{
             self, last_known_good_time::LastKnownGoodTime,
-            certificate_validity_policy::CertificateValidityPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
+            certificate_validity_policy::{CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy},
+            operational_certificate_store::{CertChainElement, OperationalCertificateStore},
             chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte, extract_not_before_from_chip_cert_byte},
         },
         crypto::{
@@ -768,7 +766,7 @@ mod fabric_table {
     //#[double]
     use super::fabric_info::FabricInfo;
 
-    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<'a, CertificateValidityPolicy>;
+    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<'a, IgnoreCertificateValidityPeriodPolicy>;
 
     bitflags! {
         #[derive(Clone, Copy)]
@@ -2079,7 +2077,7 @@ mod fabric_table {
             return self.m_pending_fabric.is_initialized() && self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent | StateFlags::KisUpdatePending);
         }
 
-        fn validate_incoming_noc_chain(_noc: &[u8], _icac: &[u8], _rcac: &[u8], existing_fabric_id: FabricId, _policy: &CertificateValidityPolicy,
+        fn validate_incoming_noc_chain<Policy: CertificateValidityPolicy>(_noc: &[u8], _icac: &[u8], _rcac: &[u8], existing_fabric_id: FabricId, _policy: &Policy,
             ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
             Err(chip_error_not_implemented!())
         }

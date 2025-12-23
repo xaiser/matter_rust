@@ -39,7 +39,6 @@ mod chip_certificate_set {
     use crate::chip_core_error;
     use crate::chip_error_invalid_argument;
     use crate::chip_error_buffer_too_small;
-    use crate::chip_error_internal;
     use crate::chip_error_key_not_found;
     use crate::chip_ok;
     use crate::chip_sdk_error;
@@ -66,9 +65,10 @@ mod chip_certificate_set {
             },
         },
         credentials::{
-            certificate_validity_policy::TheCertificateValidityPolicy,
-            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader},
-        }
+            certificate_validity_policy::CertificateValidityPolicy,
+            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId},
+        },
+        crypto::{P256PublicKey, P256EcdsaSignature},
     };
 
     use crate::chip_core_error;
@@ -78,7 +78,18 @@ mod chip_certificate_set {
     use crate::verify_or_return_value;
     use crate::ChipErrorResult;
     use crate::ChipError;
-    use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory};
+    use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory, chip_error_internal,
+       chip_error_invalid_argument};
+
+    pub fn verify_cert_signature(cert: &ChipCertificateData, signer: &ChipCertificateData) -> ChipErrorResult {
+        verify_or_return_error!(cert.m_cert_flags.intersects(CertFlags::KtbsHashPresent), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(), Err(chip_error_unsupported_signature_type!()));
+
+        let mut signer_public_key = P256PublicKey::default_with_raw_value(&signer.m_public_key[..]);
+        let mut signature = P256EcdsaSignature::default();
+
+        chip_ok!()
+    }
 
     enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
@@ -87,7 +98,7 @@ mod chip_certificate_set {
 
     pub struct ValidationContext<'a, ValidityPolicy> 
         where
-            ValidityPolicy: TheCertificateValidityPolicy,
+            ValidityPolicy: CertificateValidityPolicy,
     {
         pub m_effective_time: EffectiveTime,
         pub m_trust_anchor: Option<&'a ChipCertificateData>,
@@ -99,7 +110,7 @@ mod chip_certificate_set {
 
     impl<'a, ValidityPolicy> ValidationContext<'a, ValidityPolicy>
         where
-            ValidityPolicy: TheCertificateValidityPolicy,
+            ValidityPolicy: CertificateValidityPolicy,
     {
         pub const fn new() -> Self {
             Self {
@@ -187,13 +198,11 @@ mod chip_certificate_set {
             // Verify the cert was signed with ECDSA-SHA256. This is the only signature algorithm currently supported.
             verify_or_return_error!(cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(), Err(chip_error_unsupported_signature_type!()));
 
-            /*
             for internal_cert in self.m_certs_internal_storage.iter() {
-                if internal_cert.as_ref().is_some_and(|c| *c == cert) {
+                if internal_cert.as_ref().is_some_and(|c| c.is_equal(&cert)) {
                     return chip_ok!();
                 }
             }
-            */
 
             verify_or_return_error!((self.m_cert_count as usize) < K_MAX_ARRAY_SIZE, Err(chip_error_no_memory!()));
 
@@ -202,6 +211,41 @@ mod chip_certificate_set {
             self.m_cert_count += 1;
 
             chip_ok!()
+        }
+
+        pub fn release_last_cert(&mut self) -> ChipErrorResult {
+            if self.m_cert_count > 0 {
+                self.m_certs_internal_storage[(self.m_cert_count - 1) as usize] = None;
+                self.m_cert_count -= 1;
+
+                chip_ok!()
+            } else {
+                Err(chip_error_internal!())
+            }
+        }
+
+        pub fn find_cert(&self, subject_key_id: &CertificateKeyId) -> Option<&ChipCertificateData> {
+            for i in 0..self.m_cert_count as usize {
+                if let Some(ref cert) = self.m_certs_internal_storage[i] {
+                    if cert.m_subject_key_id == *subject_key_id {
+                        return Some(cert);
+                    }
+                }
+            }
+
+            None
+        }
+
+        pub fn is_cert_in_the_set(&self, cert: &ChipCertificateData) -> bool {
+            for i in 0..self.m_cert_count as usize {
+                if let Some(ref current_cert) = self.m_certs_internal_storage[i] {
+                    if core::ptr::eq(cert, current_cert) {
+                        return true;
+                    }
+                }
+            }
+
+            false
         }
 
         pub fn get_cert_count(&self) -> u8 {
@@ -217,7 +261,12 @@ mod chip_certificate_set {
     pub mod tests {
         use super::*;
 
-        use crate::chip::credentials::fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert};
+        use crate::chip::{
+            credentials::{
+                chip_cert::tests::make_subject_key_id,
+                fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert},
+            },
+        };
 
         #[test]
         fn new() {
@@ -247,14 +296,48 @@ mod chip_certificate_set {
 
         #[test]
         fn load_one_cert_twice_correctlly() {
-            /*
             let mut sets = ChipCertificateSet::new();
             let key = stub_public_key();
             let cert = make_chip_cert(1, 2, &key[..]).unwrap();
             assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
             assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
             assert_eq!(1, sets.get_cert_count());
-            */
+        }
+
+        #[test]
+        fn release_last_cert_correctlly() {
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(sets.release_last_cert().is_ok());
+        }
+
+        #[test]
+        fn find_cert() {
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+
+            // this is the key in make_chip_cert
+            let key = make_subject_key_id(3, 4);
+            assert!(sets.find_cert(&key).is_some());
+        }
+
+        #[test]
+        fn is_cert_in_the_sets() {
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            assert!(sets.load_cert(cert.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+
+            // this is the key in make_chip_cert
+            let key = make_subject_key_id(3, 4);
+            let found_cert = sets.find_cert(&key);
+
+            assert!(found_cert.is_some());
+            assert!(sets.is_cert_in_the_set(found_cert.unwrap()));
         }
     } // end of tests
 }
