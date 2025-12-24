@@ -68,7 +68,7 @@ mod chip_certificate_set {
             certificate_validity_policy::CertificateValidityPolicy,
             chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId},
         },
-        crypto::{P256PublicKey, P256EcdsaSignature},
+        crypto::{P256PublicKey, ECPKey, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
     };
 
     use crate::chip_core_error;
@@ -80,16 +80,6 @@ mod chip_certificate_set {
     use crate::ChipError;
     use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory, chip_error_internal,
        chip_error_invalid_argument};
-
-    pub fn verify_cert_signature(cert: &ChipCertificateData, signer: &ChipCertificateData) -> ChipErrorResult {
-        verify_or_return_error!(cert.m_cert_flags.intersects(CertFlags::KtbsHashPresent), Err(chip_error_invalid_argument!()));
-        verify_or_return_error!(cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(), Err(chip_error_unsupported_signature_type!()));
-
-        let mut signer_public_key = P256PublicKey::default_with_raw_value(&signer.m_public_key[..]);
-        let mut signature = P256EcdsaSignature::default();
-
-        chip_ok!()
-    }
 
     enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
@@ -247,6 +237,19 @@ mod chip_certificate_set {
 
             false
         }
+
+        pub fn validate_cert<Policy: CertificateValidityPolicy>(&self, cert: &ChipCertificateData, context: &mut ValidationContext<Policy>) -> ChipErrorResult {
+            verify_or_return_error!(self.is_cert_in_the_set(cert), Err(chip_error_invalid_argument!()));
+
+            context.m_trust_anchor = None;
+
+            return self.validate_cert_depth(cert, context, 0);
+        }
+
+        pub fn validate_cert_depth<Policy: CertificateValidityPolicy>(&self, cert: &ChipCertificateData, context: &mut ValidationContext<Policy>, depth: u8) -> ChipErrorResult {
+            chip_ok!()
+        }
+
 
         pub fn get_cert_count(&self) -> u8 {
             self.m_cert_count

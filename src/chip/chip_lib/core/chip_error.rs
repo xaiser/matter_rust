@@ -409,6 +409,13 @@ macro_rules! chip_error_unsupported_cert_format {
 }
 
 #[macro_export]
+macro_rules! chip_error_wrong_cert_dn {
+    () => {
+        chip_core_error!(0x59)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_wrong_node_id {
     () => {
         chip_core_error!(0x5c)

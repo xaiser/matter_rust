@@ -3,7 +3,7 @@ use crate::chip::{
     asn1::{Oid, Asn1Oid, get_oid, OidCategory},
     chip_lib::{
         core::{
-            case_auth_tag::is_valid_case_auth_tag,
+            case_auth_tag::{CaseAuthTag, is_valid_case_auth_tag},
             data_model_types::is_valid_fabric_id,
             node_id::is_operational_node_id,
             tlv_types::TlvType,
@@ -14,7 +14,7 @@ use crate::chip::{
         support::default_string::DefaultString,
     },
     //credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
-    crypto::{P256PublicKey, K_P256_PUBLIC_KEY_LENGTH, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
+    crypto::{P256PublicKey, ECPKey, K_P256_PUBLIC_KEY_LENGTH, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
     system::system_clock::Seconds32,
 };
 
@@ -30,6 +30,8 @@ use crate::chip_error_no_memory;
 use crate::chip_error_not_found;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_wrong_node_id;
+use crate::chip_error_unsupported_signature_type;
+use crate::chip_error_wrong_cert_dn;
 
 // re-export
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert;
@@ -72,7 +74,7 @@ pub enum ChipCertTag
     KtagECDSASignature          = 11, /* [ byte string ] The ECDSA signature for the certificate. */
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum CertType {
     KnotSpecified    = 0x00,       /* The certificate's type has not been specified. */
@@ -197,6 +199,24 @@ pub(crate) fn tag_not_before() -> Tag {
 #[inline]
 pub(crate) fn tag_not_after() -> Tag {
     context_tag(ChipCertTag::KtagNotAfter as u8)
+}
+
+pub(super) mod internal {
+    pub const K_NETWORK_IDENTITY_CN: &str = "*";
+}
+
+pub fn verify_cert_signature(cert: &ChipCertificateData, signer: &ChipCertificateData) -> ChipErrorResult {
+    verify_or_return_error!(cert.m_cert_flags.intersects(CertFlags::KtbsHashPresent), Err(chip_error_invalid_argument!()));
+    verify_or_return_error!(cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(), Err(chip_error_unsupported_signature_type!()));
+
+    let mut signer_public_key = P256PublicKey::default_with_raw_value(&signer.m_public_key[..]);
+    let mut signature = P256EcdsaSignature::default();
+
+    let sig_length = cert.m_signature.length();
+    signature.set_length(sig_length)?;
+    signature.bytes()[..sig_length].copy_from_slice(&cert.m_signature.const_bytes()[..sig_length]);
+
+    return signer_public_key.ecdsa_validate_hash_signature(&cert.m_tbs_hash[..K_SHA256_HASH_LENGTH], &signature);
 }
 
 pub struct CertBuffer {
@@ -417,6 +437,64 @@ impl ChipDN {
 
         return true;
     }
+
+    pub fn get_cert_type(&self) -> Result<CertType, ChipError> {
+        let rdn_count = self.rdn_count();
+
+        if rdn_count == 1 && self.rdn[0].m_attr_oid == Asn1Oid::KoidAttributeTypeCommonName.into() && !self.rdn[0].m_attr_is_printable_string &&
+            self.rdn[0].m_string.const_bytes() == internal::K_NETWORK_IDENTITY_CN.as_bytes() {
+                return Ok(CertType::KnetworkIdentity);
+        }
+
+        let mut cert_type = CertType::KnotSpecified;
+        let mut fabric_id_present = false;
+        let mut cats_present = false;
+
+        for i in 0..rdn_count {
+            match self.rdn[i as usize].m_attr_oid {
+                v if v == Asn1Oid::KoidAttributeTypeMatterRCACId.into() => {
+                    verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
+                    cert_type = CertType::Kroot;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterICACId.into() => {
+                    verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
+                    cert_type = CertType::KiCA;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterVidVerificationSignerId.into() => {
+                    verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
+                    cert_type = CertType::KvidVerificationSigner;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterNodeId.into() => {
+                    verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
+                    verify_or_return_error!(is_operational_node_id(self.rdn[i as usize].m_chip_val), Err(chip_error_wrong_node_id!()));
+                    cert_type = CertType::Knode;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterFirmwareSigningId.into() => {
+                    verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
+                    cert_type = CertType::KfirmwareSigning;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterFabricId.into() => {
+                    verify_or_return_error!(!fabric_id_present, Err(chip_error_wrong_cert_dn!()));
+                    verify_or_return_error!(is_valid_fabric_id(self.rdn[i as usize].m_chip_val), Err(chip_error_wrong_cert_dn!()));
+                    fabric_id_present = true;
+                },
+                v if v == Asn1Oid::KoidAttributeTypeMatterCASEAuthTag.into() => {
+                    if let Ok(val) = CaseAuthTag::try_from(self.rdn[i as usize].m_chip_val) {
+                        verify_or_return_error!(is_valid_case_auth_tag(val), Err(chip_error_wrong_cert_dn!()));
+                    } else {
+                        return Err(chip_error_wrong_cert_dn!());
+                    }
+                    cats_present = true;
+                },
+                _ => {
+                }
+            }
+        }
+
+        continue here
+
+        return Ok(cert_type);
+    }
 }
 
 impl Default for ChipDN {
@@ -437,7 +515,7 @@ pub struct ChipCertificateData {
     pub m_key_purpose_flags: KeyPurposeFlags,
     pub m_sig_algo_OID: u16,
     pub m_signature: P256EcdsaSignature,
-    pub m_tbs_has: [u8; K_SHA256_HASH_LENGTH],
+    pub m_tbs_hash: [u8; K_SHA256_HASH_LENGTH],
 }
 
 impl ChipCertificateData {
@@ -454,6 +532,8 @@ impl ChipCertificateData {
             m_key_purpose_flags: KeyPurposeFlags::Knone,
             // for now, we just level it this way.
             m_sig_algo_OID: Asn1Oid::KoidSigAlgoECDSAWithSHA256 as u16,
+            m_signature: P256EcdsaSignature::const_default(),
+            m_tbs_hash: [0u8; K_SHA256_HASH_LENGTH],
         }
     }
 
@@ -468,6 +548,8 @@ impl ChipCertificateData {
         self.m_key_usage_flags.clear();
         self.m_key_purpose_flags.clear();
         self.m_sig_algo_OID = 0;
+        self.m_signature = P256EcdsaSignature::const_default();
+        self.m_tbs_hash = [0u8; K_SHA256_HASH_LENGTH];
     }
 
     pub fn is_equal(&self, other: &Self) -> bool {
@@ -481,9 +563,11 @@ impl ChipCertificateData {
         let is_key_usage_flags = self.m_key_usage_flags == other.m_key_usage_flags;
         let is_key_purpose_flags = self.m_key_purpose_flags == other.m_key_purpose_flags;
         let is_sig_algo_oid = self.m_sig_algo_OID == other.m_sig_algo_OID;
+        let is_signature = self.m_signature.const_bytes() == other.m_signature.const_bytes();
+        let is_tbs_hash = self.m_tbs_hash == other.m_tbs_hash;
 
         return is_subject_dn && is_public_key && is_not_before_time && is_not_after_time && is_subject_key_id && is_auth_key_id &&
-            is_cert_flags && is_key_usage_flags && is_key_purpose_flags && is_sig_algo_oid;
+            is_cert_flags && is_key_usage_flags && is_key_purpose_flags && is_sig_algo_oid && is_signature && is_tbs_hash;
     }
 }
 
@@ -975,7 +1059,7 @@ pub(super) mod tests {
             //tlv_reader::{TlvContiguousBufferReader, TlvReader},
             tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
         };
-        use crate::chip::crypto::{K_P256_PUBLIC_KEY_LENGTH, ECPKey};
+        use crate::chip::crypto::{K_P256_PUBLIC_KEY_LENGTH, ECPKey, P256Keypair, ECPKeyTarget};
 
         #[test]
         fn extract_node_id_fabrid_id() {
@@ -1252,6 +1336,6 @@ pub(super) mod tests {
 
             assert_eq!(false, cert1.is_equal(&cert2));
         }
-    } // end of other
+    } // end of chip_certificate_data
 
 } // end of tests
