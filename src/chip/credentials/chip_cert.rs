@@ -79,7 +79,7 @@ pub enum ChipCertTag
 pub enum CertType {
     KnotSpecified    = 0x00,       /* The certificate's type has not been specified. */
     Kroot            = 0x01,       /* A Matter Root certificate (RCAC). */
-    KiCA             = 0x02,       /* A Matter Intermediate CA certificate (ICAC). */
+    Kica             = 0x02,       /* A Matter Intermediate CA certificate (ICAC). */
     Knode            = 0x03,       /* A Matter node operational certificate (NOC). */
     KfirmwareSigning = 0x04,       /* A Matter firmware signing certificate. Note that Matter doesn't
                                         specify how firmware images are signed and implementation of
@@ -165,6 +165,8 @@ bitflags! {
         const KisTrustAnchor   = 0x02;   /* Indicates that the corresponding certificate is trust anchor. */
     }
 }
+
+pub const K_NULL_CERT_TIME: u32 = 0;
 
 #[inline]
 const fn default_certificate_key_id() -> CertificateKeyId {
@@ -458,7 +460,7 @@ impl ChipDN {
                 },
                 v if v == Asn1Oid::KoidAttributeTypeMatterICACId.into() => {
                     verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
-                    cert_type = CertType::KiCA;
+                    cert_type = CertType::Kica;
                 },
                 v if v == Asn1Oid::KoidAttributeTypeMatterVidVerificationSignerId.into() => {
                     verify_or_return_error!(cert_type == CertType::KnotSpecified, Err(chip_error_wrong_cert_dn!()));
@@ -491,7 +493,15 @@ impl ChipDN {
             }
         }
 
-        continue here
+        if cert_type == CertType::Knode {
+            verify_or_return_error!(fabric_id_present, Err(chip_error_wrong_cert_dn!()));
+        } else {
+            verify_or_return_error!(!cats_present, Err(chip_error_wrong_cert_dn!()));
+        }
+
+        if cert_type == CertType::KvidVerificationSigner {
+            verify_or_return_error!(!fabric_id_present, Err(chip_error_wrong_cert_dn!()));
+        }
 
         return Ok(cert_type);
     }
@@ -505,6 +515,7 @@ impl Default for ChipDN {
 
 pub struct ChipCertificateData {
     pub m_subject_dn: ChipDN,
+    pub m_issuer_dn: ChipDN,
     pub m_public_key: [u8; K_P256_PUBLIC_KEY_LENGTH],
     pub m_not_before_time: u32,
     pub m_not_after_time: u32,
@@ -516,12 +527,14 @@ pub struct ChipCertificateData {
     pub m_sig_algo_OID: u16,
     pub m_signature: P256EcdsaSignature,
     pub m_tbs_hash: [u8; K_SHA256_HASH_LENGTH],
+    pub m_path_len_constraint: u8,
 }
 
 impl ChipCertificateData {
     pub const fn const_default() -> Self {
         Self {
             m_subject_dn: ChipDN::const_default(),
+            m_issuer_dn: ChipDN::const_default(),
             m_public_key: [0; K_P256_PUBLIC_KEY_LENGTH],
             m_not_before_time: 0,
             m_not_after_time: 0,
@@ -534,11 +547,13 @@ impl ChipCertificateData {
             m_sig_algo_OID: Asn1Oid::KoidSigAlgoECDSAWithSHA256 as u16,
             m_signature: P256EcdsaSignature::const_default(),
             m_tbs_hash: [0u8; K_SHA256_HASH_LENGTH],
+            m_path_len_constraint: 0,
         }
     }
 
     pub fn clear(&mut self) {
         self.m_subject_dn = ChipDN::const_default();
+        self.m_issuer_dn = ChipDN::const_default();
         self.m_public_key = [0; K_P256_PUBLIC_KEY_LENGTH];
         self.m_not_before_time = 0;
         self.m_not_after_time = 0;
@@ -550,10 +565,12 @@ impl ChipCertificateData {
         self.m_sig_algo_OID = 0;
         self.m_signature = P256EcdsaSignature::const_default();
         self.m_tbs_hash = [0u8; K_SHA256_HASH_LENGTH];
+        self.m_path_len_constraint = 0;
     }
 
     pub fn is_equal(&self, other: &Self) -> bool {
         let is_subject_dn = self.m_subject_dn.is_equal(&other.m_subject_dn);
+        let is_issuer_dn = self.m_issuer_dn.is_equal(&other.m_issuer_dn);
         let is_public_key = self.m_public_key == other.m_public_key;
         let is_not_before_time = self.m_not_before_time == other.m_not_before_time;
         let is_not_after_time = self.m_not_after_time == other.m_not_after_time;
@@ -565,9 +582,10 @@ impl ChipCertificateData {
         let is_sig_algo_oid = self.m_sig_algo_OID == other.m_sig_algo_OID;
         let is_signature = self.m_signature.const_bytes() == other.m_signature.const_bytes();
         let is_tbs_hash = self.m_tbs_hash == other.m_tbs_hash;
+        let is_path_long_constraint = self.m_path_len_constraint == other.m_path_len_constraint;
 
-        return is_subject_dn && is_public_key && is_not_before_time && is_not_after_time && is_subject_key_id && is_auth_key_id &&
-            is_cert_flags && is_key_usage_flags && is_key_purpose_flags && is_sig_algo_oid && is_signature && is_tbs_hash;
+        return is_subject_dn && is_issuer_dn && is_public_key && is_not_before_time && is_not_after_time && is_subject_key_id && is_auth_key_id &&
+            is_cert_flags && is_key_usage_flags && is_key_purpose_flags && is_sig_algo_oid && is_signature && is_tbs_hash && is_path_long_constraint;
     }
 }
 
@@ -1048,6 +1066,46 @@ pub(super) mod tests {
             let mut dn1 = ChipDN::default();
 
             assert_eq!(false, dn.is_equal(&dn1));
+        }
+
+        #[test]
+        fn get_net_identity_type() {
+            let mut dn = ChipDN::default();
+
+            assert!(dn.add_attribute_string(Asn1Oid::KoidAttributeTypeCommonName as Oid, internal::K_NETWORK_IDENTITY_CN, false).is_ok());
+            assert!(dn.get_cert_type().is_ok_and(|t| t == CertType::KnetworkIdentity));
+        }
+
+        #[test]
+        fn get_root_type() {
+            let mut dn = ChipDN::default();
+
+            assert!(dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1).is_ok());
+            assert!(dn.get_cert_type().is_ok_and(|t| t == CertType::Kroot));
+        }
+
+        #[test]
+        fn get_node_id() {
+            let mut dn = ChipDN::default();
+
+            assert!(dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 1).is_ok());
+            assert!(dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1).is_ok());
+            assert!(dn.get_cert_type().is_ok_and(|t| t == CertType::Knode));
+        }
+
+        #[test]
+        fn get_node_id_no_fabric_id() {
+            let mut dn = ChipDN::default();
+
+            assert!(dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1).is_ok());
+            assert!(dn.get_cert_type().is_err());
+        }
+
+        #[test]
+        fn no_type() {
+            let dn = ChipDN::default();
+
+            assert_eq!(true, dn.get_cert_type().is_ok_and(|t| t == CertType::KnotSpecified));
         }
     } // end of dn
     

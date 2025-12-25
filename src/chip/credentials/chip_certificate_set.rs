@@ -65,8 +65,8 @@ mod chip_certificate_set {
             },
         },
         credentials::{
-            certificate_validity_policy::CertificateValidityPolicy,
-            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId},
+            certificate_validity_policy::{CertificateValidityPolicy, CertificateValidityResult, apply_default_policy},
+            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId, K_NULL_CERT_TIME},
         },
         crypto::{P256PublicKey, ECPKey, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
     };
@@ -79,7 +79,12 @@ mod chip_certificate_set {
     use crate::ChipErrorResult;
     use crate::ChipError;
     use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory, chip_error_internal,
-       chip_error_invalid_argument};
+       chip_error_invalid_argument, chip_error_cert_usage_not_allowed, chip_error_wrong_cert_type, chip_error_cert_path_len_constraint_exceeded};
+
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_detail;
+    use core::str::FromStr;
 
     enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
@@ -238,7 +243,7 @@ mod chip_certificate_set {
             false
         }
 
-        pub fn validate_cert<Policy: CertificateValidityPolicy>(&self, cert: &ChipCertificateData, context: &mut ValidationContext<Policy>) -> ChipErrorResult {
+        pub fn validate_cert<'a, Policy: CertificateValidityPolicy>(&self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>) -> ChipErrorResult {
             verify_or_return_error!(self.is_cert_in_the_set(cert), Err(chip_error_invalid_argument!()));
 
             context.m_trust_anchor = None;
@@ -246,7 +251,118 @@ mod chip_certificate_set {
             return self.validate_cert_depth(cert, context, 0);
         }
 
-        pub fn validate_cert_depth<Policy: CertificateValidityPolicy>(&self, cert: &ChipCertificateData, context: &mut ValidationContext<Policy>, depth: u8) -> ChipErrorResult {
+        pub fn validate_cert_depth<'a, Policy: CertificateValidityPolicy>(&self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>, depth: u8) -> ChipErrorResult {
+            let cert_type = cert.m_subject_dn.get_cert_type()?;
+
+            verify_or_return_error!(!cert.m_cert_flags.contains(CertFlags::KextPresentFutureIsCritical), Err(chip_error_cert_usage_not_allowed!()));
+
+            if depth > 0 {
+                // If the depth is greater than 0 then the certificate is required to be a CA certificate...
+                
+                // Verify the isCA flag is present.
+                verify_or_return_value!(cert.m_cert_flags.contains(CertFlags::KisCA), Err(chip_error_cert_usage_not_allowed!()));
+
+                // Verify the key usage extension is present and contains the 'keyCertSign' flag.
+                verify_or_return_value!(
+                    cert.m_cert_flags.contains(CertFlags::KextPresentKeyUsage) && 
+                    cert.m_key_usage_flags.contains(KeyUsageFlags::KkeyCertSign), Err(chip_error_cert_usage_not_allowed!()));
+
+                // Verify that the certificate type is set to Root or ICA.
+                verify_or_return_error!(cert_type == CertType::Kica || cert_type == CertType::Kroot, Err(chip_error_wrong_cert_type!()));
+
+                // If a path length constraint was included, verify the cert depth vs. the specified constraint.
+                //
+                // From the RFC, the path length constraint "gives the maximum number of non-self-issued
+                // intermediate certificates that may follow this certificate in a valid certification path.
+                // (Note: The last certificate in the certification path is not an intermediate certificate,
+                // and is not included in this limit...)"
+                //
+                if cert.m_cert_flags.contains(CertFlags::KpathLenConstraintPresent) {
+                    verify_or_return_error!((depth - 1) <= cert.m_path_len_constraint, Err(chip_error_cert_path_len_constraint_exceeded!()));
+                }
+            } else {
+                // Otherwise verify the desired certificate usages/purposes/type given in the validation context...
+                
+                // If a set of desired key usages has been specified, verify that the key usage extension exists
+                // in the certificate and that the corresponding usages are supported.
+                if !context.m_required_key_usages.is_empty() {
+                    verify_or_return_error!(cert.m_cert_flags.contains(CertFlags::KextPresentKeyUsage) &&
+                        cert.m_key_usage_flags.contains(context.m_required_key_usages.clone()), Err(chip_error_cert_usage_not_allowed!()));
+                }
+
+                if !context.m_required_key_purpose.is_empty() {
+                    verify_or_return_error!(cert.m_cert_flags.contains(CertFlags::KextPresentExtendedKeyUsage) &&
+                        cert.m_key_purpose_flags.contains(context.m_required_key_purpose.clone()), Err(chip_error_cert_usage_not_allowed!()));
+                }
+
+                // If a required certificate type has been specified, verify it against the current certificate's type.
+                if context.m_required_cert_type != CertType::KnotSpecified {
+                    verify_or_return_error!(cert_type == context.m_required_cert_type, Err(chip_error_wrong_cert_type!()));
+                }
+            }
+
+            // Verify NotBefore and NotAfter validity of the certificates.
+            //
+            // See also ASN1ToChipEpochTime().
+            //
+            // X.509/RFC5280 defines the special time 99991231235959Z to mean 'no
+            // well-defined expiration date'.  In CHIP TLV-encoded certificates, this
+            // special value is represented as a CHIP Epoch time value of 0 sec
+            // (2000-01-01 00:00:00 UTC).
+            let mut validity_result = CertificateValidityResult::Kvalid;
+            match context.m_effective_time {
+                EffectiveTime::CurrentChipEpochTime(time) => {
+                    let time_secs = time.as_secs() as u32;
+                    if time_secs < cert.m_not_before_time {
+                        chip_log_detail!(SecureChannel, "Certificate's m_not_before_time {} is after curren time {}",
+                            cert.m_not_before_time, time_secs);
+                        validity_result = CertificateValidityResult::KnotYetValid;
+                    } else if cert.m_not_after_time != K_NULL_CERT_TIME && time_secs > cert.m_not_after_time {
+                        chip_log_detail!(SecureChannel, "Certificate's m_not_after_time {} is before curren time {}",
+                            cert.m_not_after_time, time_secs);
+                        validity_result = CertificateValidityResult::Kexpired;
+                    } else {
+                        // do nothing
+                    }
+                },
+                EffectiveTime::LastKnownGoodChipEpochTime(time) => {
+                    let time_secs = time.as_secs() as u32;
+                    // Last Known Good Time may not be moved forward except at the time of
+                    // commissioning or firmware update, so we can't use it to validate
+                    // NotBefore.  However, so long as firmware build times are properly
+                    // recorded and certificates loaded during commissioning are in fact
+                    // valid at the time of commissioning, observing a NotAfter that falls
+                    // before Last Known Good Time is a reliable indicator that the
+                    // certificate in question is expired.  Check for this.
+                    if cert.m_not_after_time != K_NULL_CERT_TIME && time_secs > cert.m_not_after_time {
+                        chip_log_detail!(SecureChannel, "Certificate's m_not_after_time {} is before curren time {}",
+                            cert.m_not_after_time, time_secs);
+                        validity_result = CertificateValidityResult::KexpiredAtLastKnownGoodTime;
+                    } else {
+                        validity_result = CertificateValidityResult::KnotExpiredAtLastKnownGoodTime;
+                    }
+                },
+            }
+
+            if let Some(policy) = context.m_validity_policy {
+                validity_result = policy.apply_certificate_validity_policy(cert, depth)?;
+            } else {
+                validity_result = apply_default_policy(cert, depth)?;
+            }
+
+            // If the certificate itself is trusted, then it is implicitly valid.  Record this certificate as the trust
+            // anchor and return success.
+            if cert.m_cert_flags.contains(CertFlags::KisTrustAnchor) {
+                context.m_trust_anchor = Some(cert);
+                return chip_ok!();
+            }
+
+            // Otherwise we must validate the certificate by looking for a chain of valid certificates up to a trusted
+            // certificate known as the 'trust anchor'.
+
+            // Fail validation if the certificate is self-signed. Since we don't trust this certificate (see the check above) and
+            // it has no path we can follow to a trust anchor, it can't be considered valid.
+
             chip_ok!()
         }
 

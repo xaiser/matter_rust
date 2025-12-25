@@ -402,6 +402,27 @@ macro_rules! chip_error_invalid_argument {
 }
 
 #[macro_export]
+macro_rules! chip_error_cert_path_len_constraint_exceeded {
+    () => {
+        chip_core_error!(0x4b)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_cert_path_too_long {
+    () => {
+        chip_core_error!(0x4c)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_cert_usage_not_allowed {
+    () => {
+        chip_core_error!(0x4d)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_unsupported_cert_format {
     () => {
         chip_core_error!(0x50)
@@ -440,6 +461,13 @@ macro_rules! chip_error_wrong_encryption_type_from_peer {
 macro_rules! chip_error_invalid_integer_value {
     () => {
         chip_core_error!(0x8f)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_wrong_cert_type {
+    () => {
+        chip_core_error!(0x9d)
     };
 }
 
