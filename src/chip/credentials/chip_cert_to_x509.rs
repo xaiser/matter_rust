@@ -27,14 +27,6 @@ use core::str::FromStr;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
-// Just make up a X509 format to make life easier, here is the format:
-// struct {
-//     SbujectDNs: [..]
-//     ECPublicKey
-//     NotBeforeTime
-//     NotAfterTime
-// }
-
 use bitflags::Flags;
 
 pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
@@ -191,6 +183,10 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
     // start reading
     reader.next()?;
 
+    // get issuer DNs
+    cert_data.m_issuer_dn.decode_from_tlv(reader)?;
+
+    reader.next()?;
     // get subject DNs
     cert_data.m_subject_dn.decode_from_tlv(reader)?;
     

@@ -1143,6 +1143,22 @@ pub(super) mod tests {
             // start a struct
             assert_eq!(true, writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
 
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end of list conatiner
+            writer.end_container(issuer_outer_container_dn_list);
+
             let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
             assert_eq!(true, writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e)).is_ok());
@@ -1194,6 +1210,22 @@ pub(super) mod tests {
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
             assert_eq!(true, writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end of list conatiner
+            writer.end_container(issuer_outer_container_dn_list);
 
             let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
@@ -1248,6 +1280,22 @@ pub(super) mod tests {
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
             assert_eq!(true, writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end of list conatiner
+            writer.end_container(issuer_outer_container_dn_list);
 
             let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
@@ -1304,6 +1352,22 @@ pub(super) mod tests {
             // start a struct
             assert_eq!(true, writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
 
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end of list conatiner
+            writer.end_container(issuer_outer_container_dn_list);
+
             let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
             assert_eq!(true, writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e)).is_ok());
@@ -1350,6 +1414,22 @@ pub(super) mod tests {
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
             assert_eq!(true, writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), 0x01u64);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), 0x02u64);
+            // end of list conatiner
+            writer.end_container(issuer_outer_container_dn_list);
 
             let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list

@@ -550,9 +550,9 @@ pub mod fabric_info {
             // start a struct
             writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
 
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
@@ -564,7 +564,23 @@ pub mod fabric_info {
             // put a fabric id 0x02
             writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
             // end of list conatiner
-            writer.end_container(outer_container_dn_list);
+            writer.end_container(issuer_outer_container_dn_list);
+
+            let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a subject_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            // end of list conatiner
+            writer.end_container(subject_outer_container_dn_list);
 
             // add to cert
             writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
@@ -597,9 +613,9 @@ pub mod fabric_info {
             // start a struct
             writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
 
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a issuer_dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
@@ -611,7 +627,24 @@ pub mod fabric_info {
             // put a fabric id 0x02
             writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
             // end of list conatiner
-            writer.end_container(outer_container_dn_list);
+            writer.end_container(issuer_outer_container_dn_list);
+
+            // start a subject dn list
+            let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from matter id
+            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            // set up a tag number from fabric id
+            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
+            // put a fabric id 0x02
+            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            // end of list conatiner
+            writer.end_container(subject_outer_container_dn_list);
 
             // add to cert
             writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
@@ -1507,7 +1540,6 @@ mod fabric_table {
             }
 
             self.m_last_known_good_time.set_last_known_good_chip_epoch_time(last_known_good_chip_epoch_time, latest_not_before)?;
-
             chip_ok!()
         }
 
@@ -3569,7 +3601,7 @@ mod fabric_table {
 
             // all the not before is 0
             assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(0)).is_ok());
-            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
+            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).inspect_err(|e| println!("{}", e)).is_ok());
         }
 
         #[test]
