@@ -444,10 +444,16 @@ mod chip_certificate_set {
         use crate::chip::{
             credentials::{
                 certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy,
-                chip_cert::tests::make_subject_key_id,
+                chip_cert::{
+                    K_KEY_IDENTIFIER_LENGTH,
+                    tests::make_subject_key_id,
+                },
                 fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert, make_ca_cert},
             },
+            crypto::{P256KeypairBase, P256Keypair, ECPKeypair, K_P256_PUBLIC_KEY_LENGTH, P256EcdsaSignature, ECPKeyTarget},
         };
+
+        use sha2::{Digest, Sha256};
 
         type IgorePolicyValidate<'a> = ValidationContext<'a, IgnoreCertificateValidityPeriodPolicy>;
 
@@ -528,23 +534,93 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let root_buffer = make_ca_cert(1, &key[..]).unwrap();
-            // load as trust anchor
-            assert!(sets.load_cert(root_buffer.const_bytes(), CertDecodeFlags::KisTrustAnchor).inspect_err(|e| println!("{}", e)).is_ok());
-            // this is the key in make_chip_cert
-            let key = make_subject_key_id(1, 2);
-            let root = sets.find_cert(&key);
-            assert!(root.is_some());
-            let root = root.unwrap();
-            root.m_not_before_time = expected_not_before;
-            root.m_not_aftet_time = expected_not_after;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_dn = {
+                let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                assert!(sets.load_cert(root_buffer.const_bytes(), CertDecodeFlags::KisTrustAnchor).inspect_err(|e| println!("{}", e)).is_ok());
+                assert!(sets.m_certs_internal_storage[0].is_some());
+                if let Some(root) = sets.m_certs_internal_storage[0].as_mut() {
+                    root.m_not_before_time = expected_not_before;
+                    root.m_not_after_time = expected_not_after;
+                    root.m_cert_flags.insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                    root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
+                } else {
+                    assert!(false);
+                }
+
+                let mut context = IgorePolicyValidate::default();
+                context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs((expected_not_before + 1).into()));
+
+                // this is the key in make_chip_cert
+                let key = make_subject_key_id(1, 2);
+                let root_ref = sets.find_cert(&key);
+                assert!(root_ref.is_some());
+                let root_ref = root_ref.unwrap();
+
+                // validate the root cert first
+                assert!(sets.validate_cert(root_ref, &mut context).inspect_err(|e| println!("{}", e)).is_ok());
+                assert!(context.m_trust_anchor.is_some_and(|c| core::ptr::eq(c, root_ref)));
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                root_dn
+            };
+
+            let noc = {
+                let key = stub_public_key();
+                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                // load as trust anchor
+                assert!(sets.load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+                assert!(sets.m_certs_internal_storage[1].is_some());
+                if let Some(noc) = sets.m_certs_internal_storage[1].as_mut() {
+                    // update the effec time
+                    noc.m_not_before_time = expected_not_before;
+                    noc.m_not_after_time = expected_not_after;
+                    /* for test, just sign pubkey and sub key id */
+                    let mut buf = [0u8; K_P256_PUBLIC_KEY_LENGTH + K_KEY_IDENTIFIER_LENGTH];
+                    buf[..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(&noc.m_public_key[..]);
+                    buf[K_P256_PUBLIC_KEY_LENGTH..].copy_from_slice(&noc.m_subject_key_id[..]);
+
+                    // get the hash result first 
+                    let mut hasher = Sha256::new();
+                    hasher.update(&buf[..]);
+                    let result = hasher.finalize();
+
+                    assert!(result.as_slice().len() == K_SHA256_HASH_LENGTH);
+                    noc.m_tbs_hash[..K_SHA256_HASH_LENGTH].copy_from_slice(result.as_slice());
+
+                    // sign the buf: pubkey + sub key id
+                    assert!(root_keypair.ecdsa_sign_msg(&buf[..], &mut noc.m_signature).inspect_err(|e| println!("{}", e)).is_ok());
+                    // set up hash present flag
+                    noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+
+                    // copy subject dn from root to issue dn from noc
+                    noc.m_issuer_dn.clear();
+                    for (index, value) in root_dn.rdn.iter().enumerate() {
+                        noc.m_issuer_dn.rdn[index] = value.clone();
+                    }
+
+                } else {
+                    assert!(false);
+                }
+
+                // this is the key in make_chip_cert
+                let key = make_subject_key_id(3, 4);
+                let noc_ref = sets.find_cert(&key);
+                assert!(noc_ref.is_some());
+                let noc_ref = noc_ref.unwrap();
+
+                noc_ref
+            };
 
             let mut context = IgorePolicyValidate::default();
-            context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from(expected_not_before + 1));
-
-            assert!(sets.validate_cert(&root, &mut context).inspect_err(|e| println!("{}", e)).is_ok());
-            assert!(context.m_trust_anchor.is_some_and(|c| core::ptr::eq(c, root)));
+            context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs((expected_not_before + 1).into()));
+            assert!(sets.validate_cert(noc, &mut context).inspect_err(|e| println!("{}", e)).is_ok());
         }
     } // end of tests
 }

@@ -37,12 +37,10 @@ use crate::chip_error_wrong_cert_dn;
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert;
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert_with_reader as decode_chip_cert_with_reader;
 
-/*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
-*/
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
