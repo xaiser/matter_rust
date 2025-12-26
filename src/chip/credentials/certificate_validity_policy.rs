@@ -2,12 +2,14 @@ pub mod certificate_validity_policy {
     use crate::{
         chip_core_error,
         chip_sdk_error,
+        chip_ok,
         ChipError,
         ChipErrorResult,
         chip::{
             credentials::chip_cert::ChipCertificateData,
         },
     };
+    #[derive(PartialEq, Eq)]
     pub enum CertificateValidityResult {
         Kvalid                         = 0, // current time is known and is within the validity period bounded by [notBefore, notAfter]
         KnotYetValid                   = 1, // current time is known and falls before the validity period bounded by notBefore
@@ -20,20 +22,20 @@ pub mod certificate_validity_policy {
     //pub struct CertificateValidityPolicy(u8);
 
     pub trait CertificateValidityPolicy { 
-        fn apply_certificate_validity_policy(&self, cert: &ChipCertificateData, depth: u8) -> Result<CertificateValidityResult, ChipError>;
+        fn apply_certificate_validity_policy(&self, cert: &ChipCertificateData, depth: u8, result: CertificateValidityResult) -> ChipErrorResult;
     }
 
     pub struct IgnoreCertificateValidityPeriodPolicy;
 
     impl CertificateValidityPolicy for IgnoreCertificateValidityPeriodPolicy {
-        fn apply_certificate_validity_policy(&self, _cert: &ChipCertificateData, _depth: u8) -> Result<CertificateValidityResult, ChipError> {
-            Ok(CertificateValidityResult::Kvalid)
+        fn apply_certificate_validity_policy(&self, _cert: &ChipCertificateData, _depth: u8, _result: CertificateValidityResult) -> ChipErrorResult {
+            chip_ok!()
         }
     }
 
 
-    pub fn apply_default_policy(_cert: &ChipCertificateData, _depth: u8) -> Result<CertificateValidityResult, ChipError> {
-        Ok(CertificateValidityResult::Kvalid)
+    pub fn apply_default_policy(_cert: &ChipCertificateData, _depth: u8, _result: CertificateValidityResult) -> ChipErrorResult {
+        chip_ok!()
     }
 } // certificate_validity_policy
 
