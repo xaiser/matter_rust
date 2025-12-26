@@ -673,6 +673,61 @@ pub mod fabric_info {
             return Ok(cert);
         }
 
+        pub fn make_ca_cert(rcac_id_value: u64, public_key: &[u8]) -> Result<CertBuffer, ()> {
+            let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
+            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
+            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a struct
+            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+
+            // start a issuer dn list
+            let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a dn list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // end of list conatiner
+            writer.end_container(subject_outer_container_dn_list);
+
+            let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a subject list
+            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            // set up a tag number from rcac id
+            let rcac_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as u8;
+            // no print string
+            let is_print_string: u8 = 0x0;
+            // put a matter id 0x1
+            writer.put_u64(tlv_tags::context_tag((is_print_string | rcac_id)), rcac_id_value);
+            // end of list conatiner
+            writer.end_container(subject_outer_container_dn_list);
+
+
+            // add to cert
+            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+
+            // put a not before
+            writer.put_u32(tag_not_before(), 0);
+            // put a not after
+            writer.put_u32(tag_not_after(), 0);
+
+            // make empty extensions
+            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+            // start a list
+            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            let key = make_subject_key_id(1, 2);
+            // both id are required
+            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+            writer.end_container(extensions_outer_container_list);
+
+            // end struct container
+            writer.end_container(outer_container);
+
+            let mut cert = CertBuffer::default();
+            cert.init(&raw_tlv[..writer.get_length_written()]);
+
+            return Ok(cert);
+        }
+
         #[test]
         fn default_init() {
             let info = fabric_info_const_default();

@@ -66,7 +66,7 @@ mod chip_certificate_set {
         },
         credentials::{
             certificate_validity_policy::{CertificateValidityPolicy, CertificateValidityResult, apply_default_policy},
-            chip_cert::{CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId, K_NULL_CERT_TIME},
+            chip_cert::{ChipDN, CertFlags, KeyUsageFlags, KeyPurposeFlags, ChipCertificateData, CertType, CertDecodeFlags, decode_chip_cert_with_reader, CertificateKeyId, K_NULL_CERT_TIME, verify_cert_signature},
         },
         crypto::{P256PublicKey, ECPKey, P256EcdsaSignature, K_SHA256_HASH_LENGTH},
     };
@@ -79,11 +79,13 @@ mod chip_certificate_set {
     use crate::ChipErrorResult;
     use crate::ChipError;
     use crate::{chip_error_unsupported_cert_format, chip_error_unsupported_signature_type, chip_error_no_memory, chip_error_internal,
-       chip_error_invalid_argument, chip_error_cert_usage_not_allowed, chip_error_wrong_cert_type, chip_error_cert_path_len_constraint_exceeded};
+       chip_error_invalid_argument, chip_error_cert_usage_not_allowed, chip_error_wrong_cert_type, chip_error_cert_path_len_constraint_exceeded,
+       chip_error_cert_not_trusted, chip_error_cert_path_too_long, chip_error_ca_cert_not_found, chip_error_cert_not_found};
 
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
     use crate::chip_log_detail;
+    use crate::chip_log_error;
     use core::str::FromStr;
 
     enum EffectiveTime {
@@ -111,8 +113,8 @@ mod chip_certificate_set {
             Self {
                 m_effective_time: EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs(0)),
                 m_trust_anchor: None,
-                m_required_key_usages: KeyUsageFlags::KdigitalSignature,
-                m_required_key_purpose: KeyPurposeFlags::KserverAuth,
+                m_required_key_usages: KeyUsageFlags::empty(),
+                m_required_key_purpose: KeyPurposeFlags::empty(),
                 m_required_cert_type: CertType::KnotSpecified,
                 m_validity_policy: None,
             }
@@ -120,6 +122,15 @@ mod chip_certificate_set {
 
         pub fn set_effective_time(&mut self, chip_time: EffectiveTime) {
             self.m_effective_time = chip_time;
+        }
+    }
+
+    impl<'a, ValidityPolicy> Default for ValidationContext<'a, ValidityPolicy>
+        where
+            ValidityPolicy: CertificateValidityPolicy,
+    {
+        fn default() -> Self {
+            ValidationContext::<ValidityPolicy>::new()
         }
     }
 
@@ -243,7 +254,7 @@ mod chip_certificate_set {
             false
         }
 
-        pub fn validate_cert<'a, Policy: CertificateValidityPolicy>(&self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>) -> ChipErrorResult {
+        pub fn validate_cert<'a, Policy: CertificateValidityPolicy>(&'a self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>) -> ChipErrorResult {
             verify_or_return_error!(self.is_cert_in_the_set(cert), Err(chip_error_invalid_argument!()));
 
             context.m_trust_anchor = None;
@@ -251,7 +262,7 @@ mod chip_certificate_set {
             return self.validate_cert_depth(cert, context, 0);
         }
 
-        pub fn validate_cert_depth<'a, Policy: CertificateValidityPolicy>(&self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>, depth: u8) -> ChipErrorResult {
+        pub fn validate_cert_depth<'a, Policy: CertificateValidityPolicy>(&'a self, cert: &'a ChipCertificateData, context: &mut ValidationContext<'a, Policy>, depth: u8) -> ChipErrorResult {
             let cert_type = cert.m_subject_dn.get_cert_type()?;
 
             verify_or_return_error!(!cert.m_cert_flags.contains(CertFlags::KextPresentFutureIsCritical), Err(chip_error_cert_usage_not_allowed!()));
@@ -362,10 +373,60 @@ mod chip_certificate_set {
 
             // Fail validation if the certificate is self-signed. Since we don't trust this certificate (see the check above) and
             // it has no path we can follow to a trust anchor, it can't be considered valid.
+            if cert.m_issuer_dn.is_equal(&cert.m_subject_dn) && cert.m_auth_key_id == cert.m_subject_key_id {
+                return Err(chip_error_cert_not_trusted!());
+            }
 
-            chip_ok!()
+            // Verify that the certificate depth is less than the total number of certificates. It is technically possible to create
+            // a circular chain of certificates.  Limiting the maximum depth of the certificate path prevents infinite
+            // recursion in such a case.
+            verify_or_return_error!(depth < self.m_cert_count, Err(chip_error_cert_path_too_long!()));
+
+            // Search for a valid CA certificate that matches the Issuer DN and Authority Key Id of the current certificate.
+            // Fail if no acceptable certificate is found.
+            let ca_cert = self.find_valid_cert(&cert.m_issuer_dn, &cert.m_auth_key_id, context, (depth + 1) as u8).map_err(|e| {
+                chip_log_error!(SecureChannel, "Failed to find valid cert druing chain traversal: {}", e);
+                chip_error_ca_cert_not_found!()
+            })?;
+
+            // Verify signature of the current certificate against public key of the CA certificate. If signature verification
+            // succeeds, the current certificate is valid.
+            return verify_cert_signature(cert, ca_cert);
         }
 
+        pub fn find_valid_cert<'a, Policy: CertificateValidityPolicy>(&'a self, subject_dn: &ChipDN, subject_key_id: &CertificateKeyId, context: &mut ValidationContext<'a, Policy>, depth: u8) -> Result<&'a ChipCertificateData, ChipError> {
+            let mut err = if depth > 0 {
+                chip_error_ca_cert_not_found!()
+            } else {
+                chip_error_cert_not_found!()
+            };
+
+            for i in 0..self.m_cert_count {
+                let candidate_cert = &self.m_certs_internal_storage[i as usize];
+
+                if candidate_cert.is_none() {
+                    continue;
+                }
+                let candidate_cert = candidate_cert.as_ref().unwrap();
+
+                if !candidate_cert.m_subject_dn.is_equal(subject_dn) {
+                    continue;
+                }
+
+                if &candidate_cert.m_subject_key_id[..] != subject_key_id {
+                    continue;
+                }
+
+                // Attempt to validate the cert.  If the cert is valid, return it to the caller. Otherwise,
+                // save the returned error and continue searching.  If there are no other matching certs this
+                // will be the error returned to the caller.
+                if self.validate_cert_depth(candidate_cert, context, depth).inspect_err(|e| err = *e).is_ok() {
+                    return Ok(candidate_cert);
+                }
+            }
+
+            return Err(err);
+        }
 
         pub fn get_cert_count(&self) -> u8 {
             self.m_cert_count
@@ -382,10 +443,13 @@ mod chip_certificate_set {
 
         use crate::chip::{
             credentials::{
+                certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy,
                 chip_cert::tests::make_subject_key_id,
-                fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert},
+                fabric_table::fabric_info::tests::{stub_public_key, make_chip_cert, make_ca_cert},
             },
         };
+
+        type IgorePolicyValidate<'a> = ValidationContext<'a, IgnoreCertificateValidityPeriodPolicy>;
 
         #[test]
         fn new() {
@@ -457,6 +521,30 @@ mod chip_certificate_set {
 
             assert!(found_cert.is_some());
             assert!(sets.is_cert_in_the_set(found_cert.unwrap()));
+        }
+
+        #[test]
+        fn valid_one_noc_and_one_root_successfully() {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut sets = ChipCertificateSet::new();
+            let key = stub_public_key();
+            let root_buffer = make_ca_cert(1, &key[..]).unwrap();
+            // load as trust anchor
+            assert!(sets.load_cert(root_buffer.const_bytes(), CertDecodeFlags::KisTrustAnchor).inspect_err(|e| println!("{}", e)).is_ok());
+            // this is the key in make_chip_cert
+            let key = make_subject_key_id(1, 2);
+            let root = sets.find_cert(&key);
+            assert!(root.is_some());
+            let root = root.unwrap();
+            root.m_not_before_time = expected_not_before;
+            root.m_not_aftet_time = expected_not_after;
+
+            let mut context = IgorePolicyValidate::default();
+            context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from(expected_not_before + 1));
+
+            assert!(sets.validate_cert(&root, &mut context).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(context.m_trust_anchor.is_some_and(|c| core::ptr::eq(c, root)));
         }
     } // end of tests
 }

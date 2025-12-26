@@ -206,7 +206,16 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
 
     reader.verify_end_of_container()?;
 
-    reader.exit_container(container_type)
+    reader.exit_container(container_type)?;
+
+
+    if let Some(flags) = decode_flag {
+        if flags.contains(CertDecodeFlags::KisTrustAnchor) {
+            cert_data.m_cert_flags.insert(CertFlags::KisTrustAnchor);
+        }
+    }
+
+    chip_ok!()
 }
 
 #[cfg(test)]

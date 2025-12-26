@@ -402,6 +402,13 @@ macro_rules! chip_error_invalid_argument {
 }
 
 #[macro_export]
+macro_rules! chip_error_ca_cert_not_found {
+    () => {
+        chip_core_error!(0x4a)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_cert_path_len_constraint_exceeded {
     () => {
         chip_core_error!(0x4b)
@@ -426,6 +433,20 @@ macro_rules! chip_error_cert_usage_not_allowed {
 macro_rules! chip_error_unsupported_cert_format {
     () => {
         chip_core_error!(0x50)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_cert_not_found {
+    () => {
+        chip_core_error!(0x53)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_cert_not_trusted {
+    () => {
+        chip_core_error!(0x57)
     };
 }
 
