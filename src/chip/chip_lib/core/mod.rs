@@ -1,3 +1,4 @@
+pub mod case_auth_tag;
 pub mod chip_config;
 pub mod chip_encoding;
 pub mod chip_error;
@@ -15,4 +16,3 @@ pub mod tlv_reader;
 pub mod tlv_tags;
 pub mod tlv_types;
 pub mod tlv_writer;
-pub mod case_auth_tag;

@@ -1,53 +1,64 @@
 const KFABRIC_LABEL_MAX_LENGTH_IN_BYTES: usize = 32;
-pub type FabricLabelString = crate::chip::chip_lib::support::default_string::DefaultString<KFABRIC_LABEL_MAX_LENGTH_IN_BYTES>;
+pub type FabricLabelString = crate::chip::chip_lib::support::default_string::DefaultString<
+    KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
+>;
 
 pub mod fabric_info {
     use crate::chip::{
-        CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
-        system::system_clock::Seconds32,
         chip_lib::{
             core::{
-                tlv_reader::{TlvContiguousBufferReader, TlvReader},
-                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                 case_auth_tag::CatValues,
-                tlv_types::TlvType,
-                tlv_tags::{self, anonymous_tag, context_tag},
-                data_model_types::{
-                    KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
-                    KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX, FabricIndex,
-                },
-                chip_persistent_storage_delegate::PersistentStorageDelegate,
-                node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
                 chip_encoding,
+                chip_persistent_storage_delegate::PersistentStorageDelegate,
+                data_model_types::{
+                    is_valid_fabric_index, FabricIndex, KMAX_VALID_FABRIC_INDEX,
+                    KMIN_VALID_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID,
+                    KUNDEFINED_FABRIC_INDEX,
+                },
+                node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
+                tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                tlv_tags::{self, anonymous_tag, context_tag},
+                tlv_types::TlvType,
+                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
             },
             support::{
-                default_string::DefaultString,
                 default_storage_key_allocator::DefaultStorageKeyAllocator,
-            }
+                default_string::DefaultString,
+            },
         },
         credentials::{
-            self, last_known_good_time::LastKnownGoodTime,
-            certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy, operational_certificate_store::{CertChainElement, OperationalCertificateStore},
-            chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
+            self,
+            certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy,
+            chip_cert::{
+                extract_node_id_fabric_id_from_op_cert_byte,
+                extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
+            },
+            last_known_good_time::LastKnownGoodTime,
+            operational_certificate_store::{CertChainElement, OperationalCertificateStore},
         },
         crypto::{
             self,
+            crypto_pal::{
+                ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
+                P256PublicKey, P256SerializedKeypair,
+            },
             generate_compressed_fabric_id,
-            crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair},
         },
+        system::system_clock::Seconds32,
+        CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
     };
     use crate::chip_core_error;
-    use crate::chip_error_invalid_argument;
     use crate::chip_error_buffer_too_small;
     use crate::chip_error_internal;
+    use crate::chip_error_invalid_argument;
     use crate::chip_error_key_not_found;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::tlv_estimate_struct_overhead;
     use crate::verify_or_return_error;
     use crate::verify_or_return_value;
-    use crate::ChipErrorResult;
     use crate::ChipError;
+    use crate::ChipErrorResult;
 
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
@@ -55,7 +66,10 @@ pub mod fabric_info {
     use crate::chip_log_progress;
 
     use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
-    use core::{ptr, str::{self, FromStr}};
+    use core::{
+        ptr,
+        str::{self, FromStr},
+    };
     #[cfg(test)]
     use mockall::*;
     //#[cfg(test)]
@@ -275,7 +289,10 @@ pub mod fabric_info {
                 compressed_fabric_id.len() == (core::mem::size_of::<u64>()),
                 Err(chip_error_invalid_argument!())
             );
-            chip_encoding::big_endian::put_u64(compressed_fabric_id, self.get_compressed_fabric_id());
+            chip_encoding::big_endian::put_u64(
+                compressed_fabric_id,
+                self.get_compressed_fabric_id(),
+            );
             chip_ok!()
         }
 
@@ -312,7 +329,8 @@ pub mod fabric_info {
             self.m_fabric_id = init_params.m_fabric_id;
             self.m_fabric_index = init_params.m_fabric_index;
             self.m_compressed_fabric_id = init_params.m_compressed_fabric_id;
-            self.m_root_publick_key = P256PublicKey::default_with_raw_value(init_params.m_root_publick_key.const_bytes());
+            self.m_root_publick_key =
+                P256PublicKey::default_with_raw_value(init_params.m_root_publick_key.const_bytes());
             self.m_vendor_id = init_params.m_vendor_id;
             self.m_should_advertise_identity = init_params.m_should_advertise_identity;
 
@@ -350,7 +368,6 @@ pub mod fabric_info {
             self.m_operation_key = ptr::addr_of_mut!(internal_keypair);
             self.m_internal_op_key_storage = Some(internal_keypair);
 
-
             chip_ok!()
         }
 
@@ -360,7 +377,10 @@ pub mod fabric_info {
         ) -> ChipErrorResult {
             verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
 
-            if self.m_has_externally_owned_operation_key == false && self.m_operation_key.is_null() == false && self.m_internal_op_key_storage.is_some() {
+            if self.m_has_externally_owned_operation_key == false
+                && self.m_operation_key.is_null() == false
+                && self.m_internal_op_key_storage.is_some()
+            {
                 let mut internal_keypair = self.m_internal_op_key_storage.take().unwrap();
                 internal_keypair.clear();
                 self.m_operation_key = ptr::null_mut();
@@ -377,10 +397,17 @@ pub mod fabric_info {
             message: &[u8],
             out_signature: &mut P256EcdsaSignature,
         ) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_operation_key.is_null(), Err(chip_error_key_not_found!()));
+            verify_or_return_error!(
+                !self.m_operation_key.is_null(),
+                Err(chip_error_key_not_found!())
+            );
 
             unsafe {
-                return self.m_operation_key.as_ref().unwrap().ecdsa_sign_msg(message, out_signature);
+                return self
+                    .m_operation_key
+                    .as_ref()
+                    .unwrap()
+                    .ecdsa_sign_msg(message, out_signature);
             }
         }
 
@@ -420,9 +447,8 @@ pub mod fabric_info {
         pub(super) fn commit_to_storge<'a, Storage: PersistentStorageDelegate>(
             &'a self,
             storage: &'a mut Storage,
-        ) -> ChipErrorResult
-        {
-            let mut buf: [u8; metadata_tlv_max_size()] = [0; {metadata_tlv_max_size()}];
+        ) -> ChipErrorResult {
+            let mut buf: [u8; metadata_tlv_max_size()] = [0; { metadata_tlv_max_size() }];
             let mut writer = TlvContiguousBufferWriter::const_default();
 
             writer.init(buf.as_mut_ptr(), metadata_tlv_max_size() as u32);
@@ -441,10 +467,12 @@ pub mod fabric_info {
 
             writer.end_container(outer_type)?;
 
-            let meta_data_len = u16::try_from(writer.get_length_written()).map_err(|_| {
-                chip_error_buffer_too_small!()
-            })?;
-            return storage.sync_set_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &buf[..meta_data_len as usize]);
+            let meta_data_len = u16::try_from(writer.get_length_written())
+                .map_err(|_| chip_error_buffer_too_small!())?;
+            return storage.sync_set_key_value(
+                DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(),
+                &buf[..meta_data_len as usize],
+            );
         }
 
         pub(super) fn load_from_storage<'a, Storage: PersistentStorageDelegate>(
@@ -457,9 +485,11 @@ pub mod fabric_info {
             //verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
             self.m_fabric_index = new_fabric_index;
             {
-                (self.m_node_id, self.m_fabric_id) = extract_node_id_fabric_id_from_op_cert_byte(noc)?;
+                (self.m_node_id, self.m_fabric_id) =
+                    extract_node_id_fabric_id_from_op_cert_byte(noc)?;
                 self.m_root_publick_key = extract_public_key_from_chip_cert_byte(rcac)?;
-                self.m_compressed_fabric_id = generate_compressed_fabric_id(&self.m_root_publick_key, self.m_fabric_id)?;
+                self.m_compressed_fabric_id =
+                    generate_compressed_fabric_id(&self.m_root_publick_key, self.m_fabric_id)?;
             }
             // Load other storable metadata (label, vendorId, etc)
             {
@@ -470,7 +500,10 @@ pub mod fabric_info {
                     storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
                 }
                 */
-                let data_size = storage.sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
+                let data_size = storage.sync_get_key_value(
+                    DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(),
+                    &mut buffer[..],
+                )?;
                 let mut reader = TlvContiguousBufferReader::const_default();
                 reader.init(buffer.as_ptr(), data_size);
                 reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
@@ -484,7 +517,10 @@ pub mod fabric_info {
                 let label_string = reader.get_string()?;
 
                 if let Some(label) = label_string {
-                    verify_or_return_error!(label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_buffer_too_small!()));
+                    verify_or_return_error!(
+                        label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
+                        Err(chip_error_buffer_too_small!())
+                    );
                     self.m_fabric_label = FabricLabelString::from(label);
                 }
 
@@ -505,24 +541,25 @@ pub mod fabric_info {
     pub mod tests {
         use super::*;
         use crate::chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{self, context_tag, is_context_tag, tag_num_from_tag},
+                    tlv_types::{self, TlvType},
+                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+                },
+                support::test_persistent_storage::TestPersistentStorage,
+            },
             credentials::{
+                chip_cert::{
+                    tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag,
+                },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
-                chip_cert::{ChipCertTag, tag_not_before, tag_not_after, tests::make_subject_key_id},
             },
             crypto::{
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
-                K_P256_PUBLIC_KEY_LENGTH,
-                P256Keypair, ECPKeyTarget, ECPKeypair, P256KeypairBase,
+                ECPKeyTarget, ECPKeypair, P256Keypair, P256KeypairBase, K_P256_PUBLIC_KEY_LENGTH,
                 *,
             },
-            chip_lib::{
-                support::test_persistent_storage::TestPersistentStorage,
-                core::{
-                    tlv_types::{self, TlvType},
-                    tlv_tags::{self, is_context_tag, tag_num_from_tag, context_tag},
-                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
-                }
-            }
         };
         use core::ptr;
 
@@ -532,7 +569,8 @@ pub mod fabric_info {
         const CHIP_CERT_SIZE: usize = 256 + K_P256_PUBLIC_KEY_LENGTH;
 
         pub fn stub_public_key() -> [u8; K_P256_PUBLIC_KEY_LENGTH] {
-            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] = [0; K_P256_PUBLIC_KEY_LENGTH];
+            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
+                [0; K_P256_PUBLIC_KEY_LENGTH];
             let mut keypair = P256Keypair::default();
             let _ = keypair.initialize(ECPKeyTarget::Ecdh);
             fake_public_key.copy_from_slice(keypair.public_key().const_bytes());
@@ -540,50 +578,86 @@ pub mod fabric_info {
         }
 
         pub fn make_chip_cert_with_time(
-            matter_id_value: u64, fabric_id_value: u64, public_key: &[u8],
-            not_before: Seconds32, not_after: Seconds32
-            ) -> Result<CertBuffer, ()> {
+            matter_id_value: u64,
+            fabric_id_value: u64,
+            public_key: &[u8],
+            not_before: Seconds32,
+            not_after: Seconds32,
+        ) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            );
 
             let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a issuer_dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut issuer_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | matter_id)),
+                matter_id_value,
+            );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | fabric_id)),
+                fabric_id_value,
+            );
             // end of list conatiner
             writer.end_container(issuer_outer_container_dn_list);
 
             let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a subject_dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut subject_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | matter_id)),
+                matter_id_value,
+            );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | fabric_id)),
+                fabric_id_value,
+            );
             // end of list conatiner
             writer.end_container(subject_outer_container_dn_list);
 
             // add to cert
-            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+            writer
+                .put_bytes(
+                    tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
+                    public_key,
+                )
+                .inspect_err(|e| println!("{:?}", e));
 
             // put a not before
             writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
@@ -593,7 +667,11 @@ pub mod fabric_info {
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            writer.start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut extensions_outer_container_list,
+            );
             writer.end_container(extensions_outer_container_list);
 
             // end struct container
@@ -605,49 +683,86 @@ pub mod fabric_info {
             return Ok(cert);
         }
 
-        pub fn make_chip_cert(matter_id_value: u64, fabric_id_value: u64, public_key: &[u8]) -> Result<CertBuffer, ()> {
+        pub fn make_chip_cert(
+            matter_id_value: u64,
+            fabric_id_value: u64,
+            public_key: &[u8],
+        ) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            );
 
             let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a issuer_dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut issuer_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut issuer_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | matter_id)),
+                matter_id_value,
+            );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | fabric_id)),
+                fabric_id_value,
+            );
             // end of list conatiner
             writer.end_container(issuer_outer_container_dn_list);
 
             // start a subject dn list
             let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut subject_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // set up a tag number from matter id
             let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::context_tag((is_print_string | matter_id)), matter_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | matter_id)),
+                matter_id_value,
+            );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(tlv_tags::context_tag((is_print_string | fabric_id)), fabric_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | fabric_id)),
+                fabric_id_value,
+            );
             // end of list conatiner
             writer.end_container(subject_outer_container_dn_list);
 
             // add to cert
-            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+            writer
+                .put_bytes(
+                    tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
+                    public_key,
+                )
+                .inspect_err(|e| println!("{:?}", e));
 
             // put a not before
             writer.put_u32(tag_not_before(), 0);
@@ -657,7 +772,11 @@ pub mod fabric_info {
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            writer.start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut extensions_outer_container_list,
+            );
             let key = make_subject_key_id(1, 2);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
             let key = make_subject_key_id(3, 4);
@@ -679,30 +798,53 @@ pub mod fabric_info {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container);
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            );
 
             // start a issuer dn list
             let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a dn list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut subject_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // end of list conatiner
             writer.end_container(subject_outer_container_dn_list);
 
             let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a subject list
-            writer.start_container(tlv_tags::context_tag(ChipCertTag::KtagSubject as u8), tlv_types::TlvType::KtlvTypeList, &mut subject_outer_container_dn_list).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
+                    tlv_types::TlvType::KtlvTypeList,
+                    &mut subject_outer_container_dn_list,
+                )
+                .inspect_err(|e| println!("{:?}", e));
             // set up a tag number from rcac id
             let rcac_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as u8;
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::context_tag((is_print_string | rcac_id)), rcac_id_value);
+            writer.put_u64(
+                tlv_tags::context_tag((is_print_string | rcac_id)),
+                rcac_id_value,
+            );
             // end of list conatiner
             writer.end_container(subject_outer_container_dn_list);
 
-
             // add to cert
-            writer.put_bytes(tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8), public_key).inspect_err(|e| println!("{:?}", e));
+            writer
+                .put_bytes(
+                    tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
+                    public_key,
+                )
+                .inspect_err(|e| println!("{:?}", e));
 
             // put a not before
             writer.put_u32(tag_not_before(), 0);
@@ -712,7 +854,11 @@ pub mod fabric_info {
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut extensions_outer_container_list);
+            writer.start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut extensions_outer_container_list,
+            );
             let key = make_subject_key_id(1, 2);
             // both id are required
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
@@ -739,7 +885,10 @@ pub mod fabric_info {
             let mut pa = TestPersistentStorage::default();
             let info = fabric_info_const_default();
             assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
-            assert_eq!(true, pa.has_key(DefaultStorageKeyAllocator::fabric_metadata(0).key_name_str()));
+            assert_eq!(
+                true,
+                pa.has_key(DefaultStorageKeyAllocator::fabric_metadata(0).key_name_str())
+            );
         }
 
         #[test]
@@ -753,11 +902,17 @@ pub mod fabric_info {
             assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
 
             let pub_key = stub_public_key();
-            let rcac = make_chip_cert(1,2, &pub_key[..]).unwrap();
-            let noc = make_chip_cert(3,4, &pub_key[..]).unwrap();
+            let rcac = make_chip_cert(1, 2, &pub_key[..]).unwrap();
+            let noc = make_chip_cert(3, 4, &pub_key[..]).unwrap();
 
             let mut info_out = fabric_info_const_default();
-            assert_eq!(true, info_out.load_from_storage(&mut pa, 0, rcac.const_bytes(), noc.const_bytes()).inspect_err(|e| println!("{:?}", e)).is_ok());
+            assert_eq!(
+                true,
+                info_out
+                    .load_from_storage(&mut pa, 0, rcac.const_bytes(), noc.const_bytes())
+                    .inspect_err(|e| println!("{:?}", e))
+                    .is_ok()
+            );
             assert_eq!(3, info_out.m_node_id);
             assert_eq!(4, info_out.m_fabric_id);
             assert_eq!(VendorId::Common, info_out.m_vendor_id);
@@ -769,92 +924,121 @@ pub mod fabric_info {
             let mut info = fabric_info_const_default();
             let keypair = P256Keypair::default();
 
-            assert_eq!(true, info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok());
+            assert_eq!(
+                true,
+                info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok()
+            );
             assert_eq!(true, info.m_internal_op_key_storage.is_some());
-            assert_eq!(keypair.public_key().const_bytes(), info.m_internal_op_key_storage.as_ref().unwrap().public_key().const_bytes());
+            assert_eq!(
+                keypair.public_key().const_bytes(),
+                info.m_internal_op_key_storage
+                    .as_ref()
+                    .unwrap()
+                    .public_key()
+                    .const_bytes()
+            );
         }
     } // end of mod tests
 } // end of mod fabric_info
 
-
 mod fabric_table {
     use crate::chip::{
-        CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
-        system::system_clock::Seconds32,
         chip_lib::{
             core::{
-                tlv_reader::{TlvContiguousBufferReader, TlvReader},
-                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                 case_auth_tag::CatValues,
-                tlv_types::TlvType,
-                tlv_tags::{self, anonymous_tag, context_tag, Tag},
-                data_model_types::{
-                    KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
-                    KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX, FabricIndex,
-                },
-                chip_persistent_storage_delegate::PersistentStorageDelegate,
-                node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
-                chip_encoding,
                 chip_config::CHIP_CONFIG_MAX_FABRICS,
+                chip_encoding,
+                chip_persistent_storage_delegate::PersistentStorageDelegate,
+                data_model_types::{
+                    is_valid_fabric_index, FabricIndex, KMAX_VALID_FABRIC_INDEX,
+                    KMIN_VALID_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID,
+                    KUNDEFINED_FABRIC_INDEX,
+                },
+                node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
+                tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                tlv_tags::{self, anonymous_tag, context_tag, Tag},
+                tlv_types::TlvType,
+                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
             },
             support::{
-                default_string::DefaultString,
                 default_storage_key_allocator::DefaultStorageKeyAllocator,
-            }
+                default_string::DefaultString,
+            },
         },
         credentials::{
-            self, last_known_good_time::LastKnownGoodTime,
-            certificate_validity_policy::{CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy},
+            self,
+            certificate_validity_policy::{
+                CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
+            },
+            chip_cert::{
+                extract_node_id_fabric_id_from_op_cert_byte,
+                extract_not_before_from_chip_cert_byte, extract_public_key_from_chip_cert_byte,
+                CertBuffer, K_MAX_CHIP_CERT_LENGTH,
+            },
+            last_known_good_time::LastKnownGoodTime,
             operational_certificate_store::{CertChainElement, OperationalCertificateStore},
-            chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte, extract_not_before_from_chip_cert_byte},
         },
         crypto::{
             self,
+            crypto_pal::{
+                ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
+                P256PublicKey, P256SerializedKeypair, K_MIN_CSR_BUFFER_SIZE,
+            },
             generate_compressed_fabric_id,
-            crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair, K_MIN_CSR_BUFFER_SIZE},
         },
+        system::system_clock::Seconds32,
+        CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
     };
     use crate::chip_core_error;
-    use crate::chip_error_invalid_argument;
-    use crate::chip_error_invalid_fabric_index;
     use crate::chip_error_buffer_too_small;
-    use crate::chip_error_not_implemented;
-    use crate::chip_error_persisted_storage_value_not_found;
+    use crate::chip_error_end_of_tlv;
     use crate::chip_error_incorrect_state;
     use crate::chip_error_internal;
+    use crate::chip_error_invalid_argument;
+    use crate::chip_error_invalid_fabric_index;
     use crate::chip_error_key_not_found;
     use crate::chip_error_no_memory;
-    use crate::chip_error_end_of_tlv;
     use crate::chip_error_not_found;
+    use crate::chip_error_not_implemented;
+    use crate::chip_error_persisted_storage_value_not_found;
     use crate::chip_ok;
     use crate::chip_sdk_error;
+    use crate::chip_static_assert;
+    use crate::matter_trace_scope;
     use crate::tlv_estimate_struct_overhead;
     use crate::verify_or_return_error;
     use crate::verify_or_return_value;
-    use crate::ChipErrorResult;
     use crate::ChipError;
-    use crate::matter_trace_scope;
-    use crate::chip_static_assert;
+    use crate::ChipErrorResult;
 
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
+    use crate::chip_log_detail;
     use crate::chip_log_error;
     use crate::chip_log_progress;
-    use crate::chip_log_detail;
 
     use bitflags::{bitflags, Flags};
     //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, fabric_info_const_default}};
-    use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, fabric_info_const_default}};
-    use core::{ptr, str::{self, FromStr}};
+    use super::{
+        fabric_info::{self, fabric_info_const_default},
+        FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
+    };
+    use core::{
+        ptr,
+        str::{self, FromStr},
+    };
 
-    use mockall_double::double;
     #[cfg(test)]
     use mockall::*;
+    use mockall_double::double;
 
     //#[double]
     use super::fabric_info::FabricInfo;
 
-    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<'a, IgnoreCertificateValidityPeriodPolicy>;
+    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<
+        'a,
+        IgnoreCertificateValidityPeriodPolicy,
+    >;
 
     bitflags! {
         #[derive(Clone, Copy)]
@@ -892,7 +1076,12 @@ mod fabric_table {
     const fn commit_marker_context_tlv_max_size() -> usize {
         use core::mem;
 
-        tlv_estimate_struct_overhead!(size_of::<FabricIndex>(), size_of::<bool>(), size_of::<u64>(), size_of::<u64>())
+        tlv_estimate_struct_overhead!(
+            size_of::<FabricIndex>(),
+            size_of::<bool>(),
+            size_of::<u64>(),
+            size_of::<u64>()
+        )
     }
 
     const fn index_info_tlv_max_size() -> usize {
@@ -903,7 +1092,10 @@ mod fabric_table {
         // The max size of the list is (1 byte control + bytes for actual value)
         // times max number of list items, plus one byte for the list terminator.
 
-        tlv_estimate_struct_overhead!(size_of::<FabricIndex>(), CHIP_CONFIG_MAX_FABRICS * (1 + size_of::<FabricIndex>()) + 1)
+        tlv_estimate_struct_overhead!(
+            size_of::<FabricIndex>(),
+            CHIP_CONFIG_MAX_FABRICS * (1 + size_of::<FabricIndex>()) + 1
+        )
     }
 
     fn marker_fabric_index_tag() -> Tag {
@@ -937,17 +1129,25 @@ mod fabric_table {
         }
     }
 
-    pub trait Delegate<PSD, OK, OCS> 
+    pub trait Delegate<PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
-        fn on_fabric_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex);
-        fn next(&self) -> Option<* mut dyn Delegate<PSD, OK, OCS>>;
+        fn fabric_will_be_removed(
+            &mut self,
+            fabric_table: &FabricTable<PSD, OK, OCS>,
+            fabric_index: FabricIndex,
+        );
+        fn on_fabric_removed(
+            &mut self,
+            fabric_table: &FabricTable<PSD, OK, OCS>,
+            fabric_index: FabricIndex,
+        );
+        fn next(&self) -> Option<*mut dyn Delegate<PSD, OK, OCS>>;
         fn remove_next(&mut self);
-        fn set_next(&mut self, next: Option<* mut dyn Delegate<PSD, OK, OCS>>);
+        fn set_next(&mut self, next: Option<*mut dyn Delegate<PSD, OK, OCS>>);
     }
 
     #[repr(u8)]
@@ -981,7 +1181,7 @@ mod fabric_table {
         m_op_cert_store: *mut OCS,
         // FabricTable::Delegate link to first node, since FabricTable::Delegate is a form
         // of intrusive linked-list item.
-        m_delegate_list_root: Option<* mut dyn Delegate<PSD, OK, OCS>>,
+        m_delegate_list_root: Option<*mut dyn Delegate<PSD, OK, OCS>>,
         //m_delegate_list_root: * mut dyn Delegate<PSD, OK, OCS>,
 
         // When mStateFlags.Has(kIsPendingFabricDataPresent) is true, this holds the index of the fabric
@@ -1009,12 +1209,12 @@ mod fabric_table {
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        pub storage: * mut PSD,
-        pub operational_keystore: * mut OK,
-        pub op_certs_store: * mut OCS,
+        pub storage: *mut PSD,
+        pub operational_keystore: *mut OK,
+        pub op_certs_store: *mut OCS,
     }
 
-    impl<PSD, OK, OCS> Default for InitParams<PSD, OK, OCS> 
+    impl<PSD, OK, OCS> Default for InitParams<PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
@@ -1038,10 +1238,10 @@ mod fabric_table {
 
     #[cfg(test)]
     pub fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<PSD, OK, OCS>
-        where
-            PSD: PersistentStorageDelegate,
-            OK: crypto::OperationalKeystore,
-            OCS: credentials::OperationalCertificateStore,
+    where
+        PSD: PersistentStorageDelegate,
+        OK: crypto::OperationalKeystore,
+        OCS: credentials::OperationalCertificateStore,
     {
         FabricTable {
             //m_states: [const {FabricInfo::default()}; CHIP_CONFIG_MAX_FABRICS],
@@ -1064,13 +1264,13 @@ mod fabric_table {
 
     #[cfg(not(test))]
     pub const fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<PSD, OK, OCS>
-        where
-            PSD: PersistentStorageDelegate,
-            OK: crypto::OperationalKeystore,
-            OCS: credentials::OperationalCertificateStore,
+    where
+        PSD: PersistentStorageDelegate,
+        OK: crypto::OperationalKeystore,
+        OCS: credentials::OperationalCertificateStore,
     {
         FabricTable {
-            m_states: [const {fabric_info_const_default()}; CHIP_CONFIG_MAX_FABRICS],
+            m_states: [const { fabric_info_const_default() }; CHIP_CONFIG_MAX_FABRICS],
             m_pending_fabric: fabric_info_const_default(),
             m_storage: ptr::null_mut(),
             m_operational_keystore: ptr::null_mut(),
@@ -1093,23 +1293,44 @@ mod fabric_table {
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        fn load_from_storage(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!self.m_states[index].is_initialized(), Err(chip_error_incorrect_state!()));
+        fn load_from_storage(
+            &mut self,
+            fabric_index: FabricIndex,
+            index: usize,
+        ) -> ChipErrorResult {
+            verify_or_return_error!(
+                !self.m_storage.is_null(),
+                Err(chip_error_invalid_argument!())
+            );
+            verify_or_return_error!(
+                !self.m_states[index].is_initialized(),
+                Err(chip_error_incorrect_state!())
+            );
 
             let mut noc_buf = CertBuffer::default();
             let mut rcac_buf = CertBuffer::default();
 
-            let err = self.fetch_noc_cert(fabric_index, &mut noc_buf).and_then(|_| {
-                self.fetch_root_cert(fabric_index, &mut rcac_buf).and_then(|_| {
-                    unsafe {
-                        self.m_states[index].load_from_storage(self.m_storage.as_mut().unwrap(), fabric_index, noc_buf.const_bytes(), rcac_buf.const_bytes())
-                    }
-                })
-            });
+            let err = self
+                .fetch_noc_cert(fabric_index, &mut noc_buf)
+                .and_then(|_| {
+                    self.fetch_root_cert(fabric_index, &mut rcac_buf)
+                        .and_then(|_| unsafe {
+                            self.m_states[index].load_from_storage(
+                                self.m_storage.as_mut().unwrap(),
+                                fabric_index,
+                                noc_buf.const_bytes(),
+                                rcac_buf.const_bytes(),
+                            )
+                        })
+                });
 
             if err.is_err() {
-                chip_log_error!(FabricProvisioning, "Failed to load fabric {:#x}: {}", fabric_index, err.err().unwrap());
+                chip_log_error!(
+                    FabricProvisioning,
+                    "Failed to load fabric {:#x}: {}",
+                    fabric_index,
+                    err.err().unwrap()
+                );
                 self.m_states[index].reset();
                 return err;
             }
@@ -1120,7 +1341,10 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn read_fabric_info<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+        fn read_fabric_info<'a, Reader: TlvReader<'a>>(
+            &mut self,
+            reader: &mut Reader,
+        ) -> ChipErrorResult {
             reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
             let container_type = reader.enter_container()?;
             reader.next_tag(next_available_fabric_index_tag())?;
@@ -1142,7 +1366,10 @@ mod fabric_table {
                 let current_fabric_index = reader.get_u8()?;
 
                 //if self.load_from_storage(current_fabric_index, &mut self.m_states[self.m_fabric_count as usize]).is_ok() {
-                if self.load_from_storage(current_fabric_index, self.m_fabric_count as usize).is_ok() {
+                if self
+                    .load_from_storage(current_fabric_index, self.m_fabric_count as usize)
+                    .is_ok()
+                {
                     self.m_fabric_count += 1;
                 } else {
                     // This could happen if we failed to store our fabric index info
@@ -1167,14 +1394,23 @@ mod fabric_table {
         }
 
         pub fn init(&mut self, init_params: &InitParams<PSD, OK, OCS>) -> ChipErrorResult {
-            verify_or_return_error!(!init_params.storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(!init_params.op_certs_store.is_null(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(
+                !init_params.storage.is_null(),
+                Err(chip_error_invalid_argument!())
+            );
+            verify_or_return_error!(
+                !init_params.op_certs_store.is_null(),
+                Err(chip_error_invalid_argument!())
+            );
 
             self.m_storage = init_params.storage;
             self.m_operational_keystore = init_params.operational_keystore;
             self.m_op_cert_store = init_params.op_certs_store;
 
-            chip_log_detail!(FabricProvisioning, "Initializing FabricTable from persistent storage");
+            chip_log_detail!(
+                FabricProvisioning,
+                "Initializing FabricTable from persistent storage"
+            );
 
             chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX);
 
@@ -1193,15 +1429,22 @@ mod fabric_table {
             let mut buf: [u8; SIZE] = [0; SIZE];
 
             unsafe {
-                match self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &mut buf) {
+                match self.m_storage.as_mut().unwrap().sync_get_key_value(
+                    DefaultStorageKeyAllocator::fabric_index_info().key_name_str(),
+                    &mut buf,
+                ) {
                     Ok(data_size) => {
                         let mut reader = TlvContiguousBufferReader::default();
                         reader.init(buf.as_ptr(), data_size);
 
                         self.read_fabric_info(&mut reader).inspect_err(|e| {
-                            chip_log_error!(FabricProvisioning, "Error loading fabric table {}, we are in a bad state!", e);
+                            chip_log_error!(
+                                FabricProvisioning,
+                                "Error loading fabric table {}, we are in a bad state!",
+                                e
+                            );
                         })?;
-                    },
+                    }
                     Err(e) => {
                         if e == chip_error_persisted_storage_value_not_found!() {
                             // No fabrics yet.  Nothing to be done here.
@@ -1220,11 +1463,15 @@ mod fabric_table {
 
                     // Can't do better on error. We just have to hope for the best.
                     self.delete(commit_marker.fabric_index);
-                },
+                }
                 Err(e) => {
                     // Got an error, but somehow value is not missing altogether: inconsistent state but touch nothing.
                     if e != chip_error_persisted_storage_value_not_found!() {
-                        chip_log_error!(FabricProvisioning, "Error loading Table commit marker {}, hope for the best", e);
+                        chip_log_error!(
+                            FabricProvisioning,
+                            "Error loading Table commit marker {}, hope for the best",
+                            e
+                        );
                     }
                 }
             }
@@ -1232,7 +1479,6 @@ mod fabric_table {
             chip_ok!()
         }
     }
-
 
     impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
     where
@@ -1242,8 +1488,14 @@ mod fabric_table {
     {
         pub fn delete(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
             matter_trace_scope!("Delete", "Fabric");
-            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_invalid_argument!()));
-            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(
+                !self.m_storage.is_null(),
+                Err(chip_error_invalid_argument!())
+            );
+            verify_or_return_error!(
+                is_valid_fabric_index(fabric_index),
+                Err(chip_error_invalid_argument!())
+            );
 
             let mut delegate = self.m_delegate_list_root;
             unsafe {
@@ -1268,7 +1520,9 @@ mod fabric_table {
             }
             */
 
-            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+            if self.has_pending_fabric_update()
+                && (self.m_pending_fabric.get_fabric_index() == fabric_index)
+            {
                 self.revert_pending_fabric_data();
             }
 
@@ -1286,12 +1540,16 @@ mod fabric_table {
 
             if !self.m_operational_keystore.is_null() {
                 unsafe {
-                    op_key_err = self.m_operational_keystore.as_mut().unwrap().remove_op_keypair_for_fabric(fabric_index).or_else(|e| {
-                        // Not having found data is not an error, we may just have gotten here
-                        // on a fail-safe expiry after `RevertPendingFabricData`.
-                        handle_not_having_data(e)
-                    });
-
+                    op_key_err = self
+                        .m_operational_keystore
+                        .as_mut()
+                        .unwrap()
+                        .remove_op_keypair_for_fabric(fabric_index)
+                        .or_else(|e| {
+                            // Not having found data is not an error, we may just have gotten here
+                            // on a fail-safe expiry after `RevertPendingFabricData`.
+                            handle_not_having_data(e)
+                        });
                 }
             }
 
@@ -1299,14 +1557,19 @@ mod fabric_table {
 
             if !self.m_op_cert_store.is_null() {
                 unsafe {
-                    op_certs_err = self.m_op_cert_store.as_mut().unwrap().remove_certs_for_fabric(fabric_index).or_else(|e| {
-                        handle_not_having_data(e)
-                    });
+                    op_certs_err = self
+                        .m_op_cert_store
+                        .as_mut()
+                        .unwrap()
+                        .remove_certs_for_fabric(fabric_index)
+                        .or_else(|e| handle_not_having_data(e));
                 }
             }
 
             let fabric_info_option = self.get_mutable_fabric_by_index(fabric_index);
-            let fabric_is_initialized = fabric_info_option.as_ref().is_some_and(|info| info.is_initialized());
+            let fabric_is_initialized = fabric_info_option
+                .as_ref()
+                .is_some_and(|info| info.is_initialized());
 
             if fabric_is_initialized {
                 let fabric_info = fabric_info_option.unwrap();
@@ -1326,7 +1589,10 @@ mod fabric_table {
                 self.store_fabric_index_info();
 
                 if self.m_fabric_count == 0 {
-                    chip_log_error!(FabricProvisioning, "Trying to delete a fabric, but the current fabric count is already 0");
+                    chip_log_error!(
+                        FabricProvisioning,
+                        "Trying to delete a fabric, but the current fabric count is already 0"
+                    );
                 } else {
                     self.m_fabric_count -= 1;
                     chip_log_progress!(FabricProvisioning, "Fabric {:#x} deleted", fabric_index);
@@ -1356,7 +1622,8 @@ mod fabric_table {
 
             self.revert_pending_fabric_data();
 
-            let mut to_be_deleted: [bool; CHIP_CONFIG_MAX_FABRICS] = [false; CHIP_CONFIG_MAX_FABRICS];
+            let mut to_be_deleted: [bool; CHIP_CONFIG_MAX_FABRICS] =
+                [false; CHIP_CONFIG_MAX_FABRICS];
 
             for fabric in &mut *self {
                 let index = fabric.get_fabric_index() as usize;
@@ -1374,7 +1641,11 @@ mod fabric_table {
             }
         }
 
-        pub fn find_fabric(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId) -> Option<&FabricInfo> {
+        pub fn find_fabric(
+            &self,
+            root_pub_key: &P256PublicKey,
+            fabric_id: FabricId,
+        ) -> Option<&FabricInfo> {
             return self.find_fabric_common(root_pub_key, fabric_id);
         }
 
@@ -1383,7 +1654,9 @@ mod fabric_table {
                 return None;
             }
 
-            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+            if self.has_pending_fabric_update()
+                && (self.m_pending_fabric.get_fabric_index() == fabric_index)
+            {
                 return Some(&self.m_pending_fabric);
             }
 
@@ -1400,12 +1673,22 @@ mod fabric_table {
             return None;
         }
 
-        pub fn find_indentiy(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId, node_id: NodeId) -> Option<&FabricInfo> {
+        pub fn find_indentiy(
+            &self,
+            root_pub_key: &P256PublicKey,
+            fabric_id: FabricId,
+            node_id: NodeId,
+        ) -> Option<&FabricInfo> {
             return self.find_fabric_common_with_id(root_pub_key, fabric_id, Some(node_id));
         }
 
-        pub fn find_fabric_with_compressed_id(&self, compressed_fabric_id: CompressedFabricId) -> Option<&FabricInfo> {
-            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_compressed_fabric_id() == compressed_fabric_id) {
+        pub fn find_fabric_with_compressed_id(
+            &self,
+            compressed_fabric_id: CompressedFabricId,
+        ) -> Option<&FabricInfo> {
+            if self.has_pending_fabric_update()
+                && (self.m_pending_fabric.get_compressed_fabric_id() == compressed_fabric_id)
+            {
                 return Some(&self.m_pending_fabric);
             }
 
@@ -1462,12 +1745,18 @@ mod fabric_table {
                 return;
             }
             unsafe {
-                self.m_storage.as_mut().unwrap().sync_delete_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str());
+                self.m_storage.as_mut().unwrap().sync_delete_key_value(
+                    DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
+                );
             }
         }
 
         pub fn forget(&mut self, fabric_index: FabricIndex) {
-            chip_log_progress!(FabricProvisioning, "Forgetting fabirc {:#x}", fabric_index as u32);
+            chip_log_progress!(
+                FabricProvisioning,
+                "Forgetting fabirc {:#x}",
+                fabric_index as u32
+            );
 
             let is_found = self.get_mutable_fabric_by_index(fabric_index).is_some();
 
@@ -1479,7 +1768,10 @@ mod fabric_table {
             }
         }
 
-        pub fn add_fabric_delegate(&mut self, delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) -> ChipErrorResult {
+        pub fn add_fabric_delegate(
+            &mut self,
+            delegate: Option<*mut dyn Delegate<PSD, OK, OCS>>,
+        ) -> ChipErrorResult {
             verify_or_return_error!(delegate.is_some(), Err(chip_error_invalid_argument!()));
 
             let delegate = delegate.unwrap();
@@ -1494,14 +1786,21 @@ mod fabric_table {
                     iter = i.as_ref().unwrap().next();
                 }
 
-                delegate.clone().as_mut().unwrap().set_next(self.m_delegate_list_root);
+                delegate
+                    .clone()
+                    .as_mut()
+                    .unwrap()
+                    .set_next(self.m_delegate_list_root);
                 self.m_delegate_list_root = Some(delegate);
             }
 
             chip_ok!()
         }
 
-        pub fn remove_fabric_delegate(&mut self, mut delegate: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
+        pub fn remove_fabric_delegate(
+            &mut self,
+            mut delegate: Option<*mut dyn Delegate<PSD, OK, OCS>>,
+        ) {
             if delegate.is_none() {
                 return;
             }
@@ -1529,12 +1828,28 @@ mod fabric_table {
             }
         }
 
-        pub fn set_fabric_label(&mut self, fabric_index: FabricIndex, fabric_label: &str) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
-            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
-            verify_or_return_error!(fabric_label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, Err(chip_error_invalid_argument!()));
+        pub fn set_fabric_label(
+            &mut self,
+            fabric_index: FabricIndex,
+            fabric_label: &str,
+        ) -> ChipErrorResult {
+            verify_or_return_error!(
+                !self.m_storage.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
+            verify_or_return_error!(
+                is_valid_fabric_index(fabric_index),
+                Err(chip_error_invalid_fabric_index!())
+            );
+            verify_or_return_error!(
+                fabric_label.len() <= KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
+                Err(chip_error_invalid_argument!())
+            );
 
-            if !self.find_fabric_with_index(fabric_index).is_some_and(|info| info.is_initialized()) {
+            if !self
+                .find_fabric_with_index(fabric_index)
+                .is_some_and(|info| info.is_initialized())
+            {
                 return Err(chip_error_invalid_fabric_index!());
             }
 
@@ -1545,16 +1860,22 @@ mod fabric_table {
             // we cannot borrow mut info and call the store_fabric_meta. So we have to borrow
             // immutable info once again to store the data
             if let Some(info) = self.find_fabric_with_index(fabric_index) {
-                if !self.m_state_flag.intersects(StateFlags::KisAddPending | StateFlags::KisUpdatePending) &&
-                    info.get_fabric_index() != self.m_pending_fabric.get_fabric_index() {
-                        self.store_fabric_metadata(info)?;
+                if !self
+                    .m_state_flag
+                    .intersects(StateFlags::KisAddPending | StateFlags::KisUpdatePending)
+                    && info.get_fabric_index() != self.m_pending_fabric.get_fabric_index()
+                {
+                    self.store_fabric_metadata(info)?;
                 }
             }
 
             chip_ok!()
         }
 
-        pub fn get_fabric_label(&self, fabric_index: FabricIndex) -> Result<Option<&str>, ChipError> {
+        pub fn get_fabric_label(
+            &self,
+            fabric_index: FabricIndex,
+        ) -> Result<Option<&str>, ChipError> {
             if let Some(info) = self.find_fabric_with_index(fabric_index) {
                 Ok(info.get_fabric_label())
             } else {
@@ -1563,10 +1884,14 @@ mod fabric_table {
         }
 
         pub fn get_last_known_good_chip_epoch_time(&self) -> Result<Seconds32, ChipError> {
-            self.m_last_known_good_time.get_last_known_good_chip_epoch_time()
+            self.m_last_known_good_time
+                .get_last_known_good_chip_epoch_time()
         }
 
-        pub fn set_last_known_good_chip_epoch_time(&mut self, last_known_good_chip_epoch_time: Seconds32) -> ChipErrorResult {
+        pub fn set_last_known_good_chip_epoch_time(
+            &mut self,
+            last_known_good_chip_epoch_time: Seconds32,
+        ) -> ChipErrorResult {
             let mut latest_not_before = Seconds32::from_secs(0);
             for fabric in &self.m_states {
                 if !fabric.is_initialized() {
@@ -1575,14 +1900,16 @@ mod fabric_table {
                 {
                     let mut rcac = CertBuffer::default();
                     self.fetch_root_cert(fabric.get_fabric_index(), &mut rcac)?;
-                    let rcac_not_before = extract_not_before_from_chip_cert_byte(rcac.const_bytes())?;
+                    let rcac_not_before =
+                        extract_not_before_from_chip_cert_byte(rcac.const_bytes())?;
                     latest_not_before = core::cmp::max(latest_not_before, rcac_not_before);
                 }
                 {
                     let mut icac = CertBuffer::default();
                     self.fetch_icac_cert(fabric.get_fabric_index(), &mut icac)?;
                     if icac.length() > 0 {
-                        let icac_not_before = extract_not_before_from_chip_cert_byte(icac.const_bytes())?;
+                        let icac_not_before =
+                            extract_not_before_from_chip_cert_byte(icac.const_bytes())?;
                         latest_not_before = core::cmp::max(latest_not_before, icac_not_before);
                     }
                 }
@@ -1594,7 +1921,11 @@ mod fabric_table {
                 }
             }
 
-            self.m_last_known_good_time.set_last_known_good_chip_epoch_time(last_known_good_chip_epoch_time, latest_not_before)?;
+            self.m_last_known_good_time
+                .set_last_known_good_chip_epoch_time(
+                    last_known_good_chip_epoch_time,
+                    latest_not_before,
+                )?;
             chip_ok!()
         }
 
@@ -1602,35 +1933,65 @@ mod fabric_table {
             self.m_fabric_count
         }
 
-        pub fn fetch_root_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+        pub fn fetch_root_cert(
+            &self,
+            fabric_index: FabricIndex,
+            out_cert: &mut CertBuffer,
+        ) -> ChipErrorResult {
             matter_trace_scope!("FetchRootCert", "Fabric");
-            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_op_cert_store.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
             unsafe {
-                let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Krcac, out_cert.all_bytes())?;
+                let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(
+                    fabric_index,
+                    CertChainElement::Krcac,
+                    out_cert.all_bytes(),
+                )?;
                 out_cert.set_length(size)?;
             }
 
             chip_ok!()
         }
 
-        pub fn fetch_pending_non_fabric_associcated_root_cert(&self, _out_cert: &mut [u8]) -> ChipErrorResult {
+        pub fn fetch_pending_non_fabric_associcated_root_cert(
+            &self,
+            _out_cert: &mut [u8],
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn fetch_icac_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+        pub fn fetch_icac_cert(
+            &self,
+            fabric_index: FabricIndex,
+            out_cert: &mut CertBuffer,
+        ) -> ChipErrorResult {
             matter_trace_scope!("FetchICACert", "Fabric");
-            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_op_cert_store.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
             unsafe {
-                match self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Kicac, out_cert.all_bytes()) {
+                match self.m_op_cert_store.as_ref().unwrap().get_certificate(
+                    fabric_index,
+                    CertChainElement::Kicac,
+                    out_cert.all_bytes(),
+                ) {
                     Ok(size) => {
                         out_cert.set_length(size)?;
                         return chip_ok!();
-                    },
+                    }
                     Err(e) => {
                         if e == chip_error_not_found!() {
-                            if self.m_op_cert_store.as_ref().unwrap().has_certificate_for_fabric(fabric_index, CertChainElement::Knoc) {
+                            if self
+                                .m_op_cert_store
+                                .as_ref()
+                                .unwrap()
+                                .has_certificate_for_fabric(fabric_index, CertChainElement::Knoc)
+                            {
                                 out_cert.set_length(0);
                                 return chip_ok!();
                             }
@@ -1641,29 +2002,53 @@ mod fabric_table {
             }
         }
 
-        pub fn fetch_noc_cert(&self, fabric_index: FabricIndex, out_cert: &mut CertBuffer) -> ChipErrorResult {
+        pub fn fetch_noc_cert(
+            &self,
+            fabric_index: FabricIndex,
+            out_cert: &mut CertBuffer,
+        ) -> ChipErrorResult {
             matter_trace_scope!("FetchNOCCert", "Fabric");
-            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_op_cert_store.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
             unsafe {
-                let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(fabric_index, CertChainElement::Knoc, out_cert.all_bytes())?;
+                let size = self.m_op_cert_store.as_ref().unwrap().get_certificate(
+                    fabric_index,
+                    CertChainElement::Knoc,
+                    out_cert.all_bytes(),
+                )?;
                 out_cert.set_length(size)?;
             }
 
             chip_ok!()
         }
 
-        pub fn fetch_vid_verification_statement(&self, _fabric_index: FabricIndex, _out_vid_verification_statement: &mut [u8]) -> ChipErrorResult {
+        pub fn fetch_vid_verification_statement(
+            &self,
+            _fabric_index: FabricIndex,
+            _out_vid_verification_statement: &mut [u8],
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn fetch_vvsc(&self, _fabric_index: FabricIndex, _out_vvsc: &mut [u8]) -> ChipErrorResult {
+        pub fn fetch_vvsc(
+            &self,
+            _fabric_index: FabricIndex,
+            _out_vvsc: &mut [u8],
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn fetch_root_pubkey(&self, fabric_index: FabricIndex) -> Result<P256PublicKey, ChipError> {
+        pub fn fetch_root_pubkey(
+            &self,
+            fabric_index: FabricIndex,
+        ) -> Result<P256PublicKey, ChipError> {
             matter_trace_scope!("FetchRootPubkey", "Fabric");
-            let fabric_info = self.find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?;
+            let fabric_info = self
+                .find_fabric_with_index(fabric_index)
+                .ok_or(chip_error_invalid_fabric_index!())?;
 
             return fabric_info.fetch_root_pubkey();
         }
@@ -1672,7 +2057,12 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn sign_with_op_keypair(&self, fabric_index: FabricIndex, message: &[u8], out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
+        pub fn sign_with_op_keypair(
+            &self,
+            fabric_index: FabricIndex,
+            message: &[u8],
+            out_signature: &mut P256EcdsaSignature,
+        ) -> ChipErrorResult {
             if let Some(info) = self.find_fabric_with_index(fabric_index) {
                 if info.has_operational_key() {
                     return info.sign_with_op_keypair(message, out_signature);
@@ -1680,7 +2070,11 @@ mod fabric_table {
 
                 if !self.m_operational_keystore.is_null() {
                     unsafe {
-                        return self.m_operational_keystore.as_ref().unwrap().sign_with_op_keypair(fabric_index, message, out_signature);
+                        return self
+                            .m_operational_keystore
+                            .as_ref()
+                            .unwrap()
+                            .sign_with_op_keypair(fabric_index, message, out_signature);
                     }
                 }
             }
@@ -1691,49 +2085,88 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn release_ephemeral_keypair(&self, _keypair: P256Keypair) {
-        }
+        pub fn release_ephemeral_keypair(&self, _keypair: P256Keypair) {}
 
-        pub fn allocate_pending_operation_key(&mut self, fabric_index: Option<FabricIndex>, out_csr: &mut [u8]) -> Result<usize, ChipError> {
-            verify_or_return_error!(!self.m_operational_keystore.is_null(), Err(chip_error_incorrect_state!()));
+        pub fn allocate_pending_operation_key(
+            &mut self,
+            fabric_index: Option<FabricIndex>,
+            out_csr: &mut [u8],
+        ) -> Result<usize, ChipError> {
+            verify_or_return_error!(
+                !self.m_operational_keystore.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
-            verify_or_return_error!(!self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent), Err(chip_error_incorrect_state!()));
-            verify_or_return_error!(out_csr.len() >= K_MIN_CSR_BUFFER_SIZE, Err(chip_error_buffer_too_small!()));
-            
+            verify_or_return_error!(
+                !self
+                    .m_state_flag
+                    .contains(StateFlags::KisPendingFabricDataPresent),
+                Err(chip_error_incorrect_state!())
+            );
+            verify_or_return_error!(
+                out_csr.len() >= K_MIN_CSR_BUFFER_SIZE,
+                Err(chip_error_buffer_too_small!())
+            );
+
             self.ensure_next_available_fabric_index_updated();
             let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
 
             if let Some(index) = fabric_index {
-                verify_or_return_error!(!self.m_state_flag.contains(StateFlags::KisTrustedRootPending), Err(chip_error_incorrect_state!()));
+                verify_or_return_error!(
+                    !self
+                        .m_state_flag
+                        .contains(StateFlags::KisTrustedRootPending),
+                    Err(chip_error_incorrect_state!())
+                );
 
                 fabric_index_to_use = index;
-                self.m_state_flag.insert(StateFlags::KisPendingKeyForUpdateNoc);
+                self.m_state_flag
+                    .insert(StateFlags::KisPendingKeyForUpdateNoc);
             } else {
                 if let Some(index) = self.m_next_available_fabric_index {
                     fabric_index_to_use = index;
-                    self.m_state_flag.remove(StateFlags::KisPendingKeyForUpdateNoc);
+                    self.m_state_flag
+                        .remove(StateFlags::KisPendingKeyForUpdateNoc);
                 } else {
                     return Err(chip_error_no_memory!());
                 }
             }
 
-            verify_or_return_error!(is_valid_fabric_index(fabric_index_to_use), Err(chip_error_invalid_fabric_index!()));
-            verify_or_return_error!(self.set_pending_data_fabric_index(fabric_index_to_use), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                is_valid_fabric_index(fabric_index_to_use),
+                Err(chip_error_invalid_fabric_index!())
+            );
+            verify_or_return_error!(
+                self.set_pending_data_fabric_index(fabric_index_to_use),
+                Err(chip_error_incorrect_state!())
+            );
             let mut csr_size: usize = 0;
             unsafe {
-                csr_size = self.m_operational_keystore.as_mut().unwrap().new_op_keypair_for_fabric(self.m_fabric_index_with_pending_state, out_csr)?;
+                csr_size = self
+                    .m_operational_keystore
+                    .as_mut()
+                    .unwrap()
+                    .new_op_keypair_for_fabric(self.m_fabric_index_with_pending_state, out_csr)?;
             }
 
-            self.m_state_flag.insert(StateFlags::KisOperationalKeyPending);
+            self.m_state_flag
+                .insert(StateFlags::KisOperationalKeyPending);
 
             Ok(csr_size)
         }
 
-        pub fn has_pending_operational_key(&self, out_is_pending_key_for_update_noc: &mut bool) -> bool {
-            let has_op_key_pending = self.m_state_flag.contains(StateFlags::KisOperationalKeyPending);
+        pub fn has_pending_operational_key(
+            &self,
+            out_is_pending_key_for_update_noc: &mut bool,
+        ) -> bool {
+            let has_op_key_pending = self
+                .m_state_flag
+                .contains(StateFlags::KisOperationalKeyPending);
 
             if has_op_key_pending {
-                *out_is_pending_key_for_update_noc = self.m_state_flag.contains(StateFlags::KisPendingKeyForUpdateNoc);
+                *out_is_pending_key_for_update_noc = self
+                    .m_state_flag
+                    .contains(StateFlags::KisPendingKeyForUpdateNoc);
             }
 
             has_op_key_pending
@@ -1746,7 +2179,11 @@ mod fabric_table {
                 }
                 if !self.m_operational_keystore.is_null() {
                     unsafe {
-                        return self.m_operational_keystore.as_ref().unwrap().has_op_keypair_for_fabric(fabric_index);
+                        return self
+                            .m_operational_keystore
+                            .as_ref()
+                            .unwrap()
+                            .has_op_keypair_for_fabric(fabric_index);
                     }
                 }
             }
@@ -1758,17 +2195,25 @@ mod fabric_table {
             KUNDEFINED_FABRIC_INDEX
         }
 
-
-        pub fn get_operational_keystore(&self) -> * const OK {
+        pub fn get_operational_keystore(&self) -> *const OK {
             self.m_operational_keystore
         }
 
-
         pub fn add_new_pending_trusted_root_cert(&mut self, rcac: &[u8]) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_op_cert_store.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
             // We should not already have pending NOC chain elements when we get here
-            verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KisTrustedRootPending | StateFlags::KisUpdatePending | StateFlags::KisAddPending), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_state_flag.intersects(
+                    StateFlags::KisTrustedRootPending
+                        | StateFlags::KisUpdatePending
+                        | StateFlags::KisAddPending
+                ),
+                Err(chip_error_incorrect_state!())
+            );
 
             self.ensure_next_available_fabric_index_updated();
             let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
@@ -1779,39 +2224,69 @@ mod fabric_table {
                 return Err(chip_error_no_memory!());
             }
 
-            verify_or_return_error!(is_valid_fabric_index(fabric_index_to_use), Err(chip_error_invalid_fabric_index!()));
-            verify_or_return_error!(self.set_pending_data_fabric_index(fabric_index_to_use), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                is_valid_fabric_index(fabric_index_to_use),
+                Err(chip_error_invalid_fabric_index!())
+            );
+            verify_or_return_error!(
+                self.set_pending_data_fabric_index(fabric_index_to_use),
+                Err(chip_error_incorrect_state!())
+            );
 
             unsafe {
-                self.m_op_cert_store.as_mut().unwrap().add_new_trusted_root_cert_for_fabric(fabric_index_to_use, rcac)?;
+                self.m_op_cert_store
+                    .as_mut()
+                    .unwrap()
+                    .add_new_trusted_root_cert_for_fabric(fabric_index_to_use, rcac)?;
             }
-            
-            self.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+
+            self.m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
             self.m_state_flag.insert(StateFlags::KisTrustedRootPending);
 
             chip_ok!()
         }
 
-        pub fn add_new_pending_fabric_with_operational_keystore(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
-            _advertise_identity: Option<AdvertiseIdentity>) -> Result<FabricIndex, ChipError> {
+        pub fn add_new_pending_fabric_with_operational_keystore(
+            &mut self,
+            _noc: &[u8],
+            _icac: &[u8],
+            _vendor_id: u16,
+            _advertise_identity: Option<AdvertiseIdentity>,
+        ) -> Result<FabricIndex, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn add_new_pending_fabric_with_provided_op_key(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
-            _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: Option<AdvertiseIdentity>) -> Result<FabricIndex, ChipError> {
+        pub fn add_new_pending_fabric_with_provided_op_key(
+            &mut self,
+            _noc: &[u8],
+            _icac: &[u8],
+            _vendor_id: u16,
+            _existeding_op_key: &P256Keypair,
+            _is_existing_op_key_externally_owned: bool,
+            _advertise_identity: Option<AdvertiseIdentity>,
+        ) -> Result<FabricIndex, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-
-        pub fn update_pending_fabric_with_operational_keystore(&mut self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8],
-            _advertise_identity: Option<AdvertiseIdentity>) -> ChipErrorResult {
+        pub fn update_pending_fabric_with_operational_keystore(
+            &mut self,
+            _fabric_index: FabricIndex,
+            _noc: &[u8],
+            _icac: &[u8],
+            _advertise_identity: Option<AdvertiseIdentity>,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn update_pending_fabric_with_provided_op_key(&mut self, _noc: &[u8], _icac: &[u8], 
-            _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: Option<AdvertiseIdentity>) -> ChipErrorResult {
+        pub fn update_pending_fabric_with_provided_op_key(
+            &mut self,
+            _noc: &[u8],
+            _icac: &[u8],
+            _existeding_op_key: &P256Keypair,
+            _is_existing_op_key_externally_owned: bool,
+            _advertise_identity: Option<AdvertiseIdentity>,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
@@ -1826,17 +2301,24 @@ mod fabric_table {
 
             if !self.m_operational_keystore.is_null() {
                 unsafe {
-                    self.m_operational_keystore.as_mut().unwrap().revert_pending_keypair();
+                    self.m_operational_keystore
+                        .as_mut()
+                        .unwrap()
+                        .revert_pending_keypair();
                 }
             }
 
             if !self.m_op_cert_store.is_null() {
                 unsafe {
-                    self.m_op_cert_store.as_mut().unwrap().revert_pending_op_certs_except_root();
+                    self.m_op_cert_store
+                        .as_mut()
+                        .unwrap()
+                        .revert_pending_op_certs_except_root();
                 }
             }
 
-            self.m_last_known_good_time.revert_pending_last_known_good_chip_epoch_time();
+            self.m_last_known_good_time
+                .revert_pending_last_known_good_chip_epoch_time();
 
             self.m_state_flag.clear();
             self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
@@ -1846,13 +2328,23 @@ mod fabric_table {
             matter_trace_scope!("RevertPendingOpCertsExceptRoot", "Fabric");
             self.m_pending_fabric.reset();
 
-            if self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent) {
-                chip_log_error!(FabricProvisioning, "Reverting pending fabric data for fabric {:#x}", self.m_fabric_index_with_pending_state);
+            if self
+                .m_state_flag
+                .contains(StateFlags::KisPendingFabricDataPresent)
+            {
+                chip_log_error!(
+                    FabricProvisioning,
+                    "Reverting pending fabric data for fabric {:#x}",
+                    self.m_fabric_index_with_pending_state
+                );
             }
 
             if !self.m_op_cert_store.is_null() {
                 unsafe {
-                    self.m_op_cert_store.as_mut().unwrap().revert_pending_op_certs_except_root();
+                    self.m_op_cert_store
+                        .as_mut()
+                        .unwrap()
+                        .revert_pending_op_certs_except_root();
                 }
             }
 
@@ -1863,40 +2355,87 @@ mod fabric_table {
             self.m_state_flag.remove(StateFlags::KisAddPending);
             self.m_state_flag.remove(StateFlags::KisUpdatePending);
 
-            if self.m_state_flag.contains(StateFlags::KisTrustedRootPending) {
+            if self
+                .m_state_flag
+                .contains(StateFlags::KisTrustedRootPending)
+            {
                 self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
             }
         }
 
-        pub fn verify_credentials(&self, _fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
-            ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
+        pub fn verify_credentials(
+            &self,
+            _fabric_index: FabricIndex,
+            _noc: &[u8],
+            _icac: &[u8],
+            _context: &mut ValidationContext,
+        ) -> Result<
+            (
+                CompressedFabricId,
+                FabricId,
+                NodeId,
+                P256PublicKey,
+                P256PublicKey,
+            ),
+            ChipError,
+        > {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn run_verify_credentials(_fabric_index: FabricIndex, _noc: &[u8], _icac: &[u8], _context: &mut ValidationContext,
-            ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
+        pub fn run_verify_credentials(
+            _fabric_index: FabricIndex,
+            _noc: &[u8],
+            _icac: &[u8],
+            _context: &mut ValidationContext,
+        ) -> Result<
+            (
+                CompressedFabricId,
+                FabricId,
+                NodeId,
+                P256PublicKey,
+                P256PublicKey,
+            ),
+            ChipError,
+        > {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn permit_colliding_fabrics(&mut self) { 
-            self.m_state_flag.insert(StateFlags::KareCollidingFabricsIgnored);
+        pub fn permit_colliding_fabrics(&mut self) {
+            self.m_state_flag
+                .insert(StateFlags::KareCollidingFabricsIgnored);
         }
 
-        pub fn add_new_fabric_for_test(&mut self, _root_cert: &[u8], _icac_cert: &[u8], _noc_cert: &[u8], _ok_key: &[u8]) -> 
-            Result<FabricIndex, ChipError> {
+        pub fn add_new_fabric_for_test(
+            &mut self,
+            _root_cert: &[u8],
+            _icac_cert: &[u8],
+            _noc_cert: &[u8],
+            _ok_key: &[u8],
+        ) -> Result<FabricIndex, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn add_new_uncommited_fabric_for_test(&mut self, _root_cert: &[u8], _icac_cert: &[u8], _noc_cert: &[u8], _ok_key: &[u8]) -> 
-            Result<FabricIndex, ChipError> {
+        pub fn add_new_uncommited_fabric_for_test(
+            &mut self,
+            _root_cert: &[u8],
+            _icac_cert: &[u8],
+            _noc_cert: &[u8],
+            _ok_key: &[u8],
+        ) -> Result<FabricIndex, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn add_new_fabric_for_test_ignoring_collisions(&mut self, root_cert: &[u8], icac_cert: &[u8], noc_cert: &[u8], ok_key: &[u8]) -> 
-            Result<FabricIndex, ChipError> {
-                self.permit_colliding_fabrics();
-                self.m_state_flag.remove(StateFlags::KareCollidingFabricsIgnored);
-                return self.add_new_fabric_for_test(root_cert, icac_cert, noc_cert, ok_key);
+        pub fn add_new_fabric_for_test_ignoring_collisions(
+            &mut self,
+            root_cert: &[u8],
+            icac_cert: &[u8],
+            noc_cert: &[u8],
+            ok_key: &[u8],
+        ) -> Result<FabricIndex, ChipError> {
+            self.permit_colliding_fabrics();
+            self.m_state_flag
+                .remove(StateFlags::KareCollidingFabricsIgnored);
+            return self.add_new_fabric_for_test(root_cert, icac_cert, noc_cert, ok_key);
         }
 
         pub fn set_force_abort_commit_for_test(&mut self, abort_commit_for_test: bool) {
@@ -1911,24 +2450,44 @@ mod fabric_table {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn set_fabric_index_for_next_addition(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
+        pub fn set_fabric_index_for_next_addition(
+            &mut self,
+            _fabric_index: FabricIndex,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn sign_vid_verification_request(&self, _fabric_index: FabricIndex, _client_challenge: &[u8], _attestation_challenge: &[u8], out_response: &mut SignVidVerificationResponseData) -> ChipErrorResult {
+        pub fn sign_vid_verification_request(
+            &self,
+            _fabric_index: FabricIndex,
+            _client_challenge: &[u8],
+            _attestation_challenge: &[u8],
+            out_response: &mut SignVidVerificationResponseData,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        pub fn set_vid_verification_statement_elements(&self, _fabric_index: FabricIndex, _vendor_id: Option<u16>, _vid_verification_statement: Option<&[u8]>, _vvsc: Option<&[u8]>) -> Result<bool, ChipError> {
+        pub fn set_vid_verification_statement_elements(
+            &self,
+            _fabric_index: FabricIndex,
+            _vendor_id: Option<u16>,
+            _vid_verification_statement: Option<&[u8]>,
+            _vvsc: Option<&[u8]>,
+        ) -> Result<bool, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-        fn get_mutable_fabric_by_index(&mut self, fabric_index: FabricIndex) -> Option<&mut FabricInfo> {
+        fn get_mutable_fabric_by_index(
+            &mut self,
+            fabric_index: FabricIndex,
+        ) -> Option<&mut FabricInfo> {
             if fabric_index == KUNDEFINED_FABRIC_INDEX {
                 return None;
             }
 
-            if self.has_pending_fabric_update() && (self.m_pending_fabric.get_fabric_index() == fabric_index) {
+            if self.has_pending_fabric_update()
+                && (self.m_pending_fabric.get_fabric_index() == fabric_index)
+            {
                 return Some(&mut self.m_pending_fabric);
             }
 
@@ -1946,23 +2505,33 @@ mod fabric_table {
         }
 
         fn store_fabric_metadata(&self, fabric_info: &FabricInfo) -> ChipErrorResult {
-            verify_or_return_error!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(
+                !self.m_storage.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
 
             let fabric_index = fabric_info.get_fabric_index();
-            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_internal!()));
+            verify_or_return_error!(
+                is_valid_fabric_index(fabric_index),
+                Err(chip_error_internal!())
+            );
 
             unsafe {
                 fabric_info.commit_to_storge(self.m_storage.as_mut().unwrap())?;
             }
 
-            chip_log_progress!(FabricProvisioning, "Metadata for fabric {:#x} persisted to storage.", fabric_index as u32);
+            chip_log_progress!(
+                FabricProvisioning,
+                "Metadata for fabric {:#x} persisted to storage.",
+                fabric_index as u32
+            );
 
             chip_ok!()
         }
 
         fn set_pending_data_fabric_index(&mut self, fabric_index: FabricIndex) -> bool {
-            let is_legal = (self.m_fabric_index_with_pending_state == KUNDEFINED_FABRIC_INDEX) ||
-                (self.m_fabric_index_with_pending_state == fabric_index);
+            let is_legal = (self.m_fabric_index_with_pending_state == KUNDEFINED_FABRIC_INDEX)
+                || (self.m_fabric_index_with_pending_state == fabric_index);
 
             if is_legal {
                 self.m_fabric_index_with_pending_state = fabric_index;
@@ -1979,24 +2548,47 @@ mod fabric_table {
             KUNDEFINED_FABRIC_INDEX
         }
 
-        fn add_or_update_inner(&mut self, _fabric_index: FabricIndex, _is_addition: bool, _existing_op_key: &P256Keypair,
-            _is_existingg_op_key_externally_owned: bool, _vendor_id: u16, _advertise_identity: AdvertiseIdentity) -> ChipErrorResult {
+        fn add_or_update_inner(
+            &mut self,
+            _fabric_index: FabricIndex,
+            _is_addition: bool,
+            _existing_op_key: &P256Keypair,
+            _is_existingg_op_key_externally_owned: bool,
+            _vendor_id: u16,
+            _advertise_identity: AdvertiseIdentity,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        fn add_new_pending_fabric_common(&mut self, _noc: &[u8], _icac: &[u8], _vendor_id: u16,
-            _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: AdvertiseIdentity) -> Result<FabricIndex, ChipError> {
+        fn add_new_pending_fabric_common(
+            &mut self,
+            _noc: &[u8],
+            _icac: &[u8],
+            _vendor_id: u16,
+            _existeding_op_key: &P256Keypair,
+            _is_existing_op_key_externally_owned: bool,
+            _advertise_identity: AdvertiseIdentity,
+        ) -> Result<FabricIndex, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
-        fn update_pending_fabric_common(&mut self, _noc: &[u8], _icac: &[u8], 
-            _existeding_op_key: &P256Keypair, _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: AdvertiseIdentity) -> ChipErrorResult {
+        fn update_pending_fabric_common(
+            &mut self,
+            _noc: &[u8],
+            _icac: &[u8],
+            _existeding_op_key: &P256Keypair,
+            _is_existing_op_key_externally_owned: bool,
+            _advertise_identity: AdvertiseIdentity,
+        ) -> ChipErrorResult {
             Err(chip_error_not_implemented!())
         }
 
-        fn find_fabric_common_with_id(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId, node_id: Option<NodeId>) -> Option<&FabricInfo> {
+        fn find_fabric_common_with_id(
+            &self,
+            root_pub_key: &P256PublicKey,
+            fabric_id: FabricId,
+            node_id: Option<NodeId>,
+        ) -> Option<&FabricInfo> {
             // Try to match pending fabric first if available
             if self.has_pending_fabric_update() {
                 let candidate_pub_key = self.m_pending_fabric.fetch_root_pubkey();
@@ -2006,9 +2598,13 @@ mod fabric_table {
                     self.m_pending_fabric.get_node_id()
                 };
 
-                if candidate_pub_key.as_ref().is_ok_and(|key| root_pub_key.matches(key)) && 
-                    fabric_id == self.m_pending_fabric.get_fabric_id() && matching_node_id == self.m_pending_fabric.get_node_id() {
-                        return Some(&self.m_pending_fabric);
+                if candidate_pub_key
+                    .as_ref()
+                    .is_ok_and(|key| root_pub_key.matches(key))
+                    && fabric_id == self.m_pending_fabric.get_fabric_id()
+                    && matching_node_id == self.m_pending_fabric.get_node_id()
+                {
+                    return Some(&self.m_pending_fabric);
                 }
             }
 
@@ -2024,9 +2620,11 @@ mod fabric_table {
                 }
 
                 if let Ok(key) = fabric.fetch_root_pubkey() {
-                    if root_pub_key.matches(&key) && fabric_id == fabric.get_fabric_id() && 
-                        matching_node_id == fabric.get_node_id() {
-                            return Some(fabric);
+                    if root_pub_key.matches(&key)
+                        && fabric_id == fabric.get_fabric_id()
+                        && matching_node_id == fabric.get_node_id()
+                    {
+                        return Some(fabric);
                     }
                 }
             }
@@ -2034,7 +2632,11 @@ mod fabric_table {
             None
         }
 
-        fn find_fabric_common(&self, root_pub_key: &P256PublicKey, fabric_id: FabricId) -> Option<&FabricInfo> {
+        fn find_fabric_common(
+            &self,
+            root_pub_key: &P256PublicKey,
+            fabric_id: FabricId,
+        ) -> Option<&FabricInfo> {
             return self.find_fabric_common_with_id(root_pub_key, fabric_id, None);
         }
 
@@ -2043,9 +2645,13 @@ mod fabric_table {
                 return;
             }
 
-            let mut candidate = next_fabric_index(self.m_next_available_fabric_index.clone().unwrap());
+            let mut candidate =
+                next_fabric_index(self.m_next_available_fabric_index.clone().unwrap());
 
-            while self.m_next_available_fabric_index.is_some_and(|index| index != candidate) {
+            while self
+                .m_next_available_fabric_index
+                .is_some_and(|index| index != candidate)
+            {
                 if self.find_fabric_with_index(candidate).is_none() {
                     self.m_next_available_fabric_index = Some(candidate);
                     return;
@@ -2056,12 +2662,17 @@ mod fabric_table {
         }
 
         fn ensure_next_available_fabric_index_updated(&mut self) {
-            if self.m_next_available_fabric_index.is_none() && self.m_fabric_count < KMAX_VALID_FABRIC_INDEX {
+            if self.m_next_available_fabric_index.is_none()
+                && self.m_fabric_count < KMAX_VALID_FABRIC_INDEX
+            {
                 // We must have a fabric index available here. This situation could
                 // happen if we fail to store fabric index info when deleting a
                 // fabric.
                 self.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
-                if self.find_fabric_with_index(KMIN_VALID_FABRIC_INDEX).is_some() {
+                if self
+                    .find_fabric_with_index(KMIN_VALID_FABRIC_INDEX)
+                    .is_some()
+                {
                     self.update_next_available_fabric_index();
                 }
             }
@@ -2083,36 +2694,61 @@ mod fabric_table {
             }
 
             let mut inner_container_type = TlvType::KtlvTypeNotSpecified;
-            writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut inner_container_type)?;
+            writer.start_container(
+                fabric_indices_tag(),
+                TlvType::KtlvTypeArray,
+                &mut inner_container_type,
+            )?;
 
-            for f in & *self {
+            for f in &*self {
                 writer.put_u8(anonymous_tag(), f.get_fabric_index());
             }
 
             writer.end_container(inner_container_type)?;
             writer.end_container(outer_type)?;
 
-            let index_info_length = u16::try_from(writer.get_length_written()).map_err(|_| chip_error_buffer_too_small!())?;
+            let index_info_length = u16::try_from(writer.get_length_written())
+                .map_err(|_| chip_error_buffer_too_small!())?;
 
             unsafe {
-                self.m_storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &buf[0..index_info_length as usize]);
+                self.m_storage.as_mut().unwrap().sync_set_key_value(
+                    DefaultStorageKeyAllocator::fabric_index_info().key_name_str(),
+                    &buf[0..index_info_length as usize],
+                );
             }
 
             chip_ok!()
         }
 
         fn delete_metadata_from_storage(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-            verify_or_return_value!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
-            verify_or_return_value!(!self.m_storage.is_null(), Err(chip_error_incorrect_state!()));
+            verify_or_return_value!(
+                is_valid_fabric_index(fabric_index),
+                Err(chip_error_invalid_fabric_index!())
+            );
+            verify_or_return_value!(
+                !self.m_storage.is_null(),
+                Err(chip_error_incorrect_state!())
+            );
             unsafe {
-                match self.m_storage.as_mut().unwrap().sync_delete_key_value(DefaultStorageKeyAllocator::fabric_metadata(fabric_index).key_name_str()) {
-                    Ok(_) => {},
+                match self.m_storage.as_mut().unwrap().sync_delete_key_value(
+                    DefaultStorageKeyAllocator::fabric_metadata(fabric_index).key_name_str(),
+                ) {
+                    Ok(_) => {}
                     Err(e) => {
                         let not_found = chip_error_persisted_storage_value_not_found!();
                         if e == not_found {
-                            chip_log_error!(FabricProvisioning, "Warning: metadata not found during delete of fabric {:#x}", fabric_index);
+                            chip_log_error!(
+                                FabricProvisioning,
+                                "Warning: metadata not found during delete of fabric {:#x}",
+                                fabric_index
+                            );
                         } else {
-                            chip_log_error!(FabricProvisioning, "Error deleting metadata for fabric fabric {:#x}: {}", fabric_index, e);
+                            chip_log_error!(
+                                FabricProvisioning,
+                                "Error deleting metadata for fabric fabric {:#x}: {}",
+                                fabric_index,
+                                e
+                            );
                         }
                     }
                 }
@@ -2120,7 +2756,11 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn find_existing_fabric_by_noc_chaining(&self, pending_fabric_index: FabricIndex, noc: &[u8]) -> Result<Option<FabricIndex>, ChipError> {
+        fn find_existing_fabric_by_noc_chaining(
+            &self,
+            pending_fabric_index: FabricIndex,
+            noc: &[u8],
+        ) -> Result<Option<FabricIndex>, ChipError> {
             matter_trace_scope!("FindExistingFabricByNocChaining", "Fabric");
             // Check whether we already have a matching fabric from a cert chain perspective.
             // To do so we have to extract the FabricID from the NOC and the root public key from the RCAC.
@@ -2136,12 +2776,14 @@ mod fabric_table {
             {
                 let mut temp_rcac = CertBuffer::default();
                 self.fetch_root_cert(pending_fabric_index, &mut temp_rcac)?;
-                candidate_root_key = extract_public_key_from_chip_cert_byte(temp_rcac.const_bytes())?;
+                candidate_root_key =
+                    extract_public_key_from_chip_cert_byte(temp_rcac.const_bytes())?;
             }
 
-            for existing_fabric in & *self {
+            for existing_fabric in &*self {
                 if existing_fabric.get_fabric_id() == fabric_id {
-                    let existing_root_key = self.fetch_root_pubkey(existing_fabric.get_fabric_index())?;
+                    let existing_root_key =
+                        self.fetch_root_pubkey(existing_fabric.get_fabric_index())?;
 
                     if existing_root_key.matches(&candidate_root_key) {
                         return Ok(Some(existing_fabric.get_fabric_index()));
@@ -2161,11 +2803,28 @@ mod fabric_table {
         }
 
         fn has_pending_fabric_update(&self) -> bool {
-            return self.m_pending_fabric.is_initialized() && self.m_state_flag.contains(StateFlags::KisPendingFabricDataPresent | StateFlags::KisUpdatePending);
+            return self.m_pending_fabric.is_initialized()
+                && self.m_state_flag.contains(
+                    StateFlags::KisPendingFabricDataPresent | StateFlags::KisUpdatePending,
+                );
         }
 
-        fn validate_incoming_noc_chain<Policy: CertificateValidityPolicy>(_noc: &[u8], _icac: &[u8], _rcac: &[u8], existing_fabric_id: FabricId, _policy: &Policy,
-            ) -> Result<(CompressedFabricId, FabricId, NodeId, P256PublicKey, P256PublicKey), ChipError> {
+        fn validate_incoming_noc_chain<Policy: CertificateValidityPolicy>(
+            _noc: &[u8],
+            _icac: &[u8],
+            _rcac: &[u8],
+            existing_fabric_id: FabricId,
+            _policy: &Policy,
+        ) -> Result<
+            (
+                CompressedFabricId,
+                FabricId,
+                NodeId,
+                P256PublicKey,
+                P256PublicKey,
+            ),
+            ChipError,
+        > {
             Err(chip_error_not_implemented!())
         }
 
@@ -2186,7 +2845,11 @@ mod fabric_table {
             let mut outer_container = TlvType::KtlvTypeNotSpecified;
 
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_container)?;
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            )?;
 
             writer.put_u8(marker_fabric_index_tag(), commit_marker.fabric_index as u8)?;
 
@@ -2196,10 +2859,11 @@ mod fabric_table {
             writer.end_container(outer_container)?;
 
             match u16::try_from(writer.get_length_written()) {
-                Ok(size) => {
-                    unsafe {
-                        return self.m_storage.as_mut().unwrap().sync_set_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(), &raw_tlv[..size as usize]);
-                    }
+                Ok(size) => unsafe {
+                    return self.m_storage.as_mut().unwrap().sync_set_key_value(
+                        DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
+                        &raw_tlv[..size as usize],
+                    );
                 },
                 Err(e) => {
                     return Err(chip_error_buffer_too_small!());
@@ -2215,7 +2879,10 @@ mod fabric_table {
 
             let mut tlv_read_size = 0usize;
             unsafe {
-                tlv_read_size = self.m_storage.as_mut().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(), &mut tlv_buf)?;
+                tlv_read_size = self.m_storage.as_mut().unwrap().sync_get_key_value(
+                    DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
+                    &mut tlv_buf,
+                )?;
             }
 
             let mut reader = TlvContiguousBufferReader::default();
@@ -2264,10 +2931,10 @@ mod fabric_table {
 
         fn into_iter(self) -> Self::IntoIter {
             let pending = if self.has_pending_fabric_update() {
-                    Some(&self.m_pending_fabric)
-                } else {
-                    None
-                };
+                Some(&self.m_pending_fabric)
+            } else {
+                None
+            };
             FabricIterator {
                 m_next: self.m_states.iter(),
                 m_pending: pending,
@@ -2275,14 +2942,17 @@ mod fabric_table {
         }
     }
 
-    impl<'a> Iterator for FabricIterator<'a>
-    {
+    impl<'a> Iterator for FabricIterator<'a> {
         type Item = &'a FabricInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(info) = self.m_next.next() {
                 // check if this info is shadowed first
-                if self.m_pending.as_ref().is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index()) {
+                if self
+                    .m_pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index())
+                {
                     return self.m_pending.take();
                 }
 
@@ -2313,10 +2983,10 @@ mod fabric_table {
 
         fn into_iter(self) -> Self::IntoIter {
             let pending = if self.has_pending_fabric_update() {
-                    Some(&mut self.m_pending_fabric)
-                } else {
-                    None
-                };
+                Some(&mut self.m_pending_fabric)
+            } else {
+                None
+            };
             FabricIteratorMut {
                 m_next: self.m_states.iter_mut(),
                 m_pending: pending,
@@ -2324,14 +2994,17 @@ mod fabric_table {
         }
     }
 
-    impl<'a> Iterator for FabricIteratorMut<'a>
-    {
+    impl<'a> Iterator for FabricIteratorMut<'a> {
         type Item = &'a mut FabricInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(info) = self.m_next.next() {
                 // check if this info is shadowed first
-                if self.m_pending.as_ref().is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index()) {
+                if self
+                    .m_pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.get_fabric_index() == info.get_fabric_index())
+                {
                     return self.m_pending.take();
                 }
 
@@ -2349,78 +3022,97 @@ mod fabric_table {
     #[cfg(test)]
     mod tests {
         use crate::chip::{
-            CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
-            system::system_clock::Seconds32,
             chip_lib::{
                 core::{
-                    tlv_reader::{TlvContiguousBufferReader, TlvReader, MockTlvReader},
-                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                     case_auth_tag::CatValues,
-                    tlv_types::TlvType,
-                    tlv_tags::{self, anonymous_tag},
-                    data_model_types::{
-                        KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX, is_valid_fabric_index,
-                        KMIN_VALID_FABRIC_INDEX, KMAX_VALID_FABRIC_INDEX, FabricIndex,
-                    },
-                    chip_persistent_storage_delegate::PersistentStorageDelegate,
-                    node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
-                    chip_encoding,
                     chip_config::CHIP_CONFIG_MAX_FABRICS,
+                    chip_encoding,
+                    chip_persistent_storage_delegate::PersistentStorageDelegate,
+                    data_model_types::{
+                        is_valid_fabric_index, FabricIndex, KMAX_VALID_FABRIC_INDEX,
+                        KMIN_VALID_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID,
+                        KUNDEFINED_FABRIC_ID, KUNDEFINED_FABRIC_INDEX,
+                    },
+                    node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
+                    tlv_reader::{MockTlvReader, TlvContiguousBufferReader, TlvReader},
+                    tlv_tags::{self, anonymous_tag},
+                    tlv_types::TlvType,
+                    tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
                 },
                 support::{
-                    default_string::DefaultString,
                     default_storage_key_allocator::DefaultStorageKeyAllocator,
-                    test_persistent_storage::TestPersistentStorage,
-                }
+                    default_string::DefaultString, test_persistent_storage::TestPersistentStorage,
+                },
             },
             credentials::{
-                self, last_known_good_time::LastKnownGoodTime, chip_certificate_set::ValidationContext,
+                self,
                 certificate_validity_policy::CertificateValidityPolicy,
-                operational_certificate_store::{CertChainElement, OperationalCertificateStore, MockOperationalCertificateStore},
-                chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH, extract_public_key_from_chip_cert_byte, extract_node_id_fabric_id_from_op_cert_byte},
+                chip_cert::{
+                    extract_node_id_fabric_id_from_op_cert_byte,
+                    extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
+                },
+                chip_certificate_set::ValidationContext,
                 fabric_table::{
-                    fabric_table::{FabricTable, InitParams, index_info_tlv_max_size, next_available_fabric_index_tag, fabric_indices_tag, StateFlags, commit_marker_context_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag, Delegate},
                     fabric_info,
+                    fabric_table::{
+                        commit_marker_context_tlv_max_size, fabric_indices_tag,
+                        index_info_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag,
+                        next_available_fabric_index_tag, Delegate, FabricTable, InitParams,
+                        StateFlags,
+                    },
+                },
+                last_known_good_time::LastKnownGoodTime,
+                operational_certificate_store::{
+                    CertChainElement, MockOperationalCertificateStore, OperationalCertificateStore,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
             crypto::{
                 self,
-                operational_keystore::MockOperationalKeystore,
+                crypto_pal::{
+                    ECPKey, ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair,
+                    P256KeypairBase, P256PublicKey, P256SerializedKeypair,
+                },
                 generate_compressed_fabric_id,
-                crypto_pal::{P256EcdsaSignature, P256Keypair, P256PublicKey, ECPKey, ECPKeypair, P256KeypairBase, P256SerializedKeypair, ECPKeyTarget},
-                persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+                operational_keystore::MockOperationalKeystore,
                 operational_keystore::OperationalKeystore,
+                persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
                 K_MIN_CSR_BUFFER_SIZE,
             },
+            system::system_clock::Seconds32,
+            CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
         };
-        use crate::ChipErrorResult;
-        use crate::ChipError;
+        use crate::chip_core_error;
+        use crate::chip_error_end_of_tlv;
         use crate::chip_error_internal;
+        use crate::chip_error_invalid_fabric_index;
         use crate::chip_error_key_not_found;
         use crate::chip_error_not_found;
-        use crate::chip_error_end_of_tlv;
-        use crate::chip_error_invalid_fabric_index;
-        use crate::chip_core_error;
         use crate::chip_ok;
         use crate::chip_sdk_error;
+        use crate::ChipError;
+        use crate::ChipErrorResult;
 
         use core::ptr;
-        use static_cell::StaticCell;
         use mockall::*;
+        use static_cell::StaticCell;
 
         //use super::super::fabric_info::MockFabricInfo as FabricInfo;
-        use super::super::fabric_info::FabricInfo as FabricInfo;
         use super::super::fabric_info::tests as FabricInfoTest;
+        use super::super::fabric_info::FabricInfo;
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
         type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
 
-        type MockStorageTestFabricTable = FabricTable<TestPersistentStorage, MockOperationalKeystore, MockOperationalCertificateStore>;
+        type MockStorageTestFabricTable = FabricTable<
+            TestPersistentStorage,
+            MockOperationalKeystore,
+            MockOperationalCertificateStore,
+        >;
 
         #[derive(Default)]
-        struct TestFabricTableDelegate<PSD, OK, OCS> 
+        struct TestFabricTableDelegate<PSD, OK, OCS>
         where
             PSD: PersistentStorageDelegate,
             OK: crypto::OperationalKeystore,
@@ -2428,7 +3120,7 @@ mod fabric_table {
         {
             pub will_be_removed: FabricIndex,
             pub on_removed: FabricIndex,
-            pub next: Option<* mut dyn Delegate<PSD, OK, OCS>>,
+            pub next: Option<*mut dyn Delegate<PSD, OK, OCS>>,
         }
 
         type NoMockFabricTableDelegate = TestFabricTableDelegate<TestPersistentStorage, OK, OCS>;
@@ -2439,15 +3131,23 @@ mod fabric_table {
             OK: crypto::OperationalKeystore,
             OCS: credentials::OperationalCertificateStore,
         {
-            fn fabric_will_be_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex) {
+            fn fabric_will_be_removed(
+                &mut self,
+                fabric_table: &FabricTable<PSD, OK, OCS>,
+                fabric_index: FabricIndex,
+            ) {
                 self.will_be_removed = fabric_index;
             }
 
-            fn on_fabric_removed(&mut self, fabric_table: &FabricTable<PSD, OK, OCS>, fabric_index: FabricIndex) {
+            fn on_fabric_removed(
+                &mut self,
+                fabric_table: &FabricTable<PSD, OK, OCS>,
+                fabric_index: FabricIndex,
+            ) {
                 self.on_removed = fabric_index;
             }
 
-            fn next(&self) -> Option<* mut dyn Delegate<PSD, OK, OCS>> {
+            fn next(&self) -> Option<*mut dyn Delegate<PSD, OK, OCS>> {
                 return self.next.clone();
             }
 
@@ -2455,7 +3155,7 @@ mod fabric_table {
                 self.next = None;
             }
 
-            fn set_next(&mut self, next: Option<* mut dyn Delegate<PSD, OK, OCS>>) {
+            fn set_next(&mut self, next: Option<*mut dyn Delegate<PSD, OK, OCS>>) {
                 self.next = next;
             }
         }
@@ -2472,7 +3172,12 @@ mod fabric_table {
             fabric_info
         }
 
-        fn set_up_stub_fabric(fabric_index: FabricIndex, pos: &mut OCS, ks: &mut OK, pa: * mut TestPersistentStorage) {
+        fn set_up_stub_fabric(
+            fabric_index: FabricIndex,
+            pos: &mut OCS,
+            ks: &mut OK,
+            pa: *mut TestPersistentStorage,
+        ) {
             const OFFSET: u8 = 50;
             // commit public key to storage
             ks.init(pa);
@@ -2492,14 +3197,28 @@ mod fabric_table {
 
             // commit certs to storage
             pos.init(pa);
-            let rcac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
-            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 2) as u64, (fabric_index + OFFSET + 3) as u64, pub_key.const_bytes()).unwrap();
+            let rcac = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 1) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
+            let noc = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + OFFSET + 3) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
             pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), &[]);
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
         }
 
-        fn add_commit_marker(pa: &mut TestPersistentStorage, fabric_index: FabricIndex, is_addition: bool) {
+        fn add_commit_marker(
+            pa: &mut TestPersistentStorage,
+            fabric_index: FabricIndex,
+            is_addition: bool,
+        ) {
             const SIZE: usize = commit_marker_context_tlv_max_size();
             let mut raw_tlv: [u8; SIZE] = [0; SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -2507,7 +3226,11 @@ mod fabric_table {
 
             let mut outer_container = TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_container);
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            );
 
             writer.put_u8(marker_fabric_index_tag(), fabric_index as u8);
 
@@ -2516,10 +3239,21 @@ mod fabric_table {
             // end of struct conatiner
             writer.end_container(outer_container);
 
-            assert_eq!(true, pa.sync_set_key_value(DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(), &raw_tlv[..writer.get_length_written()]).is_ok());
+            assert_eq!(
+                true,
+                pa.sync_set_key_value(
+                    DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
+                    &raw_tlv[..writer.get_length_written()]
+                )
+                .is_ok()
+            );
         }
 
-        fn add_fabric_index_info(pa: &mut TestPersistentStorage, next_index: Option<FabricIndex>, indices: &[FabricIndex]) {
+        fn add_fabric_index_info(
+            pa: &mut TestPersistentStorage,
+            next_index: Option<FabricIndex>,
+            indices: &[FabricIndex],
+        ) {
             const SIZE: usize = index_info_tlv_max_size();
             let mut raw_tlv: [u8; SIZE] = [0; SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -2527,7 +3261,11 @@ mod fabric_table {
 
             let mut outer_container = TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(tlv_tags::anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_container);
+            writer.start_container(
+                tlv_tags::anonymous_tag(),
+                TlvType::KtlvTypeStructure,
+                &mut outer_container,
+            );
 
             if let Some(next_index) = next_index {
                 // put next available fabric index
@@ -2539,7 +3277,13 @@ mod fabric_table {
             let mut outer_container_indices_array = TlvType::KtlvTypeNotSpecified;
 
             // start a index array
-            writer.start_container(fabric_indices_tag(), TlvType::KtlvTypeArray, &mut outer_container_indices_array).inspect_err(|e| println!("{:?}", e));
+            writer
+                .start_container(
+                    fabric_indices_tag(),
+                    TlvType::KtlvTypeArray,
+                    &mut outer_container_indices_array,
+                )
+                .inspect_err(|e| println!("{:?}", e));
 
             for i in indices {
                 // put a fabric index
@@ -2552,14 +3296,25 @@ mod fabric_table {
             // end of struct conatiner
             writer.end_container(outer_container);
 
-            assert_eq!(true, pa.sync_set_key_value(DefaultStorageKeyAllocator::fabric_index_info().key_name_str(), &raw_tlv[..writer.get_length_written()]).is_ok());
+            assert_eq!(
+                true,
+                pa.sync_set_key_value(
+                    DefaultStorageKeyAllocator::fabric_index_info().key_name_str(),
+                    &raw_tlv[..writer.get_length_written()]
+                )
+                .is_ok()
+            );
         }
 
-        pub fn create_table_with_param<PSD, OK, OCS>(pa: * mut PSD, ks: * mut OK, pos: * mut OCS) -> FabricTable<PSD, OK, OCS>
-            where
-                PSD: PersistentStorageDelegate,
-                OK: crypto::OperationalKeystore,
-                OCS: credentials::OperationalCertificateStore,
+        pub fn create_table_with_param<PSD, OK, OCS>(
+            pa: *mut PSD,
+            ks: *mut OK,
+            pos: *mut OCS,
+        ) -> FabricTable<PSD, OK, OCS>
+        where
+            PSD: PersistentStorageDelegate,
+            OK: crypto::OperationalKeystore,
+            OCS: credentials::OperationalCertificateStore,
         {
             // init the table with all the stroages
             let mut init_params = InitParams::<PSD, OK, OCS>::default();
@@ -2574,21 +3329,24 @@ mod fabric_table {
             return table;
         }
 
-        pub fn add_stub_pending_fabric<PSD, OK, OCS>(table: &mut FabricTable<PSD, OK, OCS>, index: FabricIndex) 
-            where
-                PSD: PersistentStorageDelegate,
-                OK: crypto::OperationalKeystore,
-                OCS: credentials::OperationalCertificateStore,
+        pub fn add_stub_pending_fabric<PSD, OK, OCS>(
+            table: &mut FabricTable<PSD, OK, OCS>,
+            index: FabricIndex,
+        ) where
+            PSD: PersistentStorageDelegate,
+            OK: crypto::OperationalKeystore,
+            OCS: credentials::OperationalCertificateStore,
         {
             // to simulate an existed pending fabric info
             table.m_pending_fabric = get_stub_fabric_info_with_index(index);
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // set up the label to compare the result
             table.m_pending_fabric.set_fabric_label("pending");
         }
-
 
         #[test]
         fn default_init() {
@@ -2599,7 +3357,12 @@ mod fabric_table {
         #[test]
         fn find_fabric_with_index_successfully() {
             let mut table = TestFabricTable::default();
-            assert_eq!(true, table.find_fabric_with_index(KUNDEFINED_FABRIC_INDEX).is_none());
+            assert_eq!(
+                true,
+                table
+                    .find_fabric_with_index(KUNDEFINED_FABRIC_INDEX)
+                    .is_none()
+            );
             table.m_states[0] = get_stub_fabric_info_with_index(1);
             assert_eq!(true, table.find_fabric_with_index(1).is_some());
         }
@@ -2607,7 +3370,12 @@ mod fabric_table {
         #[test]
         fn find_no_fabric_with_index() {
             let mut table = TestFabricTable::default();
-            assert_eq!(true, table.find_fabric_with_index(KUNDEFINED_FABRIC_INDEX).is_none());
+            assert_eq!(
+                true,
+                table
+                    .find_fabric_with_index(KUNDEFINED_FABRIC_INDEX)
+                    .is_none()
+            );
             assert_eq!(true, table.find_fabric_with_index(1).is_none());
         }
 
@@ -2617,7 +3385,12 @@ mod fabric_table {
             table.m_next_available_fabric_index = Some(KMIN_VALID_FABRIC_INDEX);
 
             table.update_next_available_fabric_index();
-            assert_eq!(true, table.m_next_available_fabric_index.is_some_and(|i| i == KMIN_VALID_FABRIC_INDEX + 1));
+            assert_eq!(
+                true,
+                table
+                    .m_next_available_fabric_index
+                    .is_some_and(|i| i == KMIN_VALID_FABRIC_INDEX + 1)
+            );
         }
 
         #[test]
@@ -2628,7 +3401,12 @@ mod fabric_table {
             table.m_states[0] = get_stub_fabric_info_with_index(2);
 
             table.update_next_available_fabric_index();
-            assert_eq!(true, table.m_next_available_fabric_index.is_some_and(|i| i == KMIN_VALID_FABRIC_INDEX + 2));
+            assert_eq!(
+                true,
+                table
+                    .m_next_available_fabric_index
+                    .is_some_and(|i| i == KMIN_VALID_FABRIC_INDEX + 2)
+            );
         }
 
         /*
@@ -2638,37 +3416,56 @@ mod fabric_table {
         }
         */
 
-
         #[test]
         fn fetch_noc_cert_successfully() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut table =
+                FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default(
+                );
             let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Knoc) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
+            mock_op_cert_store
+                .expect_get_certificate()
+                .times(1)
+                .withf(|index, element, out_cert| {
+                    (*index == (KMIN_VALID_FABRIC_INDEX))
+                        && (*element == CertChainElement::Knoc)
+                        && (out_cert.len() > 0)
+                })
+                .return_const(Ok(1));
             table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
             let mut buf = CertBuffer::default();
 
-            assert_eq!(true, table.fetch_noc_cert(KMIN_VALID_FABRIC_INDEX, &mut buf).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .fetch_noc_cert(KMIN_VALID_FABRIC_INDEX, &mut buf)
+                    .is_ok()
+            );
         }
 
         #[test]
         fn fetch_root_cert_successfully() {
-            let mut table = FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default();
+            let mut table =
+                FabricTable::<TestPersistentStorage, OK, MockOperationalCertificateStore>::default(
+                );
             let mut mock_op_cert_store = MockOperationalCertificateStore::new();
-            mock_op_cert_store.expect_get_certificate().
-                times(1).
-                withf(|index, element, out_cert| {
-                    (*index == (KMIN_VALID_FABRIC_INDEX)) && (*element == CertChainElement::Krcac) && (out_cert.len() > 0)
-                }).
-                return_const(Ok(1));
+            mock_op_cert_store
+                .expect_get_certificate()
+                .times(1)
+                .withf(|index, element, out_cert| {
+                    (*index == (KMIN_VALID_FABRIC_INDEX))
+                        && (*element == CertChainElement::Krcac)
+                        && (out_cert.len() > 0)
+                })
+                .return_const(Ok(1));
             table.m_op_cert_store = ptr::addr_of_mut!(mock_op_cert_store);
             let mut buf = CertBuffer::default();
 
-            assert_eq!(true, table.fetch_root_cert(KMIN_VALID_FABRIC_INDEX, &mut buf).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .fetch_root_cert(KMIN_VALID_FABRIC_INDEX, &mut buf)
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -2678,7 +3475,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2687,7 +3489,10 @@ mod fabric_table {
             init_params.op_certs_store = ptr::addr_of_mut!(pos);
             assert_eq!(true, table.init(&init_params).is_ok());
 
-            assert_eq!(true, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
+            assert_eq!(
+                true,
+                table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok()
+            );
         }
 
         #[test]
@@ -2697,7 +3502,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2707,9 +3517,14 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
 
             // inject posion key to corrupt noc op key storage
-            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_noc(KMIN_VALID_FABRIC_INDEX).key_name_str());
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::fabric_noc(KMIN_VALID_FABRIC_INDEX).key_name_str(),
+            );
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
+            assert_eq!(
+                false,
+                table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok()
+            );
         }
 
         #[test]
@@ -2719,7 +3534,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2729,9 +3549,14 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
 
             // inject posion key to corrupt rcac op key storage
-            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_rcac(KMIN_VALID_FABRIC_INDEX).key_name_str());
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::fabric_rcac(KMIN_VALID_FABRIC_INDEX).key_name_str(),
+            );
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
+            assert_eq!(
+                false,
+                table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok()
+            );
         }
 
         #[test]
@@ -2741,7 +3566,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2751,9 +3581,14 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
 
             // inject posion key to corrupt fabric metadata
-            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str());
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str(),
+            );
 
-            assert_eq!(false, table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok());
+            assert_eq!(
+                false,
+                table.load_from_storage(KMIN_VALID_FABRIC_INDEX, 0).is_ok()
+            );
         }
 
         #[test]
@@ -2763,7 +3598,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2773,43 +3613,41 @@ mod fabric_table {
             // the fabric_index_info is empty, so this init call won't call read_fabric_info
             assert_eq!(true, table.init(&init_params).is_ok());
 
-
             let mut reader = MockTlvReader::new();
-            reader.expect_next_type_tag().
-                return_const(Ok(()));
-            reader.expect_enter_container().
-                return_const(Ok(TlvType::KtlvTypeStructure));
-            reader.expect_next_tag().
-                return_const(Ok(()));
+            reader.expect_next_type_tag().return_const(Ok(()));
+            reader
+                .expect_enter_container()
+                .return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().return_const(Ok(()));
 
             // next avaiable fabric index
-            reader.expect_get_type().
-                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader
+                .expect_get_type()
+                .return_const(TlvType::KtlvTypeUnsignedInteger);
             let mut seq = Sequence::new();
-            reader.expect_get_u8()
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(2u8));
 
             let mut num_next: usize = 0;
-            reader.expect_next().
-                returning(move || {
-                    if num_next < 1 {
-                        num_next += 1;
-                        return Ok(());
-                    } else {
-                        num_next += 1;
-                        return Err(chip_error_end_of_tlv!());
-                    }
-                });
-            reader.expect_get_u8()
+            reader.expect_next().returning(move || {
+                if num_next < 1 {
+                    num_next += 1;
+                    return Ok(());
+                } else {
+                    num_next += 1;
+                    return Err(chip_error_end_of_tlv!());
+                }
+            });
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
-            reader.expect_exit_container().
-                return_const(Ok(()));
-            reader.expect_verify_end_of_container().
-                return_const(Ok(()));
+            reader.expect_exit_container().return_const(Ok(()));
+            reader.expect_verify_end_of_container().return_const(Ok(()));
 
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
             assert_eq!(1, table.fabric_count());
@@ -2822,8 +3660,18 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX + 1, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX + 1,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2834,45 +3682,45 @@ mod fabric_table {
             assert_eq!(true, table.init(&init_params).is_ok());
 
             let mut reader = MockTlvReader::new();
-            reader.expect_next_type_tag().
-                return_const(Ok(()));
-            reader.expect_enter_container().
-                return_const(Ok(TlvType::KtlvTypeStructure));
-            reader.expect_next_tag().
-                return_const(Ok(()));
+            reader.expect_next_type_tag().return_const(Ok(()));
+            reader
+                .expect_enter_container()
+                .return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().return_const(Ok(()));
 
             // next avaiable fabric index
-            reader.expect_get_type().
-                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader
+                .expect_get_type()
+                .return_const(TlvType::KtlvTypeUnsignedInteger);
             let mut seq = Sequence::new();
-            reader.expect_get_u8()
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(3u8));
 
             let mut num_next: usize = 0;
-            reader.expect_next().
-                returning(move || {
-                    if num_next < 2 {
-                        num_next += 1;
-                        return Ok(());
-                    } else {
-                        num_next += 1;
-                        return Err(chip_error_end_of_tlv!());
-                    }
-                });
-            reader.expect_get_u8()
+            reader.expect_next().returning(move || {
+                if num_next < 2 {
+                    num_next += 1;
+                    return Ok(());
+                } else {
+                    num_next += 1;
+                    return Err(chip_error_end_of_tlv!());
+                }
+            });
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
-            reader.expect_get_u8()
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok((KMIN_VALID_FABRIC_INDEX + 1) as u8));
-            reader.expect_exit_container().
-                return_const(Ok(()));
-            reader.expect_verify_end_of_container().
-                return_const(Ok(()));
+            reader.expect_exit_container().return_const(Ok(()));
+            reader.expect_verify_end_of_container().return_const(Ok(()));
 
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
             assert_eq!(2, table.fabric_count());
@@ -2885,7 +3733,12 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2895,46 +3748,46 @@ mod fabric_table {
             // the fabric_index_info is empty, so this init call won't call read_fabric_info
             assert_eq!(true, table.init(&init_params).is_ok());
 
-
             let mut reader = MockTlvReader::new();
-            reader.expect_next_type_tag().
-                return_const(Ok(()));
-            reader.expect_enter_container().
-                return_const(Ok(TlvType::KtlvTypeStructure));
-            reader.expect_next_tag().
-                return_const(Ok(()));
+            reader.expect_next_type_tag().return_const(Ok(()));
+            reader
+                .expect_enter_container()
+                .return_const(Ok(TlvType::KtlvTypeStructure));
+            reader.expect_next_tag().return_const(Ok(()));
 
             // next avaiable fabric index
-            reader.expect_get_type().
-                return_const(TlvType::KtlvTypeUnsignedInteger);
+            reader
+                .expect_get_type()
+                .return_const(TlvType::KtlvTypeUnsignedInteger);
             let mut seq = Sequence::new();
-            reader.expect_get_u8()
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(2u8));
 
             let mut num_next: usize = 0;
-            reader.expect_next().
-                returning(move || {
-                    if num_next < 1 {
-                        num_next += 1;
-                        return Ok(());
-                    } else {
-                        num_next += 1;
-                        return Err(chip_error_end_of_tlv!());
-                    }
-                });
-            reader.expect_get_u8()
+            reader.expect_next().returning(move || {
+                if num_next < 1 {
+                    num_next += 1;
+                    return Ok(());
+                } else {
+                    num_next += 1;
+                    return Err(chip_error_end_of_tlv!());
+                }
+            });
+            reader
+                .expect_get_u8()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_const(Ok(KMIN_VALID_FABRIC_INDEX as u8));
-            reader.expect_exit_container().
-                return_const(Ok(()));
-            reader.expect_verify_end_of_container().
-                return_const(Ok(()));
+            reader.expect_exit_container().return_const(Ok(()));
+            reader.expect_verify_end_of_container().return_const(Ok(()));
 
             // inject posion key to corrupt fabric metadata
-            pa.add_posion_key(DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str());
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::fabric_metadata(KMIN_VALID_FABRIC_INDEX).key_name_str(),
+            );
 
             assert_eq!(true, table.read_fabric_info(&mut reader).is_ok());
             assert_eq!(0, table.fabric_count());
@@ -2947,9 +3800,14 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
-            add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX,]);
+            add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX]);
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2967,10 +3825,24 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX + 1, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX + 1,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
-            add_fabric_index_info(&mut pa, Some(3), &[KMIN_VALID_FABRIC_INDEX, KMIN_VALID_FABRIC_INDEX + 1]);
+            add_fabric_index_info(
+                &mut pa,
+                Some(3),
+                &[KMIN_VALID_FABRIC_INDEX, KMIN_VALID_FABRIC_INDEX + 1],
+            );
 
             // init the table with all the stroages
             let mut init_params = InitParams::default();
@@ -2988,9 +3860,14 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            set_up_stub_fabric(KMIN_VALID_FABRIC_INDEX, &mut pos, &mut ks, ptr::addr_of_mut!(pa));
+            set_up_stub_fabric(
+                KMIN_VALID_FABRIC_INDEX,
+                &mut pos,
+                &mut ks,
+                ptr::addr_of_mut!(pa),
+            );
 
-            add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX,]);
+            add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX]);
 
             // add a commit marker for KMIN_VALID_FABRIC_INDEX
             add_commit_marker(&mut pa, KMIN_VALID_FABRIC_INDEX, false);
@@ -3005,15 +3882,18 @@ mod fabric_table {
             // the KMIN_VALID_FABRIC_INDEX fabric should be deleted
             assert_eq!(0, table.fabric_count());
 
-            assert_eq!(KMIN_VALID_FABRIC_INDEX, table.m_deleted_fabric_index_from_init);
+            assert_eq!(
+                KMIN_VALID_FABRIC_INDEX,
+                table.m_deleted_fabric_index_from_init
+            );
         }
-        
+
         #[test]
         fn delete_one_fabric_successfully() {
             let mut pa = TestPersistentStorage::default();
             let mut ks = MockOperationalKeystore::new();
             let mut pos = MockOperationalCertificateStore::new();
-            
+
             // expect remove one keypair
             ks.expect_remove_op_keypair_for_fabric()
                 .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
@@ -3024,14 +3904,23 @@ mod fabric_table {
                 .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
                 .return_const(Ok(()));
 
-
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             // to simulate an existed fabric info
             table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_fabric_count = 1;
 
-            assert_eq!(true, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("error {}", e)).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .delete(KMIN_VALID_FABRIC_INDEX)
+                    .inspect_err(|e| println!("error {}", e))
+                    .is_ok()
+            );
             assert_eq!(0, table.fabric_count());
         }
 
@@ -3076,16 +3965,30 @@ mod fabric_table {
                 .in_sequence(&mut seq)
                 .return_const(Err(chip_error_invalid_fabric_index!()));
 
-
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             // to simulate an existed pending fabric info
             table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
-            assert_eq!(false, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| assert_eq!(true, *e == chip_error_not_found!())).is_ok());
-            assert_eq!(KUNDEFINED_FABRIC_INDEX, table.m_pending_fabric.get_fabric_index());
+            assert_eq!(
+                false,
+                table
+                    .delete(KMIN_VALID_FABRIC_INDEX)
+                    .inspect_err(|e| assert_eq!(true, *e == chip_error_not_found!()))
+                    .is_ok()
+            );
+            assert_eq!(
+                KUNDEFINED_FABRIC_INDEX,
+                table.m_pending_fabric.get_fabric_index()
+            );
         }
 
         #[test]
@@ -3129,29 +4032,37 @@ mod fabric_table {
                 .in_sequence(&mut seq)
                 .return_const(Ok(()));
 
-
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             // to simulate an existed pending fabric info
             table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // to simulate an existed fabric info
             table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_fabric_count = 1;
 
             assert_eq!(true, table.delete(KMIN_VALID_FABRIC_INDEX).is_ok());
-            assert_eq!(KUNDEFINED_FABRIC_INDEX, table.m_pending_fabric.get_fabric_index());
+            assert_eq!(
+                KUNDEFINED_FABRIC_INDEX,
+                table.m_pending_fabric.get_fabric_index()
+            );
             assert_eq!(0, table.fabric_count());
         }
-        
+
         #[test]
         fn delete_no_fabric() {
             let mut pa = TestPersistentStorage::default();
             let mut ks = MockOperationalKeystore::new();
             let mut pos = MockOperationalCertificateStore::new();
-            
+
             ks.expect_remove_op_keypair_for_fabric()
                 .withf(|index| *index == KMIN_VALID_FABRIC_INDEX)
                 .times(1)
@@ -3162,10 +4073,19 @@ mod fabric_table {
                 .times(1)
                 .return_const(Err(chip_error_invalid_fabric_index!()));
 
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
-
-            assert_eq!(false, table.delete(KMIN_VALID_FABRIC_INDEX).inspect_err(|e| println!("error {}", e)).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .delete(KMIN_VALID_FABRIC_INDEX)
+                    .inspect_err(|e| println!("error {}", e))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3175,7 +4095,13 @@ mod fabric_table {
             // to simulate an existed fabric info
             table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
 
-            assert_eq!(true, table.into_iter().next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX));
+            assert_eq!(
+                true,
+                table
+                    .into_iter()
+                    .next()
+                    .is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX)
+            );
 
             for info in &table {
                 assert_eq!(KMIN_VALID_FABRIC_INDEX, info.get_fabric_index());
@@ -3192,8 +4118,16 @@ mod fabric_table {
 
             let mut iter = table.into_iter();
 
-            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX));
-            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1));
+            assert_eq!(
+                true,
+                iter.next()
+                    .is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX)
+            );
+            assert_eq!(
+                true,
+                iter.next()
+                    .is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1)
+            );
         }
 
         #[test]
@@ -3211,12 +4145,23 @@ mod fabric_table {
             table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_pending_fabric.set_fabric_label("pending");
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             let mut iter = table.into_iter();
 
-            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX && info.get_fabric_label() == Some("pending")));
-            assert_eq!(true, iter.next().is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1));
+            assert_eq!(
+                true,
+                iter.next()
+                    .is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX
+                        && info.get_fabric_label() == Some("pending"))
+            );
+            assert_eq!(
+                true,
+                iter.next()
+                    .is_some_and(|info| info.get_fabric_index() == KMIN_VALID_FABRIC_INDEX + 1)
+            );
         }
 
         #[test]
@@ -3225,7 +4170,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3240,12 +4189,23 @@ mod fabric_table {
             fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // get the root public key
             let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
 
-            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+            assert_eq!(
+                true,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("pending"))
+            );
         }
 
         #[test]
@@ -3254,7 +4214,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3269,12 +4233,23 @@ mod fabric_table {
             fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // get the root public key
             let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id + 1)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id + 1)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("pending"))
+            );
         }
 
         #[test]
@@ -3283,7 +4258,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3298,12 +4277,23 @@ mod fabric_table {
             fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // get the root public key
             let root_key = table.m_pending_fabric.fetch_root_pubkey().unwrap();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id + 1, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id + 1,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("pending"))
+            );
         }
 
         #[test]
@@ -3312,7 +4302,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3327,14 +4321,25 @@ mod fabric_table {
             fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
-            table.m_state_flag.insert(StateFlags::KisPendingFabricDataPresent);
+            table
+                .m_state_flag
+                .insert(StateFlags::KisPendingFabricDataPresent);
 
             // get other random public key
             let mut keypair = P256Keypair::default();
             keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key = keypair.public_key().clone();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("pending")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("pending"))
+            );
         }
 
         #[test]
@@ -3343,7 +4348,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3362,7 +4371,16 @@ mod fabric_table {
             // get the root public key
             let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
 
-            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+            assert_eq!(
+                true,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("at0"))
+            );
         }
 
         #[test]
@@ -3371,7 +4389,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3392,7 +4414,16 @@ mod fabric_table {
             keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key = keypair.public_key().clone();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("at0"))
+            );
         }
 
         #[test]
@@ -3401,7 +4432,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3420,7 +4455,16 @@ mod fabric_table {
             // get the root public key
             let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id + 1, Some(expected_node_id)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id + 1,
+                        Some(expected_node_id)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("at0"))
+            );
         }
 
         #[test]
@@ -3429,7 +4473,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3448,7 +4496,16 @@ mod fabric_table {
             // get the root public key
             let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
 
-            assert_eq!(false, table.find_fabric_common_with_id(&root_key, expected_fabric_id, Some(expected_node_id + 1)).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+            assert_eq!(
+                false,
+                table
+                    .find_fabric_common_with_id(
+                        &root_key,
+                        expected_fabric_id,
+                        Some(expected_node_id + 1)
+                    )
+                    .is_some_and(|info| info.get_fabric_label() == Some("at0"))
+            );
         }
 
         #[test]
@@ -3457,7 +4514,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let expected_fabric_id: FabricId = 10u64;
             let expected_node_id: NodeId = 11u64;
@@ -3476,7 +4537,12 @@ mod fabric_table {
             // get the root public key
             let root_key = table.m_states[0].fetch_root_pubkey().unwrap();
 
-            assert_eq!(true, table.find_fabric_common_with_id(&root_key, expected_fabric_id, None).is_some_and(|info| info.get_fabric_label() == Some("at0")));
+            assert_eq!(
+                true,
+                table
+                    .find_fabric_common_with_id(&root_key, expected_fabric_id, None)
+                    .is_some_and(|info| info.get_fabric_label() == Some("at0"))
+            );
         }
 
         #[test]
@@ -3485,11 +4551,20 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut d = NoMockFabricTableDelegate::default();
 
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d)))
+                    .is_ok()
+            );
             table.delete(KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
         }
@@ -3500,15 +4575,29 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut d = NoMockFabricTableDelegate::default();
 
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d)))
+                    .is_ok()
+            );
 
             let mut d2 = NoMockFabricTableDelegate::default();
 
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d2))).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d2)))
+                    .is_ok()
+            );
             table.delete(KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d2.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
@@ -3520,12 +4609,21 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut d = NoMockFabricTableDelegate::default();
 
             // add
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d)))
+                    .is_ok()
+            );
             // delete
             table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d)));
 
@@ -3540,16 +4638,35 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut d = NoMockFabricTableDelegate::default();
             let mut d2 = NoMockFabricTableDelegate::default();
             let mut d3 = NoMockFabricTableDelegate::default();
 
             // add
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d))).is_ok());
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d2))).is_ok());
-            assert_eq!(true, table.add_fabric_delegate(Some(ptr::addr_of_mut!(d3))).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d)))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d2)))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                table
+                    .add_fabric_delegate(Some(ptr::addr_of_mut!(d3)))
+                    .is_ok()
+            );
             // delete
             table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d2)));
 
@@ -3566,13 +4683,22 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             // to simulate an existed fabric info
             table.m_states[0] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
             table.m_fabric_count = 1;
 
-            assert_eq!(true, table.set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0").is_ok());
+            assert_eq!(
+                true,
+                table
+                    .set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0")
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3581,9 +4707,18 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
-            assert_eq!(false, table.set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0").is_ok());
+            assert_eq!(
+                false,
+                table
+                    .set_fabric_label(KMIN_VALID_FABRIC_INDEX, "at0")
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3592,7 +4727,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let OFFSET = 50;
@@ -3609,15 +4748,35 @@ mod fabric_table {
 
             // commit certs to storage
             pos.init(ptr::addr_of_mut!(pa));
-            let rcac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
-            let icac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 1) as u64, (fabric_index + OFFSET + 1) as u64, pub_key.const_bytes()).unwrap();
-            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 2) as u64, (fabric_index + OFFSET + 3) as u64, pub_key.const_bytes()).unwrap();
+            let rcac = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 1) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
+            let icac = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 1) as u64,
+                (fabric_index + OFFSET + 1) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
+            let noc = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + OFFSET + 3) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
             pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
 
             // all the not before is 0
-            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(1))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3626,7 +4785,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let OFFSET = 50;
@@ -3643,10 +4806,26 @@ mod fabric_table {
 
             // commit certs to storage
             pos.init(ptr::addr_of_mut!(pa));
-            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
-            let icac = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 1) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes()).unwrap();
-            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 3) as u64, (fabric_index + OFFSET + 4) as u64, pub_key.const_bytes()).unwrap();
+            let rcac = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(1),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
+            let icac = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 1) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
+            let noc = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 3) as u64,
+                (fabric_index + OFFSET + 4) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
             pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
@@ -3655,8 +4834,19 @@ mod fabric_table {
             table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
 
             // all the not before is 0
-            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(0)).is_ok());
-            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).inspect_err(|e| println!("{}", e)).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(0))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(1))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3665,7 +4855,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let OFFSET = 50;
@@ -3682,11 +4876,28 @@ mod fabric_table {
 
             // commit certs to storage
             pos.init(ptr::addr_of_mut!(pa));
-            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
-            let icac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(2), Seconds32::from_secs(0)).unwrap();
-            let noc = FabricInfoTest::make_chip_cert((fabric_index + OFFSET + 3) as u64, (fabric_index + OFFSET + 4) as u64, pub_key.const_bytes()).unwrap();
+            let rcac = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(1),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
+            let icac = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(2),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
+            let noc = FabricInfoTest::make_chip_cert(
+                (fabric_index + OFFSET + 3) as u64,
+                (fabric_index + OFFSET + 4) as u64,
+                pub_key.const_bytes(),
+            )
+            .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
             pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
@@ -3695,8 +4906,18 @@ mod fabric_table {
             table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
 
             // all the not before is 0
-            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(1)).is_ok());
-            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(2)).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(1))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(2))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3705,7 +4926,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let OFFSET = 50;
@@ -3722,12 +4947,30 @@ mod fabric_table {
 
             // commit certs to storage
             pos.init(ptr::addr_of_mut!(pa));
-            let rcac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(1), Seconds32::from_secs(0)).unwrap();
-            let icac = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(2), Seconds32::from_secs(0)).unwrap();
-            let noc = FabricInfoTest::make_chip_cert_with_time((fabric_index + OFFSET) as u64, (fabric_index + OFFSET + 2) as u64, pub_key.const_bytes(),
-                Seconds32::from_secs(3), Seconds32::from_secs(0)).unwrap();
+            let rcac = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(1),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
+            let icac = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(2),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
+            let noc = FabricInfoTest::make_chip_cert_with_time(
+                (fabric_index + OFFSET) as u64,
+                (fabric_index + OFFSET + 2) as u64,
+                pub_key.const_bytes(),
+                Seconds32::from_secs(3),
+                Seconds32::from_secs(0),
+            )
+            .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
             pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
@@ -3736,8 +4979,18 @@ mod fabric_table {
             table.m_states[0] = get_stub_fabric_info_with_index(fabric_index);
 
             // all the not before is 0
-            assert_eq!(false, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(2)).is_ok());
-            assert_eq!(true, table.set_last_known_good_chip_epoch_time(Seconds32::from_secs(3)).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(2))
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                table
+                    .set_last_known_good_chip_epoch_time(Seconds32::from_secs(3))
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3746,7 +4999,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3772,7 +5029,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3790,7 +5051,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3803,7 +5068,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3819,7 +5088,11 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3838,7 +5111,12 @@ mod fabric_table {
 
             let mut sig = P256EcdsaSignature::default();
 
-            assert_eq!(true, table.sign_with_op_keypair(fabric_index, b"123", &mut sig).is_ok());
+            assert_eq!(
+                true,
+                table
+                    .sign_with_op_keypair(fabric_index, b"123", &mut sig)
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3847,13 +5125,22 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
             let mut sig = P256EcdsaSignature::default();
 
-            assert_eq!(false, table.sign_with_op_keypair(fabric_index, b"123", &mut sig).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .sign_with_op_keypair(fabric_index, b"123", &mut sig)
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3864,15 +5151,25 @@ mod fabric_table {
 
             ks.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut csr: [u8; K_MIN_CSR_BUFFER_SIZE] = [0; K_MIN_CSR_BUFFER_SIZE];
 
-            assert_eq!(Ok(68), table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr));
+            assert_eq!(
+                Ok(68),
+                table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr)
+            );
 
             let mut has_pending_key_for_noc = false;
 
-            assert_eq!(true, table.has_pending_operational_key(&mut has_pending_key_for_noc));
+            assert_eq!(
+                true,
+                table.has_pending_operational_key(&mut has_pending_key_for_noc)
+            );
             assert_eq!(true, has_pending_key_for_noc);
         }
 
@@ -3884,7 +5181,11 @@ mod fabric_table {
 
             ks.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut csr: [u8; K_MIN_CSR_BUFFER_SIZE] = [0; K_MIN_CSR_BUFFER_SIZE];
 
@@ -3892,7 +5193,10 @@ mod fabric_table {
 
             let mut has_pending_key_for_noc = false;
 
-            assert_eq!(true, table.has_pending_operational_key(&mut has_pending_key_for_noc));
+            assert_eq!(
+                true,
+                table.has_pending_operational_key(&mut has_pending_key_for_noc)
+            );
             assert_eq!(false, has_pending_key_for_noc);
         }
 
@@ -3904,13 +5208,22 @@ mod fabric_table {
 
             ks.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut csr: [u8; K_MIN_CSR_BUFFER_SIZE] = [0; K_MIN_CSR_BUFFER_SIZE];
 
             table.m_state_flag.insert(StateFlags::KisTrustedRootPending);
 
-            assert_eq!(false, table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr)
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3921,18 +5234,33 @@ mod fabric_table {
 
             ks.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut csr: [u8; K_MIN_CSR_BUFFER_SIZE] = [0; K_MIN_CSR_BUFFER_SIZE];
 
-            assert_eq!(Ok(68), table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr));
+            assert_eq!(
+                Ok(68),
+                table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX), &mut csr)
+            );
 
             let mut has_pending_key_for_noc = false;
 
-            assert_eq!(true, table.has_pending_operational_key(&mut has_pending_key_for_noc));
+            assert_eq!(
+                true,
+                table.has_pending_operational_key(&mut has_pending_key_for_noc)
+            );
             assert_eq!(true, has_pending_key_for_noc);
 
-            assert_eq!(false, table.allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX + 1), &mut csr).is_ok());
+            assert_eq!(
+                false,
+                table
+                    .allocate_pending_operation_key(Some(KMIN_VALID_FABRIC_INDEX + 1), &mut csr)
+                    .is_ok()
+            );
         }
 
         #[test]
@@ -3943,7 +5271,11 @@ mod fabric_table {
 
             pos.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut rcac: [u8; 1] = [0];
 
@@ -3958,12 +5290,19 @@ mod fabric_table {
 
             pos.init(ptr::addr_of_mut!(pa));
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             let mut rcac: [u8; 1] = [0];
 
             assert_eq!(true, table.add_new_pending_trusted_root_cert(&rcac).is_ok());
-            assert_eq!(false, table.add_new_pending_trusted_root_cert(&rcac).is_ok());
+            assert_eq!(
+                false,
+                table.add_new_pending_trusted_root_cert(&rcac).is_ok()
+            );
         }
 
         #[test]
@@ -3980,10 +5319,18 @@ mod fabric_table {
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
-            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let rcac =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
+            let noc =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
             // only update rcac to storage
-            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes())
+                    .is_ok()
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -3994,11 +5341,20 @@ mod fabric_table {
             init_pas.m_fabric_id = fabric_id;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             table.m_states[0].init(&init_pas);
 
-            assert_eq!(true, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+            assert_eq!(
+                true,
+                table
+                    .find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes())
+                    .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
+            );
         }
 
         #[test]
@@ -4015,10 +5371,16 @@ mod fabric_table {
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let rcac =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
             //let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
             // only update rcac to storage
-            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes())
+                    .is_ok()
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -4029,12 +5391,21 @@ mod fabric_table {
             init_pas.m_fabric_id = fabric_id;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             table.m_states[0].init(&init_pas);
 
             // use an empty noc
-            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, &[]).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+            assert_eq!(
+                false,
+                table
+                    .find_existing_fabric_by_noc_chaining(fabric_index, &[])
+                    .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
+            );
         }
 
         #[test]
@@ -4051,8 +5422,12 @@ mod fabric_table {
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
-            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let rcac =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
+            let noc =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
 
             // no rcac commit
 
@@ -4065,11 +5440,20 @@ mod fabric_table {
             init_pas.m_fabric_id = fabric_id;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             table.m_states[0].init(&init_pas);
 
-            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+            assert_eq!(
+                false,
+                table
+                    .find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes())
+                    .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
+            );
         }
 
         #[test]
@@ -4086,11 +5470,22 @@ mod fabric_table {
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let rcac =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
             // use different fabric id
-            let noc = FabricInfoTest::make_chip_cert(node_id as u64,(fabric_id + 1) as u64, &pub_key[..]).unwrap();
+            let noc = FabricInfoTest::make_chip_cert(
+                node_id as u64,
+                (fabric_id + 1) as u64,
+                &pub_key[..],
+            )
+            .unwrap();
             // only update rcac to storage
-            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes())
+                    .is_ok()
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -4101,11 +5496,20 @@ mod fabric_table {
             init_pas.m_fabric_id = fabric_id;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key[..]);
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             table.m_states[0].init(&init_pas);
 
-            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+            assert_eq!(
+                false,
+                table
+                    .find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes())
+                    .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
+            );
         }
 
         #[test]
@@ -4122,10 +5526,18 @@ mod fabric_table {
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
-            let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
+            let rcac =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
+            let noc =
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                    .unwrap();
             // only update rcac to storage
-            assert_eq!(true, pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes()).is_ok());
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes())
+                    .is_ok()
+            );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
@@ -4138,11 +5550,20 @@ mod fabric_table {
             init_pas.m_fabric_id = fabric_id;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(&pub_key_2[..]);
 
-            let mut table = create_table_with_param(ptr::addr_of_mut!(pa), ptr::addr_of_mut!(ks), ptr::addr_of_mut!(pos));
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
 
             table.m_states[0].init(&init_pas);
 
-            assert_eq!(false, table.find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes()).is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index));
+            assert_eq!(
+                false,
+                table
+                    .find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes())
+                    .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
+            );
         }
     } // end of mod tests
 } // end of mod fabric_table

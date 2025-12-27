@@ -27,10 +27,10 @@ use crate::verify_or_die;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
-use core::str::FromStr;
-use crate::chip_log_detail;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use core::str::FromStr;
 
 use core::{fmt, ptr};
 

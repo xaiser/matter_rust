@@ -55,10 +55,18 @@ pub trait OperationalCertificateStore {
     ) -> ChipErrorResult;
     fn commit_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
     fn remove_certs_for_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
-    fn update_vid_verification_signer_cert_for_fabric(&mut self, _fabric_index: FabricIndex, _vvsc: &[u8]) -> ChipErrorResult {
+    fn update_vid_verification_signer_cert_for_fabric(
+        &mut self,
+        _fabric_index: FabricIndex,
+        _vvsc: &[u8],
+    ) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }
-    fn update_vid_verification_statement_for_fabric(&mut self, _fabric_index: FabricIndex, _vvs: &[u8]) -> ChipErrorResult {
+    fn update_vid_verification_statement_for_fabric(
+        &mut self,
+        _fabric_index: FabricIndex,
+        _vvs: &[u8],
+    ) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }
     fn revert_pending_op_certs(&mut self);
@@ -70,7 +78,12 @@ pub trait OperationalCertificateStore {
         out_certificate: &mut [u8],
     ) -> Result<usize, ChipError>;
 
-    fn get_vid_verification_element(&self, _fabric_index: FabricIndex, _element: VidVerificationElement, _out_certificate: &mut [u8]) -> Result<usize, ChipError> {
+    fn get_vid_verification_element(
+        &self,
+        _fabric_index: FabricIndex,
+        _element: VidVerificationElement,
+        _out_certificate: &mut [u8],
+    ) -> Result<usize, ChipError> {
         Err(chip_error_not_implemented!())
     }
 }

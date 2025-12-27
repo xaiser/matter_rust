@@ -3,8 +3,9 @@
 use core::fmt::{self, Write};
 use core::str;
 
-#[derive(Copy,Clone, Debug)]
-pub struct DefaultString<const N: usize> { m_buf: [u8; N],
+#[derive(Copy, Clone, Debug)]
+pub struct DefaultString<const N: usize> {
+    m_buf: [u8; N],
     len: usize,
 }
 
@@ -18,7 +19,7 @@ impl<const N: usize> DefaultString<N> {
     pub const fn const_default() -> Self {
         Self {
             m_buf: [0; N],
-            len: 0
+            len: 0,
         }
     }
 
@@ -95,8 +96,7 @@ impl<const N: usize> Write for DefaultString<N> {
         let current_len = self.len();
         let bytes = s.as_bytes();
         let to_copy = bytes.len().min(N - current_len);
-        self.m_buf[current_len..current_len + to_copy]
-            .copy_from_slice(&bytes[..to_copy]);
+        self.m_buf[current_len..current_len + to_copy].copy_from_slice(&bytes[..to_copy]);
         self.len += to_copy;
         Ok(())
     }

@@ -1,22 +1,25 @@
 use crate::chip::{
-    credentials::chip_cert::{ChipCertificateData, CertDecodeFlags, ChipCertTag, tag_not_before, tag_not_after, ChipCertExtensionTag, CertFlags, KeyUsageFlags, KeyPurposeFlags},
     chip_lib::core::{
-        tlv_types::TlvType,
-        tlv_tags::{anonymous_tag, context_tag, Tag, is_context_tag, tag_num_from_tag},
         tlv_reader::{TlvContiguousBufferReader, TlvReader},
+        tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag, Tag},
+        tlv_types::TlvType,
+    },
+    credentials::chip_cert::{
+        tag_not_after, tag_not_before, CertDecodeFlags, CertFlags, ChipCertExtensionTag,
+        ChipCertTag, ChipCertificateData, KeyPurposeFlags, KeyUsageFlags,
     },
 };
 
 use crate::chip_core_error;
+use crate::chip_ok;
 use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
-use crate::chip_ok;
 
-use crate::chip_error_not_implemented;
-use crate::chip_error_no_memory;
 use crate::chip_error_end_of_tlv;
 use crate::chip_error_invalid_tlv_tag;
+use crate::chip_error_no_memory;
+use crate::chip_error_not_implemented;
 use crate::chip_error_unsupported_cert_format;
 
 use crate::chip_internal_log;
@@ -29,7 +32,11 @@ use crate::verify_or_return_value;
 
 use bitflags::Flags;
 
-pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
+pub fn decode_chip_cert(
+    cert: &[u8],
+    cert_data: &mut ChipCertificateData,
+    decode_flag: Option<CertDecodeFlags>,
+) -> ChipErrorResult {
     let mut reader = TlvContiguousBufferReader::const_default();
 
     reader.init(cert.as_ptr(), cert.len());
@@ -37,20 +44,37 @@ pub fn decode_chip_cert(cert: &[u8], cert_data: &mut ChipCertificateData, decode
     return decode_chip_cert_with_reader(&mut reader, cert_data, decode_flag);
 }
 
-pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    reader.next_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8))?;
+pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    reader.next_type_tag(
+        TlvType::KtlvTypeByteString,
+        context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
+    )?;
     let raw_bytes = reader.get_bytes()?;
-    verify_or_return_error!(raw_bytes.len() == cert_data.m_public_key.len(), Err(chip_error_no_memory!()));
+    verify_or_return_error!(
+        raw_bytes.len() == cert_data.m_public_key.len(),
+        Err(chip_error_no_memory!())
+    );
 
     cert_data.m_public_key.copy_from_slice(raw_bytes);
 
     chip_ok!()
 }
 
-pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    cert_data.m_cert_flags.insert(CertFlags::KextPresentAuthKeyId);
+pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    cert_data
+        .m_cert_flags
+        .insert(CertFlags::KextPresentAuthKeyId);
 
-    reader.expect_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8))?;
+    reader.expect_type_tag(
+        TlvType::KtlvTypeByteString,
+        context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8),
+    )?;
     let key = reader.get_bytes()?;
 
     if key.len() != cert_data.m_auth_key_id.len() {
@@ -62,10 +86,18 @@ pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'
     chip_ok!()
 }
 
-pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    cert_data.m_cert_flags.insert(CertFlags::KextPresentSubjectKeyId);
+pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    cert_data
+        .m_cert_flags
+        .insert(CertFlags::KextPresentSubjectKeyId);
 
-    reader.expect_type_tag(TlvType::KtlvTypeByteString, context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8))?;
+    reader.expect_type_tag(
+        TlvType::KtlvTypeByteString,
+        context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8),
+    )?;
     let key = reader.get_bytes()?;
 
     if key.len() != cert_data.m_subject_key_id.len() {
@@ -77,8 +109,13 @@ pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>
     chip_ok!()
 }
 
-pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    cert_data.m_cert_flags.insert(CertFlags::KextPresentKeyUsage);
+pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    cert_data
+        .m_cert_flags
+        .insert(CertFlags::KextPresentKeyUsage);
 
     reader.expect(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8))?;
     let key_usage_bits = reader.get_u16()?;
@@ -94,16 +131,28 @@ pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(reader: &mu
     chip_ok!()
 }
 
-pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    cert_data.m_cert_flags.insert(CertFlags::KextPresentExtendedKeyUsage);
+pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    cert_data
+        .m_cert_flags
+        .insert(CertFlags::KextPresentExtendedKeyUsage);
 
-    reader.expect_type_tag(TlvType::KtlvTypeArray, context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8))?;
+    reader.expect_type_tag(
+        TlvType::KtlvTypeArray,
+        context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+    )?;
 
     let container_type = reader.enter_container()?;
 
     let mut err = chip_error_end_of_tlv!();
 
-    while reader.next_tag(anonymous_tag()).inspect_err(|e| err = *e).is_ok() {
+    while reader
+        .next_tag(anonymous_tag())
+        .inspect_err(|e| err = *e)
+        .is_ok()
+    {
         let key_purpose_id = reader.get_u8()?;
 
         if let Some(key_purpose_flags) = KeyPurposeFlags::from_bits(key_purpose_id) {
@@ -120,7 +169,10 @@ pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(re
     chip_ok!()
 }
 
-pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
+pub fn decode_extension<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
     let tlv_tag = reader.get_tag();
 
     verify_or_return_error!(is_context_tag(&tlv_tag), Err(chip_error_invalid_tlv_tag!()));
@@ -133,19 +185,19 @@ pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_dat
         match extension_tag_num {
             v if v == ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u32 => {
                 decode_convert_authority_key_identifier_extension(reader, cert_data)?;
-            },
+            }
             v if v == ChipCertExtensionTag::KtagSubjectKeyIdentifier as u32 => {
                 decode_convert_subject_key_identifier_extension(reader, cert_data)?;
-            },
+            }
             v if v == ChipCertExtensionTag::KtagKeyUsage as u32 => {
                 decode_convert_key_usage_extension(reader, cert_data)?;
-            },
+            }
             v if v == ChipCertExtensionTag::KtagBasicConstraints as u32 => {
                 return Err(chip_error_not_implemented!());
-            },
+            }
             v if v == ChipCertExtensionTag::KtagExtendedKeyUsage as u32 => {
                 decode_convert_extended_key_usage_extension(reader, cert_data)?;
-            },
+            }
             _ => {
                 return Err(chip_error_unsupported_cert_format!());
             }
@@ -155,8 +207,14 @@ pub fn decode_extension<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_dat
     chip_ok!()
 }
 
-pub fn decode_extensions<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData) -> ChipErrorResult {
-    reader.next_type_tag(TlvType::KtlvTypeList, context_tag(ChipCertTag::KtagExtensions as u8))?;
+pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    reader.next_type_tag(
+        TlvType::KtlvTypeList,
+        context_tag(ChipCertTag::KtagExtensions as u8),
+    )?;
     let container_type = reader.enter_container()?;
 
     let mut err = chip_error_end_of_tlv!();
@@ -172,7 +230,11 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_da
     chip_ok!()
 }
 
-pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Reader, cert_data: &mut ChipCertificateData, decode_flag: Option<CertDecodeFlags>) -> ChipErrorResult {
+pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+    decode_flag: Option<CertDecodeFlags>,
+) -> ChipErrorResult {
     if reader.get_type() == TlvType::KtlvTypeNotSpecified {
         reader.next()?;
     }
@@ -189,14 +251,14 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
     reader.next()?;
     // get subject DNs
     cert_data.m_subject_dn.decode_from_tlv(reader)?;
-    
+
     // get public key
     decode_subject_public_key_info(reader, cert_data)?;
 
     // get validity
     // not before time
     reader.next_tag(tag_not_before())?;
-    cert_data.m_not_before_time= reader.get_u32()?;
+    cert_data.m_not_before_time = reader.get_u32()?;
     // not after time
     reader.next_tag(tag_not_after())?;
     cert_data.m_not_after_time = reader.get_u32()?;
@@ -207,7 +269,6 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(reader: &mut Read
     reader.verify_end_of_container()?;
 
     reader.exit_container(container_type)?;
-
 
     if let Some(flags) = decode_flag {
         if flags.contains(CertDecodeFlags::KisTrustAnchor) {
@@ -223,9 +284,9 @@ mod tests {
     use super::*;
     use crate::chip::{
         chip_lib::core::{
-            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
-            tlv_types::{self, TlvType},
             tlv_tags::{self, anonymous_tag},
+            tlv_types::{self, TlvType},
+            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
         },
         credentials::chip_cert,
     };
@@ -245,12 +306,30 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_bytes(
+                context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8),
+                &key
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -265,12 +344,19 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         assert_eq!(1, cert.m_auth_key_id[0]);
-        assert_eq!(2, cert.m_auth_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
+        assert_eq!(
+            2,
+            cert.m_auth_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]
+        );
         assert!(cert.m_cert_flags.contains(CertFlags::KextPresentAuthKeyId));
     }
 
@@ -287,12 +373,30 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key[0..1]).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_bytes(
+                context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8),
+                &key[0..1]
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -307,10 +411,14 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_err());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_err());
         // still setup
         assert!(cert.m_cert_flags.contains(CertFlags::KextPresentAuthKeyId));
     }
@@ -328,12 +436,30 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_bytes(
+                context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8),
+                &key
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -348,13 +474,22 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         assert_eq!(1, cert.m_subject_key_id[0]);
-        assert_eq!(2, cert.m_subject_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
-        assert!(cert.m_cert_flags.contains(CertFlags::KextPresentSubjectKeyId));
+        assert_eq!(
+            2,
+            cert.m_subject_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]
+        );
+        assert!(cert
+            .m_cert_flags
+            .contains(CertFlags::KextPresentSubjectKeyId));
     }
 
     #[test]
@@ -370,14 +505,32 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         let expected_usage = KeyUsageFlags::KdigitalSignature.bits() as u16;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_u16(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), expected_usage).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_u16(
+                context_tag(ChipCertExtensionTag::KtagKeyUsage as u8),
+                expected_usage
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -392,10 +545,14 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         assert_eq!(KeyUsageFlags::KdigitalSignature, cert.m_key_usage_flags);
     }
 
@@ -412,14 +569,32 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         let incorrect_key_usage = 0x8000u16;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_u16(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), incorrect_key_usage).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_u16(
+                context_tag(ChipCertExtensionTag::KtagKeyUsage as u8),
+                incorrect_key_usage
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -434,10 +609,14 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(!decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(!decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
     }
 
     #[test]
@@ -453,18 +632,39 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
 
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
 
         let mut outer_container_array = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start an array
-        assert!(writer.start_container(context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8), tlv_types::TlvType::KtlvTypeArray, &mut outer_container_array).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+                tlv_types::TlvType::KtlvTypeArray,
+                &mut outer_container_array
+            )
+            .is_ok());
 
         let expected_key_usage = KeyPurposeFlags::KserverAuth.bits();
-        assert!(writer.put_u8(anonymous_tag(), expected_key_usage).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .put_u8(anonymous_tag(), expected_key_usage)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
 
         writer.end_container(outer_container_array);
 
@@ -482,10 +682,14 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         assert_eq!(KeyPurposeFlags::KserverAuth, cert.m_key_purpose_flags);
     }
 
@@ -502,20 +706,44 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
 
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
 
         let mut outer_container_array = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start an array
-        assert!(writer.start_container(context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8), tlv_types::TlvType::KtlvTypeArray, &mut outer_container_array).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+                tlv_types::TlvType::KtlvTypeArray,
+                &mut outer_container_array
+            )
+            .is_ok());
 
         let expected_key_usage = KeyPurposeFlags::KserverAuth.bits();
         let expected_key_usage2 = KeyPurposeFlags::KclientAuth.bits();
-        assert!(writer.put_u8(anonymous_tag(), expected_key_usage).inspect_err(|e| println!("{}", e)).is_ok());
-        assert!(writer.put_u8(anonymous_tag(), expected_key_usage2).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .put_u8(anonymous_tag(), expected_key_usage)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
+        assert!(writer
+            .put_u8(anonymous_tag(), expected_key_usage2)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
 
         writer.end_container(outer_container_array);
 
@@ -533,11 +761,17 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
-        assert!(cert.m_key_purpose_flags.contains(KeyPurposeFlags::KserverAuth | KeyPurposeFlags::KclientAuth));
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
+        assert!(cert
+            .m_key_purpose_flags
+            .contains(KeyPurposeFlags::KserverAuth | KeyPurposeFlags::KclientAuth));
     }
 
     #[test]
@@ -553,18 +787,39 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
 
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
 
         let mut outer_container_array = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start an array
-        assert!(writer.start_container(context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8), tlv_types::TlvType::KtlvTypeArray, &mut outer_container_array).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+                tlv_types::TlvType::KtlvTypeArray,
+                &mut outer_container_array
+            )
+            .is_ok());
 
         let expected_key_usage = 0x80u8;
-        assert!(writer.put_u8(anonymous_tag(), expected_key_usage).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .put_u8(anonymous_tag(), expected_key_usage)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
 
         writer.end_container(outer_container_array);
 
@@ -582,10 +837,14 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(!decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(!decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
     }
 
     #[test]
@@ -601,15 +860,39 @@ mod tests {
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
-        assert!(writer.start_container(anonymous_tag(), tlv_types::TlvType::KtlvTypeStructure, &mut outer_container).is_ok());
+        assert!(writer
+            .start_container(
+                anonymous_tag(),
+                tlv_types::TlvType::KtlvTypeStructure,
+                &mut outer_container
+            )
+            .is_ok());
         let mut outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
 
         // start a list
-        assert!(writer.start_container(context_tag(ChipCertTag::KtagExtensions as u8), tlv_types::TlvType::KtlvTypeList, &mut outer_container_list).is_ok());
-        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .start_container(
+                context_tag(ChipCertTag::KtagExtensions as u8),
+                tlv_types::TlvType::KtlvTypeList,
+                &mut outer_container_list
+            )
+            .is_ok());
+        assert!(writer
+            .put_bytes(
+                context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8),
+                &key
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         key[0] = 3;
         key[key.len() - 1] = 4;
-        assert!(writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(writer
+            .put_bytes(
+                context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8),
+                &key
+            )
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         writer.end_container(outer_container_list);
 
         writer.end_container(outer_container);
@@ -624,15 +907,27 @@ mod tests {
 
         reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
-        assert!(reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag()).is_ok());
+        assert!(reader
+            .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
+            .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert).inspect_err(|e| println!("{}", e)).is_ok());
+        assert!(decode_extensions(&mut reader, &mut cert)
+            .inspect_err(|e| println!("{}", e))
+            .is_ok());
         assert_eq!(1, cert.m_auth_key_id[0]);
-        assert_eq!(2, cert.m_auth_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
+        assert_eq!(
+            2,
+            cert.m_auth_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]
+        );
         assert!(cert.m_cert_flags.contains(CertFlags::KextPresentAuthKeyId));
         assert_eq!(3, cert.m_subject_key_id[0]);
-        assert_eq!(4, cert.m_subject_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]);
-        assert!(cert.m_cert_flags.contains(CertFlags::KextPresentSubjectKeyId));
+        assert_eq!(
+            4,
+            cert.m_subject_key_id[chip_cert::K_KEY_IDENTIFIER_LENGTH - 1]
+        );
+        assert!(cert
+            .m_cert_flags
+            .contains(CertFlags::KextPresentSubjectKeyId));
     }
 } // end of mod tests

@@ -10,10 +10,10 @@ use crate::chip::VendorId;
 use crate::chip_static_assert;
 
 use crate::chip_core_error;
+use crate::chip_error_buffer_too_small;
 use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_well_uninitialized;
-use crate::chip_error_buffer_too_small;
 use crate::chip_ok;
 use crate::chip_sdk_error;
 use crate::ChipError;
@@ -24,13 +24,13 @@ use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
 
+use hkdf::Hkdf;
 use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{elliptic_curve, PublicKey, SecretKey};
 use sha2::{Digest, Sha256};
-use hkdf::Hkdf;
 
 use core::slice;
 
@@ -105,7 +105,9 @@ pub const K_PID_PREFIX_FOR_CN_ENCODING: &str = "Mpid:";
 pub const K_VID_AND_PID_HEX_LENGTH: usize = core::mem::size_of::<u16>() * 2;
 pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
 
-pub const K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE: usize = core::mem::size_of::<u8>() + K_SUBJECT_KEY_IDENTIFIER_LENGTH + K_P256_ECDSA_SIGNATURE_LENGTH_RAW;
+pub const K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE: usize = core::mem::size_of::<u8>()
+    + K_SUBJECT_KEY_IDENTIFIER_LENGTH
+    + K_P256_ECDSA_SIGNATURE_LENGTH_RAW;
 
 chip_static_assert!(
     K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE == 85,
@@ -564,10 +566,9 @@ impl Default for P256KeypairContext {
     }
 }
 
-const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize =  K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
+const SERIALIALIZED_KEYPAIR_SIZE_BYTE: usize = K_P256_PUBLIC_KEY_LENGTH + K_P256_PRIVATE_KEY_LENGTH;
 
-pub type P256SerializedKeypair =
-    SensitiveDataBuffer<SERIALIALIZED_KEYPAIR_SIZE_BYTE>;
+pub type P256SerializedKeypair = SensitiveDataBuffer<SERIALIALIZED_KEYPAIR_SIZE_BYTE>;
 
 pub trait P256KeypairBase:
     ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature>
@@ -635,9 +636,10 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         hasher.update(&msg[..]);
         let hash_result = hasher.finalize();
 
-        let secret_key = SecretKey::from_slice(&self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH]).map_err(|_| {
-            chip_error_internal!()
-        })?;
+        let secret_key = SecretKey::from_slice(
+            &self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH],
+        )
+        .map_err(|_| chip_error_internal!())?;
 
         let sign_key = SigningKey::from(&secret_key);
 
@@ -654,15 +656,16 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         remote_public_key: &P256PublicKey,
         out_secret: &mut P256EcdhDeriveSecret,
     ) -> ChipErrorResult {
-        let pk = PublicKey::from_sec1_bytes(remote_public_key.const_bytes()).map_err(|_| {
-            chip_error_internal!()
-        })?;
+        let pk = PublicKey::from_sec1_bytes(remote_public_key.const_bytes())
+            .map_err(|_| chip_error_internal!())?;
 
-        let secret_key = SecretKey::from_slice(&self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH]).map_err(|_| {
-            chip_error_internal!()
-        })?;
+        let secret_key = SecretKey::from_slice(
+            &self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH],
+        )
+        .map_err(|_| chip_error_internal!())?;
 
-        let shared_secret = elliptic_curve::ecdh::diffie_hellman(secret_key.to_nonzero_scalar(), pk.as_affine());
+        let shared_secret =
+            elliptic_curve::ecdh::diffie_hellman(secret_key.to_nonzero_scalar(), pk.as_affine());
 
         out_secret
             .bytes()
@@ -694,10 +697,12 @@ impl P256KeypairBase for P256Keypair {
             self.m_initialized = true;
             let secret_key = SecretKey::random(&mut rand);
             let public_key = secret_key.public_key();
-            self.m_key_context.m_bytes[0..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(public_key.to_encoded_point(false).as_bytes());
-            self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH].copy_from_slice(secret_key.to_bytes().as_slice());
+            self.m_key_context.m_bytes[0..K_P256_PUBLIC_KEY_LENGTH]
+                .copy_from_slice(public_key.to_encoded_point(false).as_bytes());
+            self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH]
+                .copy_from_slice(secret_key.to_bytes().as_slice());
             self.m_public_key = P256PublicKey::default_with_raw_value(
-                    public_key.to_encoded_point(false).as_bytes()
+                public_key.to_encoded_point(false).as_bytes(),
             );
         }
         chip_ok!()
@@ -719,7 +724,10 @@ impl P256KeypairBase for P256Keypair {
     }
 
     fn deserialize(&mut self, input: &P256SerializedKeypair) -> ChipErrorResult {
-        verify_or_return_error!(input.length() <= self.m_key_context.m_bytes.len(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(
+            input.length() <= self.m_key_context.m_bytes.len(),
+            Err(chip_error_invalid_argument!())
+        );
         self.clear();
         self.m_key_context.m_bytes[..input.length()].copy_from_slice(input.const_bytes());
         self.m_initialized = true;
@@ -1044,8 +1052,14 @@ pub fn generate_compressed_fabric_id_raw_bytes(
     fabrid_id: u64,
     out_compressed_fabrid_id: &mut [u8],
 ) -> ChipErrorResult {
-    verify_or_return_error!(root_public_key.is_uncompressed(), Err(chip_error_invalid_argument!()));
-    verify_or_return_error!(out_compressed_fabrid_id.len() == K_COMPRESSED_FABRIC_IDENTIFIER_SIZE, Err(chip_error_buffer_too_small!()));
+    verify_or_return_error!(
+        root_public_key.is_uncompressed(),
+        Err(chip_error_invalid_argument!())
+    );
+    verify_or_return_error!(
+        out_compressed_fabrid_id.len() == K_COMPRESSED_FABRIC_IDENTIFIER_SIZE,
+        Err(chip_error_buffer_too_small!())
+    );
     // Ensure proper endianness for Fabric ID (i.e. big-endian as it appears in certificates)
     let fabric_id_as_big_endian_salt = fabrid_id.to_be_bytes();
 
@@ -1059,12 +1073,20 @@ pub fn generate_compressed_fabric_id_raw_bytes(
     //
     // NOTE: len=64 bits is implied by output buffer size when calling HKDF_sha::HKDF_SHA256.
     const K_COMPRESSED_FABRIC_INFO: [u8; 16] = /* "CompressedFabric" */
-        [ 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x65, 0x64, 0x46, 0x61, 0x62, 0x72, 0x69, 0x63 ];
+        [
+            0x43, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x65, 0x64, 0x46, 0x61, 0x62, 0x72,
+            0x69, 0x63,
+        ];
 
     // Must drop uncompressed point form format specifier (first byte), per spec method
     let input_key = &root_public_key.const_bytes()[1..];
 
-    HKDFSha::hkdf_sha(input_key, &fabric_id_as_big_endian_salt[..], &K_COMPRESSED_FABRIC_INFO[..], out_compressed_fabrid_id)
+    HKDFSha::hkdf_sha(
+        input_key,
+        &fabric_id_as_big_endian_salt[..],
+        &K_COMPRESSED_FABRIC_INFO[..],
+        out_compressed_fabrid_id,
+    )
 }
 
 pub fn generate_compressed_fabric_id(
@@ -1426,10 +1448,13 @@ mod test {
             assert_eq!(true, keypair.serialize(&mut bytes).is_ok());
             let mut keypair1 = P256Keypair::default();
             assert_eq!(true, keypair1.deserialize(&bytes).is_ok());
-            assert_eq!(keypair.m_key_context.m_bytes, keypair1.m_key_context.m_bytes);
+            assert_eq!(
+                keypair.m_key_context.m_bytes,
+                keypair1.m_key_context.m_bytes
+            );
         }
     } // end of test_p256_keypair
-    
+
     mod test_hkdf_sha {
         use super::super::*;
         use super::*;
@@ -1437,28 +1462,40 @@ mod test {
 
         #[test]
         fn hkdf_sha() {
-            let key: [u8; 3] = [1,2,3];
-            let salt: [u8; 3] = [4,5,6];
-            let info: [u8; 3] = [11,22,33];
+            let key: [u8; 3] = [1, 2, 3];
+            let salt: [u8; 3] = [4, 5, 6];
+            let info: [u8; 3] = [11, 22, 33];
             let mut out1: [u8; 10] = [0; 10];
             let mut out2: [u8; 10] = [0; 10];
 
-            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok());
-            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out2).is_ok());
+            assert_eq!(
+                true,
+                HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok()
+            );
+            assert_eq!(
+                true,
+                HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out2).is_ok()
+            );
             assert_eq!(out1, out2);
         }
 
         #[test]
         fn hkdf_sha_diff() {
-            let key: [u8; 3] = [1,2,3];
-            let salt: [u8; 3] = [4,5,6];
-            let info: [u8; 3] = [11,22,33];
-            let info2: [u8; 3] = [17,28,39];
+            let key: [u8; 3] = [1, 2, 3];
+            let salt: [u8; 3] = [4, 5, 6];
+            let info: [u8; 3] = [11, 22, 33];
+            let info2: [u8; 3] = [17, 28, 39];
             let mut out1: [u8; 10] = [0; 10];
             let mut out2: [u8; 10] = [0; 10];
 
-            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok());
-            assert_eq!(true, HKDFSha::hkdf_sha(&key[..], &salt[..], &info2[..], &mut out2).is_ok());
+            assert_eq!(
+                true,
+                HKDFSha::hkdf_sha(&key[..], &salt[..], &info[..], &mut out1).is_ok()
+            );
+            assert_eq!(
+                true,
+                HKDFSha::hkdf_sha(&key[..], &salt[..], &info2[..], &mut out2).is_ok()
+            );
             assert_ne!(out1, out2);
         }
     } // end of test_hkdf_sha

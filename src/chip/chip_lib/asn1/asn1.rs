@@ -49,7 +49,7 @@ pub enum Asn1Oid {
 
     KoidNotSpecified = 0,
     KoidUnknown = 0xFFFF,
-    KoidEnumMask = 0x00FF
+    KoidEnumMask = 0x00FF,
 }
 
 impl From<Asn1Oid> for u16 {
@@ -118,14 +118,14 @@ impl TryFrom<u16> for Asn1Oid {
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OidCategory {
-    KoidCategoryNotSpecified       = 0x0000,
-    KoidCategoryPubKeyAlgo         = 0x0100,
-    KoidCategorySigAlgo            = 0x0200,
-    KoidCategoryAttributeType      = 0x0300,
-    KoidCategoryEllipticCurve      = 0x0400,
-    KoidCategoryExtension          = 0x0500,
-    KoidCategoryKeyPurpose         = 0x0600,
-    KoidCategoryUnknown            = 0x0F00,
+    KoidCategoryNotSpecified = 0x0000,
+    KoidCategoryPubKeyAlgo = 0x0100,
+    KoidCategorySigAlgo = 0x0200,
+    KoidCategoryAttributeType = 0x0300,
+    KoidCategoryEllipticCurve = 0x0400,
+    KoidCategoryExtension = 0x0500,
+    KoidCategoryKeyPurpose = 0x0600,
+    KoidCategoryUnknown = 0x0F00,
 }
 
 pub const K_OID_CATEGORY_MASK: u16 = 0x0F00;

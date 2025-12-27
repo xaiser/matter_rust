@@ -1144,7 +1144,7 @@ where
                 } else {
                     return Err(e);
                 }
-            },
+            }
             _ => {
                 return Err(chip_error_unexpected_tlv_element!());
             }
