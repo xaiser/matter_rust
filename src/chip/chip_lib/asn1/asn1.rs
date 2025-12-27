@@ -1,4 +1,6 @@
 pub type Oid = u16;
+pub type Tag = u8;
+pub type Class = u8;
 
 #[repr(u16)]
 #[derive(PartialEq, Eq)]

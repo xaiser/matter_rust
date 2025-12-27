@@ -974,7 +974,9 @@ mod fabric_table {
                 extract_node_id_fabric_id_from_op_cert_byte,
                 extract_not_before_from_chip_cert_byte, extract_public_key_from_chip_cert_byte,
                 CertBuffer, K_MAX_CHIP_CERT_LENGTH,
+                CertDecodeFlags,
             },
+            chip_certificate_set::ChipCertificateSet,
             last_known_good_time::LastKnownGoodTime,
             operational_certificate_store::{CertChainElement, OperationalCertificateStore},
         },
@@ -2365,10 +2367,10 @@ mod fabric_table {
 
         pub fn verify_credentials(
             &self,
-            _fabric_index: FabricIndex,
-            _noc: &[u8],
-            _icac: &[u8],
-            _context: &mut ValidationContext,
+            fabric_index: FabricIndex,
+            noc: &[u8],
+            icac: Option<&[u8]>,
+            context: &mut ValidationContext,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2379,14 +2381,19 @@ mod fabric_table {
             ),
             ChipError,
         > {
-            Err(chip_error_not_implemented!())
+            matter_trace_scope!("VerifyCredentials", "Fabric");
+            let mut rcac = CertBuffer::default();
+            self.fetch_root_cert(fabric_index, &mut rcac)?;
+
+            return self.run_verify_credentials(noc, icac, rcac.const_bytes(), context);
         }
 
         pub fn run_verify_credentials(
-            _fabric_index: FabricIndex,
-            _noc: &[u8],
-            _icac: &[u8],
-            _context: &mut ValidationContext,
+            &self,
+            noc: &[u8],
+            icac: Option<&[u8]>,
+            rcac: &[u8],
+            context: &mut ValidationContext,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2397,6 +2404,14 @@ mod fabric_table {
             ),
             ChipError,
         > {
+            //const K_MAX_NUM_CERTS_IN_OP_CERTS: u8 = 3;
+
+            let mut certificates = ChipCertificateSet::default();
+            certificates.load_cert(rcac, CertDecodeFlags::KisTrustAnchor)?;
+
+            if let Some(icac_buf) = icac {
+                certificates.load_cert(icac_buf, CertDecodeFlags::KgenerateTBSHash)?;
+            }
             Err(chip_error_not_implemented!())
         }
 

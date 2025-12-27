@@ -1,8 +1,11 @@
 use crate::chip::{
-    chip_lib::core::{
-        tlv_reader::{TlvContiguousBufferReader, TlvReader},
-        tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag, Tag},
-        tlv_types::TlvType,
+    chip_lib::{
+        core::{
+            tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag, Tag},
+            tlv_types::TlvType,
+        },
+        asn1::asn1_writer::{ASN1Writer, NullASN1Writer},
     },
     credentials::chip_cert::{
         tag_not_after, tag_not_before, CertDecodeFlags, CertFlags, ChipCertExtensionTag,
@@ -41,7 +44,9 @@ pub fn decode_chip_cert(
 
     reader.init(cert.as_ptr(), cert.len());
 
-    return decode_chip_cert_with_reader(&mut reader, cert_data, decode_flag);
+    let mut writer = NullASN1Writer::default();
+
+    return decode_chip_cert_with_reader(&mut reader, &mut writer, cert_data, decode_flag);
 }
 
 pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(
@@ -230,8 +235,9 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
     chip_ok!()
 }
 
-pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
+pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: ASN1Writer>(
     reader: &mut Reader,
+    _writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
     decode_flag: Option<CertDecodeFlags>,
 ) -> ChipErrorResult {

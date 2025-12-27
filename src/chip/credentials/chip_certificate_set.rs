@@ -3,7 +3,10 @@ pub use chip_certificate_set::*;
 mod chip_certificate_set {
     use crate::chip::{
         asn1::Asn1Oid,
-        chip_lib::core::tlv_reader::{TlvContiguousBufferReader, TlvReader},
+        chip_lib::{
+            core::tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            asn1::asn1_writer::{ASN1Writer, NullASN1Writer},
+        },
         credentials::{
             certificate_validity_policy::{
                 apply_default_policy, CertificateValidityPolicy, CertificateValidityResult,
@@ -103,6 +106,12 @@ mod chip_certificate_set {
         m_cert_count: u8,
     }
 
+    impl Default for ChipCertificateSet {
+        fn default() -> Self {
+            ChipCertificateSet::new()
+        }
+    }
+
     impl ChipCertificateSet {
         pub const fn new() -> Self {
             /*
@@ -152,17 +161,20 @@ mod chip_certificate_set {
 
             reader.init(chip_cert.as_ptr(), chip_cert.len());
 
-            return self.load_cert_reader(&mut reader, decode_flags, chip_cert);
+            let mut writer = NullASN1Writer::default();
+
+            return self.load_cert_reader(&mut reader, &mut writer, decode_flags, chip_cert);
         }
 
-        pub fn load_cert_reader<'a, Reader: TlvReader<'a>>(
+        pub fn load_cert_reader<'a, Reader: TlvReader<'a>, Writer: ASN1Writer>(
             &mut self,
             reader: &mut Reader,
+            writer: &mut Writer,
             decode_flags: CertDecodeFlags,
             chip_cert: &[u8],
         ) -> ChipErrorResult {
             let mut cert = ChipCertificateData::default();
-            decode_chip_cert_with_reader(reader, &mut cert, Some(decode_flags))?;
+            decode_chip_cert_with_reader(reader, writer, &mut cert, Some(decode_flags))?;
 
             // Verify the cert has both the Subject Key Id and Authority Key Id extensions present.
             // Only certs with both these extensions are supported for the purposes of certificate validation.
@@ -498,6 +510,18 @@ mod chip_certificate_set {
 
         pub fn get_cert_sets(&self) -> &[Option<ChipCertificateData>] {
             &self.m_certs_internal_storage
+        }
+
+        pub fn get_last_cert(&self) -> Option<&ChipCertificateData> {
+            if self.m_cert_count > 0 {
+                if let Some(cert) = self.m_certs_internal_storage[(self.m_cert_count - 1) as usize].as_ref() {
+                    return Some(cert);
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         }
     }
 
