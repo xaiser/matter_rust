@@ -1,6 +1,18 @@
 use crate::{
+    chip:: {
+        chip_lib::support::default_string::DefaultString,
+    },
     ChipErrorResult,
     chip_ok,
+    chip_core_error,
+    chip_sdk_error,
+    chip_error_buffer_too_small,
+    chip_error_invalid_argument,
+};
+
+use core::{
+    fmt::Write,
+    mem::size_of,
 };
 use bitflags::{bitflags, Flags};
 
@@ -32,18 +44,12 @@ bitflags! {
  * The result either fits and is written, or does not fit and nothing is written
  * to `dest_hex`.
  *
- * If `src_bytes` and `dest_hex` overlap, the results may be incorrect, depending
- * on overlap, but only the core validity checks are done and it's possible to
- * get CHIP_NO_ERROR with erroneous output.
- *
  * On success, number of bytes written to destination is always:
  *   output_size = (src_size * 2) + ((flags & HexFlags::kNullTerminate) ? 1 : 0);
  *
  * @param src_bytes Pointer to buffer to convert.  Only allowed to be null if
  *                  src_size is 0.
- * @param src_size Number of bytes to convert from src_bytes
  * @param [out] dest_hex Destination buffer to receive hex encoding
- * @param dest_size_max Maximum buffer size for the hex encoded `dest_hex` buffer
  *                      including null-terminator if needed.
  * @param flags Flags from `HexFlags` for formatting options
  *
@@ -55,6 +61,53 @@ bitflags! {
  */
 
 pub fn bytes_to_hex(src: &[u8], dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
+    /*
+    let mut tmp = DefaultString::<10>::const_default();
+
+    if let Ok(hex_str) = write!(&mut tmp, "0x{:x}", dest) {
+    }
+    */
     chip_ok!()
 }
 
+pub fn uint64_to_hex(src: u64, dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
+    const MAX_LEN: usize = size_of::<u64>() + 1;
+    let mut tmp = DefaultString::<MAX_LEN>::const_default();
+
+    if write!(&mut tmp, "{:x}", src).is_ok() {
+        if dest.len() >= tmp.len() {
+            dest[..tmp.len()].copy_from_slice(tmp.const_bytes());
+        } else {
+            return Err(chip_error_buffer_too_small!());
+        }
+    } else {
+        return Err(chip_error_invalid_argument!());
+    }
+
+    if flags.intersects(HexFlags::KnullTerminate) {
+        if dest.len() >= (tmp.len() + 1) {
+            dest[tmp.len()] = b'\0';
+        } else {
+            return Err(chip_error_buffer_too_small!());
+        }
+    }
+
+    chip_ok!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::mem::size_of;
+
+    #[test]
+    fn uint64_to_hex_correctlly() {
+        let mut buf = [0u8; 32];
+        let value = 0x1u64;
+        const SIZE: usize = size_of::<u64>();
+        let mut expected_output = [b'0'; SIZE];
+        expected_output[SIZE - 1] = b'1';
+        assert!(uint64_to_hex(value, &mut buf, HexFlags::Knone).is_ok());
+        assert_eq!(expected_output[..SIZE], buf[..SIZE]);
+    }
+} // end of tests
