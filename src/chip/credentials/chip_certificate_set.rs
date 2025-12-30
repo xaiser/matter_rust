@@ -5,7 +5,7 @@ mod chip_certificate_set {
         asn1::Asn1Oid,
         chip_lib::{
             core::tlv_reader::{TlvContiguousBufferReader, TlvReader},
-            asn1::asn1_writer::{ASN1Writer, NullASN1Writer},
+            asn1::asn1_writer::{Asn1Writer, NullAsn1Writer},
         },
         credentials::{
             certificate_validity_policy::{
@@ -161,12 +161,12 @@ mod chip_certificate_set {
 
             reader.init(chip_cert.as_ptr(), chip_cert.len());
 
-            let mut writer = NullASN1Writer::default();
+            let mut writer = NullAsn1Writer::default();
 
             return self.load_cert_reader(&mut reader, &mut writer, decode_flags, chip_cert);
         }
 
-        pub fn load_cert_reader<'a, Reader: TlvReader<'a>, Writer: ASN1Writer>(
+        pub fn load_cert_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
             &mut self,
             reader: &mut Reader,
             writer: &mut Writer,

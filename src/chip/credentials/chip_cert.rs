@@ -494,6 +494,20 @@ impl ChipDN {
         chip_ok!()
     }
 
+    /*
+    pub decode_to_asn1<Writer: Asn1Writer>(&self, writer: &mut Writer) -> ChipErrorResult {
+        let rdn_count = self.rdn_count();
+        for i in 0..rdn_count {
+            let attr_oid = self.rdn[i].m_attr_oid;
+
+            if is_chip_64bit_dn_attr(attr_oid) {
+            }
+        }
+
+        chip_ok!()
+    }
+    */
+
     pub fn is_equal(&self, other: &Self) -> bool {
         let rdn_count = self.rdn_count();
 

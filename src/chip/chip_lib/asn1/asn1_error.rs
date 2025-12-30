@@ -25,6 +25,13 @@ macro_rules! asn1_error_overflow {
 }
 
 #[macro_export]
+macro_rules! asn1_error_invalid_state {
+    () => {
+        chip_asn1_error!(0x03)
+    };
+}
+
+#[macro_export]
 macro_rules! asn1_error_unsupported_encoding {
     () => {
         chip_asn1_error!(0x06)

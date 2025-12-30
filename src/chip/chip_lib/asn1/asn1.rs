@@ -2,6 +2,44 @@ pub type Oid = u16;
 pub type Tag = u8;
 pub type Class = u8;
 
+#[repr(u8)]
+#[derive(PartialEq, Eq)]
+pub enum Asn1TagClasses {
+    Kasn1TagClassUniversal       = 0x00,
+    Kasn1TagClassApplication     = 0x40,
+    Kasn1TagClassContextSpecific = 0x80,
+    Kasn1TagClassPrivate         = 0xC0
+}
+
+#[repr(u8)]
+#[derive(PartialEq, Eq)]
+pub enum Asn1UniversalTag {
+    Kasn1UniversalTagBoolean         = 1,
+    Kasn1UniversalTagInteger         = 2,
+    Kasn1UniversalTagBitString       = 3,
+    Kasn1UniversalTagOctetString     = 4,
+    Kasn1UniversalTagNull            = 5,
+    Kasn1UniversalTagObjectId        = 6,
+    Kasn1UniversalTagObjectDesc      = 7,
+    Kasn1UniversalTagExternal        = 8,
+    Kasn1UniversalTagReal            = 9,
+    Kasn1UniversalTagEnumerated      = 10,
+    Kasn1UniversalTagUTF8String      = 12,
+    Kasn1UniversalTagSequence        = 16,
+    Kasn1UniversalTagSet             = 17,
+    Kasn1UniversalTagNumericString   = 18,
+    Kasn1UniversalTagPrintableString = 19,
+    Kasn1UniversalTagT61String       = 20,
+    Kasn1UniversalTagVideotexString  = 21,
+    Kasn1UniversalTagIA5String       = 22,
+    Kasn1UniversalTagUTCTime         = 23,
+    Kasn1UniversalTagGeneralizedTime = 24,
+    Kasn1UniversalTagGraphicString   = 25,
+    Kasn1UniversalTagVisibleString   = 26,
+    Kasn1UniversalTagGeneralString   = 27,
+    Kasn1UniversalTagUniversalString = 28
+}
+
 #[repr(u16)]
 #[derive(PartialEq, Eq)]
 pub enum Asn1Oid {
