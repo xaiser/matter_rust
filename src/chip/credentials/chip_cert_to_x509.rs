@@ -1,16 +1,17 @@
 use crate::chip::{
-    asn1::Oid,
+    asn1::{Oid, Asn1UniversalTime, Asn1UniversalTimeString},
     chip_lib::{
         core::{
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
             tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag, Tag},
             tlv_types::TlvType,
         },
+        support::time_utils,
         asn1::asn1_writer::{Asn1Writer, NullAsn1Writer},
     },
     credentials::chip_cert::{
         tag_not_after, tag_not_before, CertDecodeFlags, CertFlags, ChipCertExtensionTag,
-        ChipCertTag, ChipCertificateData, KeyPurposeFlags, KeyUsageFlags,
+        ChipCertTag, ChipCertificateData, KeyPurposeFlags, KeyUsageFlags, chip_epoch_to_asn1_time,
     },
 };
 
@@ -272,9 +273,13 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Write
     // not before time
     reader.next_tag(tag_not_before())?;
     cert_data.m_not_before_time = reader.get_u32()?;
+    let asn1_time = chip_epoch_to_asn1_time(cert_data.m_not_before_time)?;
+    writer.put_time(&asn1_time)?;
     // not after time
     reader.next_tag(tag_not_after())?;
     cert_data.m_not_after_time = reader.get_u32()?;
+    let asn1_time = chip_epoch_to_asn1_time(cert_data.m_not_after_time)?;
+    writer.put_time(&asn1_time)?;
 
     // get extensions
     decode_extensions(reader, cert_data)?;

@@ -18,6 +18,13 @@ macro_rules! asn1_end {
 }
 
 #[macro_export]
+macro_rules! asn1_error_underrun {
+    () => {
+        chip_asn1_error!(0x01)
+    };
+}
+
+#[macro_export]
 macro_rules! asn1_error_overflow {
     () => {
         chip_asn1_error!(0x02)

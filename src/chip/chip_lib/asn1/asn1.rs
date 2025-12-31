@@ -2,6 +2,8 @@ pub type Oid = u16;
 pub type Tag = u8;
 pub type Class = u8;
 
+pub use super::asn1_time::{Asn1UniversalTime, Asn1UniversalTimeString};
+
 #[repr(u8)]
 #[derive(PartialEq, Eq)]
 pub enum Asn1TagClasses {

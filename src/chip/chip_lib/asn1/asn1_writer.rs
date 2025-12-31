@@ -1,6 +1,7 @@
 use crate::{
-    chip::asn1::{Tag, Class, Oid},
+    chip::asn1::{Tag, Class, Oid, Asn1UniversalTime, Asn1UniversalTimeString, Asn1UniversalTag, Asn1TagClasses},
     ChipErrorResult,
+    asn1_error_underrun,
 };
 
 mod FieldLength {
@@ -22,6 +23,7 @@ pub trait Asn1Writer {
 
     fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult;
     fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult;
+    fn put_time(&mut self, val: &Asn1UniversalTime) -> ChipErrorResult;
 }
 
 mod asn1_writer {
@@ -61,6 +63,10 @@ mod asn1_writer {
         }
 
         fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn put_time(&mut self, _val: &Asn1UniversalTime) -> ChipErrorResult {
             chip_ok!()
         }
     }
@@ -190,6 +196,19 @@ mod asn1_writer {
             }
             return self.write_data(encoded_bits);
         }
+
+        fn put_time(&mut self, val: &Asn1UniversalTime) -> ChipErrorResult {
+            let time_string = val.export_to_asn1_time_string().map_err(|_| asn1_error_underrun!())?;
+            let tag: Tag;
+
+            if val.year >= 2050 {
+                tag = Asn1UniversalTag::Kasn1UniversalTagGeneralizedTime as Tag;
+            } else {
+                tag = Asn1UniversalTag::Kasn1UniversalTagUTCTime as Tag;
+            }
+
+            return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as Class, tag, false, time_string.const_bytes());
+        }
     }
 
     #[cfg(test)]
@@ -231,6 +250,16 @@ mod asn1_writer {
             assert_eq!(0x2, buf[1]);
             assert_eq!(b'1', buf[2]);
             assert_eq!(b'2', buf[3]);
+        }
+
+        #[test]
+        fn put_time_successfully() {
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0xFFu8; 256];
+            writer.init(&mut buf);
+            let time = Asn1UniversalTime::default();
+
+            assert!(writer.put_time(&time).is_ok());
         }
     }
 } // end of asn1_writer

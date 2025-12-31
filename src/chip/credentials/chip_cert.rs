@@ -1,5 +1,5 @@
 use crate::chip::{
-    asn1::{get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag},
+    asn1::{get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag, Asn1UniversalTime},
     chip_lib::{
         asn1::asn1_writer::Asn1Writer,
         core::{
@@ -14,6 +14,7 @@ use crate::chip::{
         support::{
             bytes_to_hex::{uint64_to_hex, uint32_to_hex, HexFlags},
             default_string::DefaultString,
+            time_utils,
         },
     },
     //credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
@@ -212,6 +213,7 @@ pub(super) mod internal {
     pub const K_NETWORK_IDENTITY_CN: &str = "*";
     pub const K_CHIP_64BIT_ATTR_UTF8_LENGTH: usize = 16;
     pub const K_CHIP_32BIT_ATTR_UTF8_LENGTH: usize = 8;
+    pub const K_X509_NO_WELL_DEFINED_EXPIRATION_DATE_YEAR: u16 = 9999;
 }
 
 pub fn verify_cert_signature(
@@ -835,6 +837,41 @@ pub fn extract_not_after_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32,
     decode_chip_cert(opcert, &mut op_cert, None)?;
 
     extract_not_after_from_chip_cert(&op_cert)
+}
+
+pub fn chip_epoch_to_asn1_time(epoch_time: u32) -> Result<Asn1UniversalTime, ChipError> {
+    // X.509/RFC5280 defines the special time 99991231235959Z to mean 'no well-defined expiration date'.
+    // In CHIP certificate it is represented as a CHIP Epoch time value of 0 secs (2000-01-01 00:00:00 UTC).
+    //
+    // For simplicity and symmetry with ASN1ToChipEpochTime, this method makes this conversion for all
+    // times, which in consuming code can create a conversion from CHIP epoch 0 seconds to 99991231235959Z
+    // for NotBefore, which is not conventional.
+    //
+    // If an original X509 certificate encloses a NotBefore time that is the CHIP Epoch itself, 2000-01-01
+    // 00:00:00, the resultant X509 certificate in a conversion back from CHIP TLV format using this time
+    // conversion method will instead enclose the NotBefore time 99991231235959Z, which will invalidiate the
+    // TBS signature.  Thus, certificates with this specific attribute are not usable with this code.
+    // Attempted installation of such certficates will fail during commissioning.
+    if epoch_time == K_NULL_CERT_TIME {
+        return Ok(Asn1UniversalTime {
+            year: internal::K_X509_NO_WELL_DEFINED_EXPIRATION_DATE_YEAR,
+            month: time_utils::K_MONTHS_PER_YEAR,
+            day: time_utils::K_MAX_DAYS_PER_MONTH,
+            hour: time_utils::K_HOURS_PER_DAY,
+            minute: time_utils::K_MINUTES_PER_HOUR - 1,
+            second: time_utils::K_SECONDS_PER_MINUTE - 1,
+        });
+    } else {
+        let (year, month, day, hour, minute, second) = time_utils::chip_epoch_to_calendar_time(epoch_time);
+        return Ok(Asn1UniversalTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second
+        });
+    }
 }
 
 #[cfg(test)]

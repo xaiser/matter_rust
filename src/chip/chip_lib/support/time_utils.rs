@@ -1,13 +1,17 @@
-mod base {
-    pub(super) const K_YEARS_PER_CENTURY: u8 = 100;
-    pub(super) const K_LEAP_YEAR_INTERVAL: u8 = 4;
-    pub(super) const K_DAYS_PER_STANDARD_YEAR: u16 = 365;
-    pub(super) const K_HOURS_PER_DAY: u8 = 24;
-    pub(super) const K_MINUTES_PER_HOUR: u8 = 60;
-    pub(super) const K_SECONDS_PER_MINUTE: u8 = 60;
-    pub(super) const K_SECONDS_PER_HOUR: u16 = K_SECONDS_PER_MINUTE as u16 * K_MINUTES_PER_HOUR as u16;
-    pub(super) const K_SECONDS_PER_DAY: u32 = K_SECONDS_PER_HOUR as u32 * K_HOURS_PER_DAY as u32;
+pub mod base {
+    pub const K_YEARS_PER_CENTURY: u8 = 100;
+    pub const K_LEAP_YEAR_INTERVAL: u8 = 4;
+    pub const K_MONTHS_PER_YEAR: u8 = 12;
+    pub const K_MAX_DAYS_PER_MONTH: u8 = 31;
+    pub const K_DAYS_PER_STANDARD_YEAR: u16 = 365;
+    pub const K_HOURS_PER_DAY: u8 = 24;
+    pub const K_MINUTES_PER_HOUR: u8 = 60;
+    pub const K_SECONDS_PER_MINUTE: u8 = 60;
+    pub const K_SECONDS_PER_HOUR: u16 = K_SECONDS_PER_MINUTE as u16 * K_MINUTES_PER_HOUR as u16;
+    pub const K_SECONDS_PER_DAY: u32 = K_SECONDS_PER_HOUR as u32 * K_HOURS_PER_DAY as u32;
 }
+
+pub use base::*;
 
 mod chip_epoch {
     pub(super) const K_BASE_YEAR: u16 = 2000;
@@ -47,7 +51,7 @@ enum Month {
  * NOTE: This is based on the math described in http://howardhinnant.github.io/date_algorithms.html.
  */
 fn march_based_month_to_day_of_year(month: u8) -> u16 {
-    ((153 * month + 2) / 5) as u16
+    ((153 * month as u16 + 2) / 5) as u16
 }
 
 /* Converts a March-1st based day of year (0=March 1st, 1=March 2nd, etc.) to a March-based month number (0=March, 1=April, etc.).
@@ -99,7 +103,7 @@ pub fn days_since_unix_epoch_to_calendar_date(mut days_since_epoch: u32) -> Resu
     let year_of_cycle: u16 = ((day_of_cycle - day_of_cycle / 1460 + day_of_cycle / 36524 - day_of_cycle / 146906) / base::K_DAYS_PER_STANDARD_YEAR as u32) as u16;
 
     // Compute the relative day with the year.
-    let day_of_year: u16 = (day_of_cycle - (year_of_cycle * base::K_DAYS_PER_STANDARD_YEAR + year_of_cycle / (base::K_LEAP_YEAR_INTERVAL as u16) - year_of_cycle / (base::K_YEARS_PER_CENTURY as u16)) as u32) as u16;
+    let day_of_year: u16 = (day_of_cycle as u32 - (year_of_cycle as u32 * base::K_DAYS_PER_STANDARD_YEAR as u32 + year_of_cycle as u32 / (base::K_LEAP_YEAR_INTERVAL as u32) - year_of_cycle as u32/ (base::K_YEARS_PER_CENTURY as u32)) as u32) as u16;
 
     // Compute a March-based month number (i.e. 0=March...11=February) from the day of year.
     let month = march_based_day_of_year_to_month(day_of_year);
@@ -133,9 +137,78 @@ pub fn days_since_unix_epoch_to_calendar_date(mut days_since_epoch: u32) -> Resu
  *    when it is called from ChipEpochToCalendarTime().
  */
 fn seconds_since_unix_epoch_to_calendar_time(seconds_since_epoch: u64) -> (u16, u8, u8, u8, u8, u8) {
-    (0, 0, 0, 0, 0, 0)
+    let days_since_epoch: u32 = (seconds_since_epoch / (base::K_SECONDS_PER_DAY as u64)) as u32;
+    // to simulate static assert
+    const _: () = {
+        if ((u32::MAX as u64) + chip_epoch::K_SECONDS_SINCE_UNIX_EPOCH) / (base::K_SECONDS_PER_DAY as u64) > u64::MAX {
+            panic!("days_since_epoch would overflow");
+        }
+    };
+
+    let mut time_of_day: u32 = (seconds_since_epoch - (days_since_epoch as u64 * base::K_SECONDS_PER_DAY as u64)) as u32;
+
+    // Note: This call to DaysSinceUnixEpochToCalendarDate can't fail, because we
+    // can't overflow a uint16_t year with a muximum possible value of the
+    // secondsSinceEpoch input.
+    const _1: () = {
+        if ((u32::MAX as u64) + chip_epoch::K_SECONDS_SINCE_UNIX_EPOCH) / (base::K_SECONDS_PER_DAY as u64 * base::K_DAYS_PER_STANDARD_YEAR as u64) + 1 > u16::MAX as u64 {
+            panic!("what happened to our eary or day lengths?");
+        }
+    };
+
+    let (year, month, day_of_month) = days_since_unix_epoch_to_calendar_date(days_since_epoch).unwrap();
+
+    let hour: u8 = (time_of_day / base::K_SECONDS_PER_HOUR as u32) as u8;
+    time_of_day -= (hour as u16 * base::K_SECONDS_PER_HOUR) as u32;
+    let minute: u8 = (time_of_day / base::K_SECONDS_PER_MINUTE as u32) as u8;
+    time_of_day -= (minute * base::K_SECONDS_PER_MINUTE) as u32;
+    let second: u8 = time_of_day as u8;
+    
+    (year, month, day_of_month, hour, minute, second)
 }
 
-pub fn chip_epoch_to_calender_time(chip_epoch_time: u32) -> (u16, u8, u8, u8, u8, u8) {
+pub fn chip_epoch_to_calendar_time(chip_epoch_time: u32) -> (u16, u8, u8, u8, u8, u8) {
     return seconds_since_unix_epoch_to_calendar_time(chip_epoch_time as u64 + chip_epoch::K_SECONDS_SINCE_UNIX_EPOCH);
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chip_epoch_to_calendar_time_1() {
+        let (year, month, day_of_month, hour, minute, second) = chip_epoch_to_calendar_time(1);
+
+        assert_eq!(2000, year);
+        assert_eq!(1, month);
+        assert_eq!(1, day_of_month);
+        assert_eq!(0, hour);
+        assert_eq!(0, minute);
+        assert_eq!(1, second);
+    }
+
+    #[test]
+    fn chip_epoch_to_calendar_time_2() {
+        let (year, month, day_of_month, hour, minute, second) = chip_epoch_to_calendar_time(2);
+
+        assert_eq!(2000, year);
+        assert_eq!(1, month);
+        assert_eq!(1, day_of_month);
+        assert_eq!(0, hour);
+        assert_eq!(0, minute);
+        assert_eq!(2, second);
+    }
+
+    #[test]
+    fn chip_epoch_to_calendar_time_1_day() {
+        let (year, month, day_of_month, hour, minute, second) = chip_epoch_to_calendar_time(3600*24);
+
+        assert_eq!(2000, year);
+        assert_eq!(1, month);
+        assert_eq!(2, day_of_month);
+        assert_eq!(0, hour);
+        assert_eq!(0, minute);
+        assert_eq!(0, second);
+    }
+} // end of tests
