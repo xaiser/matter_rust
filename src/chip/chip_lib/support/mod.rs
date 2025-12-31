@@ -12,6 +12,7 @@ pub mod logging;
 pub mod object_life_cycle;
 pub mod pool;
 pub mod bytes_to_hex;
+pub mod time_utils;
 
 #[cfg(test)]
 pub mod test_persistent_storage;

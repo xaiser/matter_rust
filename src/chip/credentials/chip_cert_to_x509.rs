@@ -1,4 +1,5 @@
 use crate::chip::{
+    asn1::Oid,
     chip_lib::{
         core::{
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
@@ -49,8 +50,9 @@ pub fn decode_chip_cert(
     return decode_chip_cert_with_reader(&mut reader, &mut writer, cert_data, decode_flag);
 }
 
-pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(
+pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     reader.next_type_tag(
@@ -63,7 +65,12 @@ pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>>(
         Err(chip_error_no_memory!())
     );
 
+    // TODO: use the public key algo oid
+    writer.put_object_id(cert_data.m_sig_algo_OID as Oid)?;
+
     cert_data.m_public_key.copy_from_slice(raw_bytes);
+
+    writer.put_bit_string(0, &cert_data.m_public_key[..])?;
 
     chip_ok!()
 }
@@ -237,7 +244,7 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
 
 pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
-    _writer: &mut Writer,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
     decode_flag: Option<CertDecodeFlags>,
 ) -> ChipErrorResult {
@@ -259,7 +266,7 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Write
     cert_data.m_subject_dn.decode_from_tlv(reader)?;
 
     // get public key
-    decode_subject_public_key_info(reader, cert_data)?;
+    decode_subject_public_key_info(reader, writer, cert_data)?;
 
     // get validity
     // not before time

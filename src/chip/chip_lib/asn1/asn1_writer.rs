@@ -21,6 +21,7 @@ pub trait Asn1Writer {
     }
 
     fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult;
+    fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult;
 }
 
 mod asn1_writer {
@@ -56,6 +57,10 @@ mod asn1_writer {
         }
 
         fn put_object_id_raw(&mut self, _value: &[u8]) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult {
             chip_ok!()
         }
     }
@@ -175,6 +180,15 @@ mod asn1_writer {
 
         fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult {
             return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as u8, Asn1UniversalTag::Kasn1UniversalTagObjectId as Tag, false, value);
+        }
+
+        fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult {
+            self.encode_head(Asn1TagClasses::Kasn1TagClassUniversal as Class, Asn1UniversalTag::Kasn1UniversalTagBitString as Tag, false, (encoded_bits.len() + 1) as i32)?;
+            if let Some(m_buf) = self.m_buf.as_mut() {
+                m_buf[self.m_write_point] = unused_bit_count;
+                self.m_write_point += 1;
+            }
+            return self.write_data(encoded_bits);
         }
     }
 
