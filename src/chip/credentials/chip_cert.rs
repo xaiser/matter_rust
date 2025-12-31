@@ -1,6 +1,7 @@
 use crate::chip::{
-    asn1::{get_oid, Asn1Oid, Oid, OidCategory},
+    asn1::{get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag},
     chip_lib::{
+        asn1::asn1_writer::Asn1Writer,
         core::{
             case_auth_tag::{is_valid_case_auth_tag, CaseAuthTag},
             chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
@@ -10,7 +11,10 @@ use crate::chip::{
             tlv_tags::{context_tag, is_context_tag, tag_num_from_tag, Tag},
             tlv_types::TlvType,
         },
-        support::default_string::DefaultString,
+        support::{
+            bytes_to_hex::{uint64_to_hex, uint32_to_hex, HexFlags},
+            default_string::DefaultString,
+        },
     },
     //credentials::chip_cert_to_x509::decode_chip_cert as decode_chip_cert,
     crypto::{
@@ -35,6 +39,7 @@ use crate::chip_error_not_implemented;
 use crate::chip_error_unsupported_signature_type;
 use crate::chip_error_wrong_cert_dn;
 use crate::chip_error_wrong_node_id;
+use crate::chip_error_unsupported_cert_format;
 
 // re-export
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert;
@@ -205,6 +210,8 @@ pub(crate) fn tag_not_after() -> Tag {
 
 pub(super) mod internal {
     pub const K_NETWORK_IDENTITY_CN: &str = "*";
+    pub const K_CHIP_64BIT_ATTR_UTF8_LENGTH: usize = 16;
+    pub const K_CHIP_32BIT_ATTR_UTF8_LENGTH: usize = 8;
 }
 
 pub fn verify_cert_signature(
@@ -494,19 +501,56 @@ impl ChipDN {
         chip_ok!()
     }
 
-    /*
-    pub decode_to_asn1<Writer: Asn1Writer>(&self, writer: &mut Writer) -> ChipErrorResult {
-        let rdn_count = self.rdn_count();
-        for i in 0..rdn_count {
+    pub fn encode_to_asn1<Writer: Asn1Writer>(&self, writer: &mut Writer) -> ChipErrorResult {
+        let rdn_count = self.rdn_count() as usize;
+        for i in 0usize..rdn_count {
             let attr_oid = self.rdn[i].m_attr_oid;
+            let mut chip_attr_str = [0u8; internal::K_CHIP_64BIT_ATTR_UTF8_LENGTH];
+            let asn1_tag: Asn1UniversalTag;
+            let asn1_attr: &str;
 
             if is_chip_64bit_dn_attr(attr_oid) {
+                uint64_to_hex(self.rdn[i].m_chip_val, &mut chip_attr_str, HexFlags::Kuppercase)?;
+                asn1_tag = Asn1UniversalTag::Kasn1UniversalTagUTF8String;
+                if let Ok(s) = core::str::from_utf8(&chip_attr_str[..]) {
+                    asn1_attr = s;
+                } else {
+                    return Err(chip_error_invalid_argument!());
+                }
+            } else if is_chip_32bit_dn_attr(attr_oid) {
+                uint32_to_hex(self.rdn[i].m_chip_val as u32, &mut chip_attr_str, HexFlags::Kuppercase)?;
+                asn1_tag = Asn1UniversalTag::Kasn1UniversalTagUTF8String;
+                if let Ok(s) = core::str::from_utf8(&chip_attr_str[..internal::K_CHIP_32BIT_ATTR_UTF8_LENGTH]) {
+                    asn1_attr = s;
+                } else {
+                    return Err(chip_error_invalid_argument!());
+                }
+            } else {
+                if let Some(s) = self.rdn[i].m_string.str() {
+                    asn1_attr = s;
+                } else {
+                    return Err(chip_error_invalid_argument!());
+                }
+
+                if attr_oid == Asn1Oid::KoidAttributeTypeDomainComponent.into() {
+                    asn1_tag = Asn1UniversalTag::Kasn1UniversalTagIA5String;
+                } else {
+                    asn1_tag = if self.rdn[i].m_attr_is_printable_string {
+                        Asn1UniversalTag::Kasn1UniversalTagPrintableString
+                    } else {
+                        Asn1UniversalTag::Kasn1UniversalTagUTF8String
+                    }
+                }
             }
+
+            writer.put_object_id(attr_oid)?;
+            let _ = u16::try_from(asn1_attr.len()).map_err(|_| chip_error_unsupported_cert_format!())?;
+
+            writer.put_string(asn1_tag as Asn1Tag, asn1_attr)?;
         }
 
         chip_ok!()
     }
-    */
 
     pub fn is_equal(&self, other: &Self) -> bool {
         let rdn_count = self.rdn_count();
@@ -863,11 +907,14 @@ pub(super) mod tests {
 
     mod dn {
         use super::super::*;
-        use crate::chip::chip_lib::core::{
-            tlv_reader::{TlvContiguousBufferReader, TlvReader},
-            tlv_tags::{self, is_context_tag, tag_num_from_tag},
-            tlv_types::{self, TlvType},
-            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        use crate::chip::chip_lib::{
+            asn1::asn1_writer::{TestAsn1Writer, Asn1Writer},
+            core::{
+                tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                tlv_tags::{self, is_context_tag, tag_num_from_tag},
+                tlv_types::{self, TlvType},
+                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+            },
         };
 
         #[test]
@@ -1386,6 +1433,55 @@ pub(super) mod tests {
                 dn.get_cert_type()
                     .is_ok_and(|t| t == CertType::KnotSpecified)
             );
+        }
+
+        #[test]
+        fn encode_to_asn1_oid64_correctlly() {
+            let mut dn = ChipDN::default();
+            dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1);
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0u8; 128];
+            writer.init(&mut buf);
+            assert!(dn.encode_to_asn1(&mut writer).is_ok());
+            let expected_len =
+                // oid: header + lenght + oid
+                1 + 1 + 2 +
+                // value: header + length + oid value expend to string
+                1 + 1 + (core::mem::size_of::<u64>() * 2);
+            assert_eq!(expected_len, writer.get_length_written());
+
+        }
+
+        #[test]
+        fn encode_to_asn1_oid32_correctlly() {
+            let mut dn = ChipDN::default();
+            dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterCASEAuthTag as Oid, 1);
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0u8; 128];
+            writer.init(&mut buf);
+            assert!(dn.encode_to_asn1(&mut writer).is_ok());
+            let expected_len =
+                // oid: header + lenght + oid
+                1 + 1 + 2 +
+                // value: header + length + oid value expend to string
+                1 + 1 + (core::mem::size_of::<u32>() * 2);
+            assert_eq!(expected_len, writer.get_length_written());
+        }
+
+        #[test]
+        fn encode_to_asn1_oid_correctlly() {
+            let mut dn = ChipDN::default();
+            dn.add_attribute_string(Asn1Oid::KoidAttributeTypeDomainComponent as Oid, "1", false);
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0u8; 128];
+            writer.init(&mut buf);
+            assert!(dn.encode_to_asn1(&mut writer).is_ok());
+            let expected_len =
+                // oid: header + lenght + oid
+                1 + 1 + 2 +
+                // value: header + length + string
+                1 + 1 + 1;
+            assert_eq!(expected_len, writer.get_length_written());
         }
     } // end of dn
 

@@ -148,4 +148,11 @@ mod test {
         let s = DefaultString::<3>::from(a);
         assert_eq!(a, s.str().unwrap_or(&""));
     }
+
+    #[test]
+    fn from_str_with_nul_ternimate() {
+        let a = "123\0";
+        let s = DefaultString::<4>::from(a);
+        assert_eq!(a, s.str().unwrap_or(&""));
+    }
 }

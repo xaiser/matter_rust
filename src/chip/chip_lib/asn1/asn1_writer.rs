@@ -1,5 +1,5 @@
 use crate::{
-    chip::asn1::{Tag, Class},
+    chip::asn1::{Tag, Class, Oid},
     ChipErrorResult,
 };
 
@@ -14,6 +14,13 @@ pub trait Asn1Writer {
     fn get_length_written(&self) -> usize;
     fn put_value(&mut self, class: Class, tag: Tag, is_constructed: bool, value: &[u8]) -> ChipErrorResult;
     fn put_string(&mut self, tag: Tag, value: &str) -> ChipErrorResult;
+
+    fn put_object_id(&mut self, oid: Oid) -> ChipErrorResult {
+        let bytes = oid.to_be_bytes();
+        return self.put_object_id_raw(&bytes);
+    }
+
+    fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult;
 }
 
 mod asn1_writer {
@@ -25,7 +32,7 @@ mod asn1_writer {
         asn1_error_invalid_state,
         verify_or_return_error,
         verify_or_return_value,
-        chip::asn1::{Tag, Class, Asn1TagClasses},
+        chip::asn1::{Oid, Tag, Class, Asn1TagClasses, Asn1UniversalTag},
         ChipErrorResult,
         chip_ok,
     };
@@ -45,6 +52,10 @@ mod asn1_writer {
         }
 
         fn put_string(&mut self, tag: Tag, value: &str) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn put_object_id_raw(&mut self, _value: &[u8]) -> ChipErrorResult {
             chip_ok!()
         }
     }
@@ -160,6 +171,10 @@ mod asn1_writer {
 
         fn put_string(&mut self, tag: Tag, value: &str) -> ChipErrorResult {
             return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as u8, tag, false, value.as_bytes());
+        }
+
+        fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult {
+            return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as u8, Asn1UniversalTag::Kasn1UniversalTagObjectId as Tag, false, value);
         }
     }
 

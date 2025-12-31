@@ -60,39 +60,49 @@ bitflags! {
  * @return CHIP_NO_ERROR on success
  */
 
-pub fn bytes_to_hex(src: &[u8], dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
-    /*
-    let mut tmp = DefaultString::<10>::const_default();
-
-    if let Ok(hex_str) = write!(&mut tmp, "0x{:x}", dest) {
+fn nibble_to_hex(nibble: u8, uppercase: bool) -> u8 {
+    let x = (nibble & 0x0Fu8) as u8;
+    if x >= 10 {
+        return (x - 10) + { if uppercase { b'A' } else { b'a' } };
     }
-    */
+
+    return x + b'0';
+}
+
+pub fn bytes_to_hex(src: &[u8], dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
+    let src_size = src.len();
+    if src_size > ((usize::MAX - 1) / 2) {
+        return Err(chip_error_invalid_argument!());
+    }
+
+    let nul_terminate = flags.intersects(HexFlags::KnullTerminate);
+    let expected_output_size = src_size * 2 + { if nul_terminate { 1 } else { 0 } };
+    if dest.len() < expected_output_size {
+        return Err(chip_error_buffer_too_small!());
+    }
+
+    let uppercase = flags.intersects(HexFlags::Kuppercase);
+
+    for i in 0..src_size {
+        dest[i * 2] = nibble_to_hex((src[i] >> 4) & 0x0Fu8, uppercase);
+        dest[i * 2 + 1] = nibble_to_hex((src[i] >> 0) & 0x0Fu8, uppercase);
+    }
+
+    if nul_terminate {
+        dest[expected_output_size - 1] = b'\0';
+    }
+
     chip_ok!()
 }
 
 pub fn uint64_to_hex(src: u64, dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
-    const MAX_LEN: usize = size_of::<u64>() + 1;
-    let mut tmp = DefaultString::<MAX_LEN>::const_default();
+    let bytes = src.to_be_bytes();
+    return bytes_to_hex(&bytes, dest, flags);
+}
 
-    if write!(&mut tmp, "{:x}", src).is_ok() {
-        if dest.len() >= tmp.len() {
-            dest[..tmp.len()].copy_from_slice(tmp.const_bytes());
-        } else {
-            return Err(chip_error_buffer_too_small!());
-        }
-    } else {
-        return Err(chip_error_invalid_argument!());
-    }
-
-    if flags.intersects(HexFlags::KnullTerminate) {
-        if dest.len() >= (tmp.len() + 1) {
-            dest[tmp.len()] = b'\0';
-        } else {
-            return Err(chip_error_buffer_too_small!());
-        }
-    }
-
-    chip_ok!()
+pub fn uint32_to_hex(src: u32, dest: &mut [u8], flags: HexFlags) -> ChipErrorResult {
+    let bytes = src.to_be_bytes();
+    return bytes_to_hex(&bytes, dest, flags);
 }
 
 #[cfg(test)]
@@ -104,10 +114,33 @@ mod tests {
     fn uint64_to_hex_correctlly() {
         let mut buf = [0u8; 32];
         let value = 0x1u64;
-        const SIZE: usize = size_of::<u64>();
+        const SIZE: usize = size_of::<u64>() * 2;
         let mut expected_output = [b'0'; SIZE];
         expected_output[SIZE - 1] = b'1';
-        assert!(uint64_to_hex(value, &mut buf, HexFlags::Knone).is_ok());
+        assert!(uint64_to_hex(value, &mut buf, HexFlags::Knone).inspect_err(|e| println!("{}", e)).is_ok());
+        assert_eq!(expected_output[..SIZE], buf[..SIZE]);
+    }
+
+    #[test]
+    fn uint64_to_hex_uppercase_correctlly() {
+        let mut buf = [0u8; 32];
+        let value = 0xau64;
+        const SIZE: usize = size_of::<u64>() * 2;
+        let mut expected_output = [b'0'; SIZE];
+        expected_output[SIZE - 1] = b'A';
+        assert!(uint64_to_hex(value, &mut buf, HexFlags::Kuppercase).inspect_err(|e| println!("{}", e)).is_ok());
+        assert_eq!(expected_output[..SIZE], buf[..SIZE]);
+    }
+
+    #[test]
+    fn uint64_to_hex_ternimate_correctlly() {
+        let mut buf = [0u8; 32];
+        let value = 0x1u64;
+        const SIZE: usize = size_of::<u64>() * 2 + 1;
+        let mut expected_output = [b'0'; SIZE];
+        expected_output[SIZE - 2] = b'1';
+        expected_output[SIZE - 1] = b'\0';
+        assert!(uint64_to_hex(value, &mut buf, HexFlags::KnullTerminate).inspect_err(|e| println!("{}", e)).is_ok());
         assert_eq!(expected_output[..SIZE], buf[..SIZE]);
     }
 } // end of tests
