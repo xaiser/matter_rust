@@ -1,5 +1,5 @@
 use crate::chip::{
-    asn1::{Oid, Asn1UniversalTime, Asn1UniversalTimeString},
+    asn1::{Oid, Asn1UniversalTime, Asn1UniversalTimeString, Asn1TagClasses, Class},
     chip_lib::{
         core::{
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
@@ -7,12 +7,16 @@ use crate::chip::{
             tlv_types::TlvType,
         },
         support::time_utils,
-        asn1::asn1_writer::{Asn1Writer, NullAsn1Writer},
+        asn1::asn1_writer::{Asn1Writer, NullAsn1Writer, TestAsn1Writer},
     },
     credentials::chip_cert::{
+        internal::{
+            K_MAX_CHIP_CERT_DECODE_BUF_LENGTH,
+        },
         tag_not_after, tag_not_before, CertDecodeFlags, CertFlags, ChipCertExtensionTag,
         ChipCertTag, ChipCertificateData, KeyPurposeFlags, KeyUsageFlags, chip_epoch_to_asn1_time,
     },
+    crypto::crypto_pal::hash_sha256,
 };
 
 use crate::chip_core_error;
@@ -46,9 +50,7 @@ pub fn decode_chip_cert(
 
     reader.init(cert.as_ptr(), cert.len());
 
-    let mut writer = NullAsn1Writer::default();
-
-    return decode_chip_cert_with_reader(&mut reader, &mut writer, cert_data, decode_flag);
+    return decode_chip_cert_with_reader(&mut reader, cert_data, decode_flag);
 }
 
 pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
@@ -76,8 +78,9 @@ pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>, Writer: Asn1Wri
     chip_ok!()
 }
 
-pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'a>>(
+pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     cert_data
@@ -96,11 +99,14 @@ pub fn decode_convert_authority_key_identifier_extension<'a, Reader: TlvReader<'
 
     cert_data.m_auth_key_id.copy_from_slice(key);
 
+    writer.put_octet_string_cls_tag(Asn1TagClasses::Kasn1TagClassContextSpecific as Class, 0, &cert_data.m_auth_key_id[..])?;
+
     chip_ok!()
 }
 
-pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>>(
+pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     cert_data
@@ -119,11 +125,14 @@ pub fn decode_convert_subject_key_identifier_extension<'a, Reader: TlvReader<'a>
 
     cert_data.m_subject_key_id.copy_from_slice(key);
 
+    writer.put_octet_string(&cert_data.m_subject_key_id[..])?;
+
     chip_ok!()
 }
 
-pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(
+pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     cert_data
@@ -141,11 +150,14 @@ pub fn decode_convert_key_usage_extension<'a, Reader: TlvReader<'a>>(
         }
     }
 
+    writer.put_bit_string_with_value(key_usage_bits.into())?;
+
     chip_ok!()
 }
 
-pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(
+pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    _writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     cert_data
@@ -182,8 +194,9 @@ pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>>(
     chip_ok!()
 }
 
-pub fn decode_extension<'a, Reader: TlvReader<'a>>(
+pub fn decode_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     let tlv_tag = reader.get_tag();
@@ -197,19 +210,19 @@ pub fn decode_extension<'a, Reader: TlvReader<'a>>(
     } else {
         match extension_tag_num {
             v if v == ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u32 => {
-                decode_convert_authority_key_identifier_extension(reader, cert_data)?;
+                decode_convert_authority_key_identifier_extension(reader, writer, cert_data)?;
             }
             v if v == ChipCertExtensionTag::KtagSubjectKeyIdentifier as u32 => {
-                decode_convert_subject_key_identifier_extension(reader, cert_data)?;
+                decode_convert_subject_key_identifier_extension(reader, writer, cert_data)?;
             }
             v if v == ChipCertExtensionTag::KtagKeyUsage as u32 => {
-                decode_convert_key_usage_extension(reader, cert_data)?;
+                decode_convert_key_usage_extension(reader, writer, cert_data)?;
             }
             v if v == ChipCertExtensionTag::KtagBasicConstraints as u32 => {
                 return Err(chip_error_not_implemented!());
             }
             v if v == ChipCertExtensionTag::KtagExtendedKeyUsage as u32 => {
-                decode_convert_extended_key_usage_extension(reader, cert_data)?;
+                decode_convert_extended_key_usage_extension(reader, writer, cert_data)?;
             }
             _ => {
                 return Err(chip_error_unsupported_cert_format!());
@@ -220,8 +233,9 @@ pub fn decode_extension<'a, Reader: TlvReader<'a>>(
     chip_ok!()
 }
 
-pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
+pub fn decode_extensions<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     reader.next_type_tag(
@@ -233,7 +247,7 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
     let mut err = chip_error_end_of_tlv!();
 
     while reader.next().inspect_err(|e| err = *e).is_ok() {
-        decode_extension(reader, cert_data)?;
+        decode_extension(reader, writer, cert_data)?;
     }
 
     verify_or_return_error!(err == chip_error_end_of_tlv!(), Err(err));
@@ -243,11 +257,10 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>>(
     chip_ok!()
 }
 
-pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
+pub fn decode_chip_cert_with_reader_writer<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
     writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
-    decode_flag: Option<CertDecodeFlags>,
 ) -> ChipErrorResult {
     if reader.get_type() == TlvType::KtlvTypeNotSpecified {
         reader.next()?;
@@ -282,11 +295,34 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Write
     writer.put_time(&asn1_time)?;
 
     // get extensions
-    decode_extensions(reader, cert_data)?;
+    decode_extensions(reader, writer, cert_data)?;
 
     reader.verify_end_of_container()?;
 
     reader.exit_container(container_type)?;
+
+    chip_ok!()
+}
+
+pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
+    reader: &mut Reader,
+    cert_data: &mut ChipCertificateData,
+    decode_flag: Option<CertDecodeFlags>,
+) -> ChipErrorResult {
+    if decode_flag.as_ref().is_some_and(|f| f.intersects(CertDecodeFlags::KgenerateTBSHash)) {
+        let mut writer = TestAsn1Writer::default();
+        let mut buf = [0u8; K_MAX_CHIP_CERT_DECODE_BUF_LENGTH];
+        writer.init(&mut buf);
+        decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
+        if let Some(written_buf) = writer.const_raw_bytes() {
+            hash_sha256(&written_buf[..writer.get_length_written()], &mut cert_data.m_tbs_hash[..])?;
+        }
+        cert_data.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+    } else {
+        let mut writer = NullAsn1Writer::default();
+        decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
+    }
+
 
     if let Some(flags) = decode_flag {
         if flags.contains(CertDecodeFlags::KisTrustAnchor) {
@@ -301,10 +337,13 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Write
 mod tests {
     use super::*;
     use crate::chip::{
-        chip_lib::core::{
-            tlv_tags::{self, anonymous_tag},
-            tlv_types::{self, TlvType},
-            tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+        chip_lib::{
+            asn1::asn1_writer::{NullAsn1Writer, TestAsn1Writer},
+            core::{
+                tlv_tags::{self, anonymous_tag},
+                tlv_types::{self, TlvType},
+                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
+            },
         },
         credentials::chip_cert,
     };
@@ -367,7 +406,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert_eq!(1, cert.m_auth_key_id[0]);
@@ -434,7 +475,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_err());
         // still setup
@@ -497,7 +540,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert_eq!(1, cert.m_subject_key_id[0]);
@@ -568,7 +613,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert_eq!(KeyUsageFlags::KdigitalSignature, cert.m_key_usage_flags);
@@ -632,7 +679,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(!decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(!decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
     }
@@ -705,7 +754,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert_eq!(KeyPurposeFlags::KserverAuth, cert.m_key_purpose_flags);
@@ -784,7 +835,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert!(cert
@@ -860,7 +913,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(!decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(!decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
     }
@@ -930,7 +985,9 @@ mod tests {
             .is_ok());
         let container_type = reader.enter_container();
 
-        assert!(decode_extensions(&mut reader, &mut cert)
+        let mut writer = NullAsn1Writer::default();
+
+        assert!(decode_extensions(&mut reader, &mut writer, &mut cert)
             .inspect_err(|e| println!("{}", e))
             .is_ok());
         assert_eq!(1, cert.m_auth_key_id[0]);

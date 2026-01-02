@@ -867,6 +867,18 @@ pub fn verify_certificate_signing_request(
 }
 
 pub fn hash_sha256(data: &[u8], out_buffer: &mut [u8]) -> ChipErrorResult {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+
+    let result = hasher.finalize();
+
+    let result_slice = result.as_slice();
+    let result_size = result_slice.len();
+
+    verify_or_return_error!(out_buffer.len() >= result_size, Err(chip_error_buffer_too_small!()));
+
+    out_buffer[..result_size].copy_from_slice(result_slice);
+
     chip_ok!()
 }
 

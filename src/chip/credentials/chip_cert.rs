@@ -214,6 +214,7 @@ pub(super) mod internal {
     pub const K_CHIP_64BIT_ATTR_UTF8_LENGTH: usize = 16;
     pub const K_CHIP_32BIT_ATTR_UTF8_LENGTH: usize = 8;
     pub const K_X509_NO_WELL_DEFINED_EXPIRATION_DATE_YEAR: u16 = 9999;
+    pub const K_MAX_CHIP_CERT_DECODE_BUF_LENGTH: usize = 600;
 }
 
 pub fn verify_cert_signature(

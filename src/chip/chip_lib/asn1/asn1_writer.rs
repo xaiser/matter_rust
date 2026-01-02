@@ -23,7 +23,36 @@ pub trait Asn1Writer {
 
     fn put_object_id_raw(&mut self, value: &[u8]) -> ChipErrorResult;
     fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult;
+    fn put_bit_string_with_value(&mut self, value: u32) -> ChipErrorResult;
     fn put_time(&mut self, val: &Asn1UniversalTime) -> ChipErrorResult;
+    fn put_octet_string(&mut self, value: &[u8]) -> ChipErrorResult;
+    fn put_octet_string_cls_tag(&mut self, cls: Class, tag: Tag, value: &[u8]) -> ChipErrorResult;
+    fn const_raw_bytes(&self) -> Option<&[u8]>;
+}
+
+pub fn highest_bit(mut v: u32) -> u8 {
+    let mut highest_bit = 0u32;
+
+    if v > 0xFFFFu32 {
+        highest_bit = 16;
+        v >>= 16;
+    }
+    if v > 0xFFu32 {
+        highest_bit |= 8;
+        v >>= 8;
+    }
+    if v > 0xFu32 {
+        highest_bit |= 4;
+        v >>= 4;
+    }
+    if v > 0x03u32 {
+        highest_bit |= 2;
+        v >>= 2;
+    }
+    highest_bit |= v >> 1;
+
+
+    return highest_bit as u8;
 }
 
 mod asn1_writer {
@@ -66,8 +95,24 @@ mod asn1_writer {
             chip_ok!()
         }
 
+        fn put_bit_string_with_value(&mut self, _value: u32) -> ChipErrorResult {
+            chip_ok!()
+        }
+
         fn put_time(&mut self, _val: &Asn1UniversalTime) -> ChipErrorResult {
             chip_ok!()
+        }
+
+        fn put_octet_string(&mut self, _value: &[u8]) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn put_octet_string_cls_tag(&mut self, _cls: Class, _tag: Tag, _value: &[u8]) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn const_raw_bytes(&self) -> Option<&[u8]> {
+            None
         }
     }
 
@@ -197,6 +242,48 @@ mod asn1_writer {
             return self.write_data(encoded_bits);
         }
 
+        fn put_bit_string_with_value(&mut self, mut value: u32) -> ChipErrorResult {
+            let mut len: u8 = 0;
+
+            if value == 0 {
+                len = 1;
+            } else if value < 256 {
+                len = 2;
+            } else if value < 65535 {
+                len = 3;
+            } else if value < (1 << 24) {
+                len = 4;
+            } else {
+                len = 5;
+            }
+
+            self.encode_head(Asn1TagClasses::Kasn1TagClassUniversal as Class, Asn1UniversalTag::Kasn1UniversalTagBitString as Tag, false, len as i32)?;
+
+            if let Some(m_buf) = self.m_buf.as_mut() {
+                if value == 0 {
+                    m_buf[self.m_write_point] = 0;
+                } else {
+                    m_buf[self.m_write_point + 1] = (value as u8).reverse_bits();
+                    if len >= 3 {
+                        value >>= 8;
+                        m_buf[self.m_write_point + 2] = (value as u8).reverse_bits();
+                        if len >= 4 {
+                            value >>= 8;
+                            m_buf[self.m_write_point + 3] = (value as u8).reverse_bits();
+                            if len >= 5 {
+                                value >>= 8;
+                                m_buf[self.m_write_point + 4] = (value as u8).reverse_bits();
+                            }
+                        } 
+                    }
+                    m_buf[self.m_write_point] = (7 - highest_bit(value)) as u8;
+                }
+                self.m_write_point += len as usize;
+            }
+
+            chip_ok!()
+        }
+
         fn put_time(&mut self, val: &Asn1UniversalTime) -> ChipErrorResult {
             let time_string = val.export_to_asn1_time_string().map_err(|_| asn1_error_underrun!())?;
             let tag: Tag;
@@ -208,6 +295,18 @@ mod asn1_writer {
             }
 
             return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as Class, tag, false, time_string.const_bytes());
+        }
+
+        fn put_octet_string(&mut self, value: &[u8]) -> ChipErrorResult {
+            self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as Class, Asn1UniversalTag::Kasn1UniversalTagOctetString as Tag, false, value)
+        }
+
+        fn put_octet_string_cls_tag(&mut self, cls: Class, tag: Tag, value: &[u8]) -> ChipErrorResult {
+            self.put_value(cls, tag, false, value)
+        }
+
+        fn const_raw_bytes(&self) -> Option<&[u8]> {
+            self.m_buf.as_deref()
         }
     }
 

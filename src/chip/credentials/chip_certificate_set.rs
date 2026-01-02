@@ -161,20 +161,17 @@ mod chip_certificate_set {
 
             reader.init(chip_cert.as_ptr(), chip_cert.len());
 
-            let mut writer = NullAsn1Writer::default();
-
-            return self.load_cert_reader(&mut reader, &mut writer, decode_flags, chip_cert);
+            return self.load_cert_reader(&mut reader, decode_flags, chip_cert);
         }
 
-        pub fn load_cert_reader<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
+        pub fn load_cert_reader<'a, Reader: TlvReader<'a>>(
             &mut self,
             reader: &mut Reader,
-            writer: &mut Writer,
             decode_flags: CertDecodeFlags,
             chip_cert: &[u8],
         ) -> ChipErrorResult {
             let mut cert = ChipCertificateData::default();
-            decode_chip_cert_with_reader(reader, writer, &mut cert, Some(decode_flags))?;
+            decode_chip_cert_with_reader(reader, &mut cert, Some(decode_flags))?;
 
             // Verify the cert has both the Subject Key Id and Authority Key Id extensions present.
             // Only certs with both these extensions are supported for the purposes of certificate validation.
