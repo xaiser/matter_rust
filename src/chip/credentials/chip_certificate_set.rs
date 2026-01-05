@@ -255,12 +255,15 @@ mod chip_certificate_set {
             return self.validate_cert_depth(cert, context, 0);
         }
 
-        pub fn validate_cert_depth<'a, Policy: CertificateValidityPolicy>(
+        pub fn validate_cert_depth<'a, 'b, Policy: CertificateValidityPolicy>(
             &'a self,
             cert: &'a ChipCertificateData,
-            context: &mut ValidationContext<'a, Policy>,
+            context: &mut ValidationContext<'b, Policy>,
             depth: u8,
-        ) -> ChipErrorResult {
+        ) -> ChipErrorResult 
+            where
+                'a: 'b,
+        {
             let cert_type = cert.m_subject_dn.get_cert_type()?;
 
             verify_or_return_error!(
@@ -457,13 +460,16 @@ mod chip_certificate_set {
             return verify_cert_signature(cert, ca_cert);
         }
 
-        pub fn find_valid_cert<'a, Policy: CertificateValidityPolicy>(
+        pub fn find_valid_cert<'a, 'b, Policy: CertificateValidityPolicy>(
             &'a self,
             subject_dn: &ChipDN,
             subject_key_id: &CertificateKeyId,
-            context: &mut ValidationContext<'a, Policy>,
+            context: &mut ValidationContext<'b, Policy>,
             depth: u8,
-        ) -> Result<&'a ChipCertificateData, ChipError> {
+        ) -> Result<&'a ChipCertificateData, ChipError> 
+            where
+                'a: 'b,
+        {
             let mut err = if depth > 0 {
                 chip_error_ca_cert_not_found!()
             } else {

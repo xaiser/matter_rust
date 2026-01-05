@@ -316,13 +316,15 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
         decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
         if let Some(written_buf) = writer.const_raw_bytes() {
             hash_sha256(&written_buf[..writer.get_length_written()], &mut cert_data.m_tbs_hash[..])?;
+        } else {
+            // should not happen since the writer must have a buffer
+            return Err(chip_error_no_memory!());
         }
         cert_data.m_cert_flags.insert(CertFlags::KtbsHashPresent);
     } else {
         let mut writer = NullAsn1Writer::default();
         decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
     }
-
 
     if let Some(flags) = decode_flag {
         if flags.contains(CertDecodeFlags::KisTrustAnchor) {

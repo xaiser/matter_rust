@@ -971,6 +971,8 @@ mod fabric_table {
                 CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
             },
             chip_cert::{
+                extract_node_id_fabric_id_from_op_cert,
+                extract_fabric_id_from_cert,
                 extract_node_id_fabric_id_from_op_cert_byte,
                 extract_not_before_from_chip_cert_byte, extract_public_key_from_chip_cert_byte,
                 CertBuffer, K_MAX_CHIP_CERT_LENGTH,
@@ -2388,12 +2390,12 @@ mod fabric_table {
             return self.run_verify_credentials(noc, icac, rcac.const_bytes(), context);
         }
 
-        pub fn run_verify_credentials(
+        pub fn run_verify_credentials<'a>(
             &self,
             noc: &[u8],
             icac: Option<&[u8]>,
             rcac: &[u8],
-            context: &mut ValidationContext,
+            context: &'a mut ValidationContext,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2409,9 +2411,26 @@ mod fabric_table {
             let mut certificates = ChipCertificateSet::default();
             certificates.load_cert(rcac, CertDecodeFlags::KisTrustAnchor)?;
 
+            let icac_fabric_id: Option<FabricId>;
             if let Some(icac_buf) = icac {
                 certificates.load_cert(icac_buf, CertDecodeFlags::KgenerateTBSHash)?;
+                icac_fabric_id = Some(extract_fabric_id_from_cert(certificates.get_cert_sets()[1].as_ref().ok_or(chip_error_internal!())?)?);
             }
+
+            certificates.load_cert(noc, CertDecodeFlags::KgenerateTBSHash)?;
+
+            let last_cert = certificates.get_last_cert().ok_or(chip_error_internal!())?;
+            let noc_subject_dn = &last_cert.m_subject_dn;
+            let noc_subject_key_id = &last_cert.m_subject_key_id;
+
+            // find_valid_cert() checks the certificate set constructed by loading noc, icac and rcac.
+            // It confirms that the certs link correctly (noc -> icac -> rcac), and have been correctly signed.
+            //let result_cert = certificates.find_valid_cert(noc_subject_dn, noc_subject_key_id, context, 0)?;
+
+            let (out_node_id, out_fabric_id) = extract_node_id_fabric_id_from_op_cert(last_cert)?;
+
+
+
             Err(chip_error_not_implemented!())
         }
 

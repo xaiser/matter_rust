@@ -840,6 +840,19 @@ pub fn extract_not_after_from_chip_cert_byte(opcert: &[u8]) -> Result<Seconds32,
     extract_not_after_from_chip_cert(&op_cert)
 }
 
+pub fn extract_fabric_id_from_cert(cert: &ChipCertificateData) -> Result<FabricId, ChipError> {
+    let subject_dn = &cert.m_subject_dn;
+
+    for i in 0..subject_dn.rdn_count() as usize {
+        let rdn = subject_dn.rdn[0];
+        if rdn.m_attr_oid == Asn1Oid::KoidAttributeTypeMatterFabricId.into() {
+            return Ok(rdn.m_chip_val as FabricId);
+        }
+    }
+
+    Err(chip_error_not_found!())
+}
+
 pub fn chip_epoch_to_asn1_time(epoch_time: u32) -> Result<Asn1UniversalTime, ChipError> {
     // X.509/RFC5280 defines the special time 99991231235959Z to mean 'no well-defined expiration date'.
     // In CHIP certificate it is represented as a CHIP Epoch time value of 0 secs (2000-01-01 00:00:00 UTC).
@@ -1532,6 +1545,7 @@ pub(super) mod tests {
             tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
         };
         use crate::chip::crypto::{ECPKey, ECPKeyTarget, P256Keypair, K_P256_PUBLIC_KEY_LENGTH};
+        use crate::chip::credentials::fabric_table::fabric_info::tests::{make_chip_cert, stub_public_key};
 
         #[test]
         fn extract_node_id_fabrid_id() {
@@ -2176,6 +2190,18 @@ pub(super) mod tests {
             );
 
             assert_eq!(false, cert1.is_equal(&cert2));
+        }
+
+        #[test]
+        fn decode_with_hash_flag_successfully() {
+            let key = stub_public_key();
+            let cert = make_chip_cert(1, 2, &key[..]);
+            assert!(cert.is_ok());
+            let cert = cert.unwrap();
+
+            let mut cert_data = ChipCertificateData::default();
+            assert!(decode_chip_cert(cert.const_bytes(), &mut cert_data, Some(CertDecodeFlags::KgenerateTBSHash)).is_ok());
+            assert!(cert_data.m_cert_flags.intersects(CertFlags::KtbsHashPresent));
         }
     } // end of chip_certificate_data
 } // end of tests
