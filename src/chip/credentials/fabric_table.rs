@@ -976,7 +976,7 @@ mod fabric_table {
                 extract_node_id_fabric_id_from_op_cert_byte,
                 extract_not_before_from_chip_cert_byte, extract_public_key_from_chip_cert_byte,
                 CertBuffer, K_MAX_CHIP_CERT_LENGTH,
-                CertDecodeFlags,
+                CertDecodeFlags, ChipCertificateData,
             },
             chip_certificate_set::ChipCertificateSet,
             last_known_good_time::LastKnownGoodTime,
@@ -1005,6 +1005,8 @@ mod fabric_table {
     use crate::chip_error_not_found;
     use crate::chip_error_not_implemented;
     use crate::chip_error_persisted_storage_value_not_found;
+    use crate::chip_error_fabric_mismatch_on_ica;
+    use crate::chip_error_wrong_cert_dn;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::chip_static_assert;
@@ -2410,11 +2412,11 @@ mod fabric_table {
 
             let mut certificates = ChipCertificateSet::default();
             certificates.load_cert(rcac, CertDecodeFlags::KisTrustAnchor)?;
+            let mut is_icac_present = false;
 
-            let icac_fabric_id: Option<FabricId>;
             if let Some(icac_buf) = icac {
                 certificates.load_cert(icac_buf, CertDecodeFlags::KgenerateTBSHash)?;
-                icac_fabric_id = Some(extract_fabric_id_from_cert(certificates.get_cert_sets()[1].as_ref().ok_or(chip_error_internal!())?)?);
+                is_icac_present = true
             }
 
             certificates.load_cert(noc, CertDecodeFlags::KgenerateTBSHash)?;
@@ -2425,13 +2427,59 @@ mod fabric_table {
 
             // find_valid_cert() checks the certificate set constructed by loading noc, icac and rcac.
             // It confirms that the certs link correctly (noc -> icac -> rcac), and have been correctly signed.
-            //let result_cert = certificates.find_valid_cert(noc_subject_dn, noc_subject_key_id, context, 0)?;
+            let result_cert = certificates.find_valid_cert(noc_subject_dn, noc_subject_key_id, context, 0)?;
 
             let (out_node_id, out_fabric_id) = extract_node_id_fabric_id_from_op_cert(last_cert)?;
 
+            if is_icac_present {
+                match extract_fabric_id_from_cert(
+                    certificates.get_cert_sets()[1].as_ref().ok_or(chip_error_internal!())?
+                    ) {
+                    Ok(icac_fabric_id) => {
+                        verify_or_return_error!(icac_fabric_id == out_fabric_id, Err(chip_error_fabric_mismatch_on_ica!()));
+                    },
+                    Err(e) => {
+                        // FabricId is optional field in ICAC and "not found" code is not treated as error.
+                        if e == chip_error_not_found!() {
+                            // do nothing
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+
+            match extract_fabric_id_from_cert(
+                certificates.get_cert_sets()[0].as_ref().ok_or(chip_error_internal!())?
+                ) {
+                Ok(rcac_fabric_id) => {
+                    verify_or_return_error!(rcac_fabric_id == out_fabric_id, Err(chip_error_wrong_cert_dn!()));
+                },
+                Err(e) => {
+                    // FabricId is optional field in ICAC and "not found" code is not treated as error.
+                    if e == chip_error_not_found!() {
+                        // do nothing
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+
+            let out_compressed_fabric_id: u64;
+            let root_pub_key: P256PublicKey;
+            // Extract compressed fabric ID and root public key
+            {
+                root_pub_key = P256PublicKey::default_with_raw_value(
+                    &certificates.get_cert_sets()[0].as_ref().ok_or(chip_error_internal!())?.m_public_key);
+
+                out_compressed_fabric_id = generate_compressed_fabric_id(&root_pub_key, out_fabric_id)?;
+            }
+
+            let noc_pub_key = P256PublicKey::default_with_raw_value(
+                &certificates.get_cert_sets()[2].as_ref().ok_or(chip_error_internal!())?.m_public_key);
 
 
-            Err(chip_error_not_implemented!())
+            return Ok((out_compressed_fabric_id, out_fabric_id, out_node_id, noc_pub_key, root_pub_key));
         }
 
         pub fn permit_colliding_fabrics(&mut self) {

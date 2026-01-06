@@ -52,7 +52,9 @@ mod chip_certificate_set {
         ValidityPolicy: CertificateValidityPolicy,
     {
         pub m_effective_time: EffectiveTime,
-        pub m_trust_anchor: Option<&'a ChipCertificateData>,
+        // In order to make the lifetime defin more reasonable, we store the copy of key id of
+        // trust cert.
+        pub m_trust_anchor: Option<CertificateKeyId>,
         pub m_required_key_usages: KeyUsageFlags,
         pub m_required_key_purpose: KeyPurposeFlags,
         pub m_required_cert_type: CertType,
@@ -262,7 +264,7 @@ mod chip_certificate_set {
             depth: u8,
         ) -> ChipErrorResult 
             where
-                'a: 'b,
+                'b: 'a,
         {
             let cert_type = cert.m_subject_dn.get_cert_type()?;
 
@@ -414,7 +416,7 @@ mod chip_certificate_set {
             // If the certificate itself is trusted, then it is implicitly valid.  Record this certificate as the trust
             // anchor and return success.
             if cert.m_cert_flags.contains(CertFlags::KisTrustAnchor) {
-                context.m_trust_anchor = Some(cert);
+                context.m_trust_anchor = Some(cert.m_subject_key_id.clone());
                 return chip_ok!();
             }
 
@@ -468,7 +470,7 @@ mod chip_certificate_set {
             depth: u8,
         ) -> Result<&'a ChipCertificateData, ChipError> 
             where
-                'a: 'b,
+                'b: 'a,
         {
             let mut err = if depth > 0 {
                 chip_error_ca_cert_not_found!()
@@ -537,7 +539,7 @@ mod chip_certificate_set {
                 certificate_validity_policy::{
                     CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
                 },
-                chip_cert::{tests::make_subject_key_id, K_KEY_IDENTIFIER_LENGTH},
+                chip_cert::{tests::make_subject_key_id, K_KEY_IDENTIFIER_LENGTH, decode_chip_cert},
                 fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key},
             },
             crypto::{
@@ -560,7 +562,6 @@ mod chip_certificate_set {
                 _depth: u8,
                 result: CertificateValidityResult,
             ) -> ChipErrorResult {
-                println!("here??");
                 if CertificateValidityResult::Kvalid == result {
                     return chip_ok!();
                 }
@@ -573,6 +574,128 @@ mod chip_certificate_set {
         }
 
         type CheckResultValidate<'a> = ValidationContext<'a, CheckResultPolicy>;
+
+        pub fn make_x509_cert_chain_3() -> (ChipCertificateData, ChipCertificateData, ChipCertificateData) {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let icac_key_id = make_subject_key_id(3, 4);
+            let node_key_id = make_subject_key_id(5, 6);
+            let (root_cert, root_dn) = {
+                let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut root = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(root_buffer.const_bytes(), &mut root, Some(CertDecodeFlags::KisTrustAnchor))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                root.m_not_before_time = expected_not_before;
+                root.m_not_after_time = expected_not_after;
+                root.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
+                root.m_subject_key_id = root_key_id.clone();
+
+                let mut context = IgorePolicyValidate::default();
+                context.m_effective_time = EffectiveTime::CurrentChipEpochTime(
+                    Seconds32::from_secs((expected_not_before + 1).into()),
+                );
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                (root, root_dn)
+            };
+
+            let mut icac_keypair = P256Keypair::default();
+            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let (icac_cert, icac_dn) = {
+                let icac_buffer = make_ca_cert(1, icac_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut icac = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(icac_buffer.const_bytes(), &mut icac, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                icac.m_not_before_time = expected_not_before;
+                icac.m_not_after_time = expected_not_after;
+                icac.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                icac.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
+                // replace RCAC id with ICAC id
+                icac.m_subject_dn.clear();
+                icac.m_subject_dn.add_attribute(
+                    crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId.into(),
+                    2,
+                );
+                icac.m_subject_key_id = icac_key_id.clone();
+                icac.m_auth_key_id = root_key_id.clone();
+
+                // copy subject dn from root to issue dn from noc
+                icac.m_issuer_dn.clear();
+                for (index, value) in root_dn.rdn.iter().enumerate() {
+                    icac.m_issuer_dn.rdn[index] = value.clone();
+                }
+
+                // sign the buf: pubkey + sub key id
+                assert!(root_keypair
+                    .ecdsa_sign_raw_msg(&icac.m_tbs_hash, &mut icac.m_signature)
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                // set up hash present flag
+                icac.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+
+
+                let mut icac_dn = ChipDN::default();
+                for (index, value) in icac.m_subject_dn.rdn.iter().enumerate() {
+                    icac_dn.rdn[index] = value.clone();
+                }
+
+                (icac, icac_dn)
+            };
+
+            let noc_cert = {
+                let key = stub_public_key();
+                let noc_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                // load as trust anchor
+                let mut noc = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(noc_buffer.const_bytes(), &mut noc, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                // update the effec time
+                noc.m_not_before_time = expected_not_before;
+                noc.m_not_after_time = expected_not_after;
+
+                // update key id
+                noc.m_subject_key_id = node_key_id.clone();
+                noc.m_auth_key_id = icac_key_id.clone();
+
+                // sign the buf: pubkey + sub key id
+                assert!(icac_keypair
+                    .ecdsa_sign_raw_msg(&noc.m_tbs_hash, &mut noc.m_signature)
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                // set up hash present flag
+                noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+
+                // copy subject dn from root to issue dn from noc
+                noc.m_issuer_dn.clear();
+                for (index, value) in icac_dn.rdn.iter().enumerate() {
+                    noc.m_issuer_dn.rdn[index] = value.clone();
+                }
+
+                noc
+            };
+
+            (root_cert, icac_cert, noc_cert)
+        } // end of make_chip_cert_chain_3
 
         #[test]
         fn new() {
@@ -713,7 +836,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| key == c));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -834,7 +957,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| c == key));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -1032,7 +1155,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| c == key));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -1151,7 +1274,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| c == key));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -1268,7 +1391,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| c == key));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -1381,7 +1504,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| core::ptr::eq(c, root_ref)));
+                    .is_some_and(|c| c == key));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {

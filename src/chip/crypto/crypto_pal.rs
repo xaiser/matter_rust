@@ -538,6 +538,8 @@ pub trait ECPKeypair<PK, Secret, Sig> {
 
     fn ecdsa_sign_msg(&self, msg: &[u8], out_signature: &mut Sig) -> ChipErrorResult;
 
+    fn ecdsa_sign_raw_msg(&self, hash: &[u8], out_signature: &mut Sig) -> ChipErrorResult;
+
     fn ecdh_derive_secret(
         &self,
         remote_public_key: &PK,
@@ -636,6 +638,10 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
         hasher.update(&msg[..]);
         let hash_result = hasher.finalize();
 
+        return self.ecdsa_sign_raw_msg(hash_result.as_slice(), out_signature);
+    }
+
+    fn ecdsa_sign_raw_msg(&self, hash: &[u8], out_signature: &mut P256EcdsaSignature) -> ChipErrorResult {
         let secret_key = SecretKey::from_slice(
             &self.m_key_context.m_bytes[K_P256_PUBLIC_KEY_LENGTH..][..K_P256_PRIVATE_KEY_LENGTH],
         )
@@ -643,7 +649,7 @@ impl ECPKeypair<P256PublicKey, P256EcdhDeriveSecret, P256EcdsaSignature> for P25
 
         let sign_key = SigningKey::from(&secret_key);
 
-        let sig: Signature = sign_key.sign(hash_result.as_slice());
+        let sig: Signature = sign_key.sign(hash);
         out_signature
             .bytes()
             .copy_from_slice(sig.to_bytes().as_slice());

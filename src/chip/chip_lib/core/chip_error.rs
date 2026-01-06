@@ -542,6 +542,13 @@ macro_rules! chip_error_invalid_public_key {
 }
 
 #[macro_export]
+macro_rules! chip_error_fabric_mismatch_on_ica {
+    () => {
+        chip_core_error!(0xc6)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_not_found {
     () => {
         chip_core_error!(0xd8)
