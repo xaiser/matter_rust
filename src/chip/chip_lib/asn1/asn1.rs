@@ -176,3 +176,8 @@ pub const K_OID_CATEGORY_MASK: u16 = 0x0F00;
 pub fn get_oid(category: OidCategory, id: u8) -> Oid {
     (category as u16 | id as u16).into()
 }
+
+#[inline]
+pub fn get_oid_enum(id: Oid) -> u8 {
+    (id & (Asn1Oid::KoidEnumMask as Oid)) as u8
+}

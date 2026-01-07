@@ -575,6 +575,81 @@ mod chip_certificate_set {
 
         type CheckResultValidate<'a> = ValidationContext<'a, CheckResultPolicy>;
 
+        pub fn make_x509_cert_chain_2() -> (ChipCertificateData, ChipCertificateData) {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let icac_key_id = make_subject_key_id(3, 4);
+            let node_key_id = make_subject_key_id(5, 6);
+            let (root_cert, root_dn) = {
+                let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut root = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(root_buffer.const_bytes(), &mut root, Some(CertDecodeFlags::KisTrustAnchor))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                root.m_not_before_time = expected_not_before;
+                root.m_not_after_time = expected_not_after;
+                root.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
+                root.m_subject_key_id = root_key_id.clone();
+
+                let mut context = IgorePolicyValidate::default();
+                context.m_effective_time = EffectiveTime::CurrentChipEpochTime(
+                    Seconds32::from_secs((expected_not_before + 1).into()),
+                );
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                (root, root_dn)
+            };
+
+            let noc_cert = {
+                let key = stub_public_key();
+                let noc_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                // load as trust anchor
+                let mut noc = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(noc_buffer.const_bytes(), &mut noc, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                // update the effec time
+                noc.m_not_before_time = expected_not_before;
+                noc.m_not_after_time = expected_not_after;
+
+                // update key id
+                noc.m_subject_key_id = node_key_id.clone();
+                noc.m_auth_key_id = root_key_id.clone();
+
+                // sign the buf: pubkey + sub key id
+                assert!(root_keypair
+                    .ecdsa_sign_raw_msg(&noc.m_tbs_hash, &mut noc.m_signature)
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                // set up hash present flag
+                noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+
+                // copy subject dn from root to issue dn from noc
+                noc.m_issuer_dn.clear();
+                for (index, value) in root_dn.rdn.iter().enumerate() {
+                    noc.m_issuer_dn.rdn[index] = value.clone();
+                }
+
+                noc
+            };
+
+            (root_cert, noc_cert)
+        } // end of make_chip_cert_chain_3
+
         pub fn make_x509_cert_chain_3() -> (ChipCertificateData, ChipCertificateData, ChipCertificateData) {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;

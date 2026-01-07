@@ -1,5 +1,5 @@
 use crate::chip::{
-    asn1::{get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag, Asn1UniversalTime},
+    asn1::{get_oid_enum, get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag, Asn1UniversalTime},
     chip_lib::{
         asn1::asn1_writer::Asn1Writer,
         core::{
@@ -8,6 +8,7 @@ use crate::chip::{
             data_model_types::is_valid_fabric_id,
             node_id::is_operational_node_id,
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            tlv_writer::TlvWriter,
             tlv_tags::{context_tag, is_context_tag, tag_num_from_tag, Tag},
             tlv_types::TlvType,
         },
@@ -502,6 +503,32 @@ impl ChipDN {
         reader.exit_container(outer_container)?;
 
         chip_ok!()
+    }
+
+    pub fn encode_to_tlv<Writer: TlvWriter>(&self, writer: &mut Writer, tag: Tag) -> ChipErrorResult {
+        let rdn_count = self.rdn_count();
+        let mut outer_container = TlvType::KtlvTypeNotSpecified;
+        // start a list
+        writer.start_container(
+            tag,
+            TlvType::KtlvTypeList,
+            &mut outer_container,
+        )?;
+
+        for i in 0..rdn_count as usize {
+            // Derive the TLV tag number from the enum value assigned to the attribute type OID. For attributes that can be
+            // either UTF8String or PrintableString, use the high bit in the tag number to distinguish the two.
+            let tlv_tag_num = get_oid_enum(self.rdn[i].m_attr_oid);
+            if self.rdn[i].m_attr_is_printable_string {
+                tlv_tag_num |= 0x80u8;
+            }
+
+            if is_chip_dn_attr(rdn[i].m_attr_oid) {
+            } else {
+            }
+        }
+
+        Err(chip_error_not_implemented!())
     }
 
     pub fn encode_to_asn1<Writer: Asn1Writer>(&self, writer: &mut Writer) -> ChipErrorResult {

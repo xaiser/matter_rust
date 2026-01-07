@@ -105,6 +105,14 @@ pub trait TlvWriter {
     fn is_container_open(&self) -> bool;
     fn init(&mut self, buf: *mut u8, max_len: u32);
     fn get_length_written(&self) -> usize;
+    fn start_container(
+        &mut self,
+        tag: Tag,
+        container_type: TlvType,
+        outer_container_type: &mut TlvType,
+    ) -> ChipErrorResult;
+
+    fn end_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult;
 }
 
 pub struct TlvWriterBasic<BackingStoreType>
@@ -192,6 +200,63 @@ where
 
     fn get_length_written(&self) -> usize {
         self.m_len_written
+    }
+
+    fn start_container(
+        &mut self,
+        tag: Tag,
+        container_type: TlvType,
+        outer_container_type: &mut TlvType,
+    ) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_container(container_type),
+            Err(chip_error_incorrect_state!())
+        );
+
+        if self.is_close_container_reserved() {
+            verify_or_return_error!(
+                self.m_max_len >= private::KEND_OF_CONTAINER_MARKER_SIZE,
+                Err(chip_error_incorrect_state!())
+            );
+            self.m_max_len -= private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        self.write_element_head(TlvElementType::from_container_type(container_type), tag, 0)
+            .map_err(|e| {
+                if self.is_close_container_reserved() {
+                    self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+                }
+                e
+            })?;
+
+        *outer_container_type = self.m_container_type;
+        self.m_container_type = container_type;
+
+        self.set_container_open(false);
+
+        chip_ok!()
+    }
+
+    fn end_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult {
+        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(
+            tlv_types::tlv_type_is_container(self.m_container_type),
+            Err(chip_error_incorrect_state!())
+        );
+
+        self.m_container_type = outer_container_type;
+
+        if self.is_close_container_reserved() {
+            self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
+        }
+
+        return self.write_element_head(
+            TlvElementType::EndOfContainer,
+            tlv_tags::anonymous_tag(),
+            0,
+        );
     }
 }
 
@@ -577,63 +642,6 @@ where
         self.set_container_open(false);
 
         container_writer.init(ptr::null_mut(), 0);
-
-        return self.write_element_head(
-            TlvElementType::EndOfContainer,
-            tlv_tags::anonymous_tag(),
-            0,
-        );
-    }
-
-    pub fn start_container(
-        &mut self,
-        tag: Tag,
-        container_type: TlvType,
-        outer_container_type: &mut TlvType,
-    ) -> ChipErrorResult {
-        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
-
-        verify_or_return_error!(
-            tlv_types::tlv_type_is_container(container_type),
-            Err(chip_error_incorrect_state!())
-        );
-
-        if self.is_close_container_reserved() {
-            verify_or_return_error!(
-                self.m_max_len >= private::KEND_OF_CONTAINER_MARKER_SIZE,
-                Err(chip_error_incorrect_state!())
-            );
-            self.m_max_len -= private::KEND_OF_CONTAINER_MARKER_SIZE;
-        }
-
-        self.write_element_head(TlvElementType::from_container_type(container_type), tag, 0)
-            .map_err(|e| {
-                if self.is_close_container_reserved() {
-                    self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
-                }
-                e
-            })?;
-
-        *outer_container_type = self.m_container_type;
-        self.m_container_type = container_type;
-
-        self.set_container_open(false);
-
-        chip_ok!()
-    }
-
-    pub fn end_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult {
-        verify_or_return_error!(self.is_initialized(), Err(chip_error_incorrect_state!()));
-        verify_or_return_error!(
-            tlv_types::tlv_type_is_container(self.m_container_type),
-            Err(chip_error_incorrect_state!())
-        );
-
-        self.m_container_type = outer_container_type;
-
-        if self.is_close_container_reserved() {
-            self.m_max_len += private::KEND_OF_CONTAINER_MARKER_SIZE;
-        }
 
         return self.write_element_head(
             TlvElementType::EndOfContainer,
@@ -1499,6 +1507,19 @@ mod test {
             fn init(&mut self, _buf: *mut u8, _max_len: u32) {}
             fn get_length_written(&self) -> usize {
                 0
+            }
+
+            fn start_container(
+                &mut self,
+                _tag: Tag,
+                _container_type: TlvType,
+                _outer_container_type: &mut TlvType,
+            ) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn end_container(&mut self, _outer_container_type: TlvType) -> ChipErrorResult {
+                chip_ok!()
             }
         }
 
