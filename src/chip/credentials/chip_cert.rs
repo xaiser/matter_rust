@@ -518,17 +518,19 @@ impl ChipDN {
         for i in 0..rdn_count as usize {
             // Derive the TLV tag number from the enum value assigned to the attribute type OID. For attributes that can be
             // either UTF8String or PrintableString, use the high bit in the tag number to distinguish the two.
-            let tlv_tag_num = get_oid_enum(self.rdn[i].m_attr_oid);
+            let mut tlv_tag_num = get_oid_enum(self.rdn[i].m_attr_oid);
             if self.rdn[i].m_attr_is_printable_string {
                 tlv_tag_num |= 0x80u8;
             }
 
-            if is_chip_dn_attr(rdn[i].m_attr_oid) {
+            if is_chip_dn_attr(self.rdn[i].m_attr_oid) {
+                writer.put_u64(context_tag(tlv_tag_num), self.rdn[i].m_chip_val)?;
             } else {
+                writer.put_string(context_tag(tlv_tag_num), self.rdn[i].m_string.str().ok_or(chip_error_invalid_argument!())?)?;
             }
         }
 
-        Err(chip_error_not_implemented!())
+        return writer.end_container(outer_container);
     }
 
     pub fn encode_to_asn1<Writer: Asn1Writer>(&self, writer: &mut Writer) -> ChipErrorResult {

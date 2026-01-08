@@ -113,6 +113,19 @@ pub trait TlvWriter {
     ) -> ChipErrorResult;
 
     fn end_container(&mut self, outer_container_type: TlvType) -> ChipErrorResult;
+    fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult;
+    fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult;
+    fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult;
+    fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult;
+    fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult;
+    fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult;
+    fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult;
+    fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult;
+    fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult;
+    fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult;
+    fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult;
+    fn put_string_f(&mut self, tag: Tag, args: core::fmt::Arguments) -> ChipErrorResult;
+    fn put_null(&mut self, tag: Tag) -> ChipErrorResult;
 }
 
 pub struct TlvWriterBasic<BackingStoreType>
@@ -258,6 +271,102 @@ where
             0,
         );
     }
+
+    fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
+        let type_bool = if v == true {
+            TlvElementType::BooleanTrue
+        } else {
+            TlvElementType::BooleanFalse
+        };
+
+        self.write_element_head(type_bool, tag, 0)
+    }
+
+    fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult {
+        return self.put_u64(tag, v as u64);
+    }
+
+    fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult {
+        self.put_u64(tag, v as u64)
+    }
+
+    fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult {
+        self.put_u64(tag, v as u64)
+    }
+
+    fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
+        let mut elem_type: TlvElementType;
+
+        if v <= u8::MAX as u64 {
+            elem_type = TlvElementType::UInt8;
+        } else if v <= u16::MAX as u64 {
+            elem_type = TlvElementType::UInt16;
+        } else if v <= u32::MAX as u64 {
+            elem_type = TlvElementType::UInt32;
+        } else {
+            elem_type = TlvElementType::UInt64;
+        }
+
+        return self.write_element_head(elem_type, tag, v);
+    }
+
+    fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult {
+        self.put_i64(tag, v as i64)
+    }
+
+    fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult {
+        self.put_i64(tag, v as i64)
+    }
+
+    fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult {
+        self.put_i64(tag, v as i64)
+    }
+
+    fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
+        let mut elem_type: TlvElementType;
+
+        if v <= i8::MAX as i64 && v >= i8::MIN as i64 {
+            elem_type = TlvElementType::Int8;
+        } else if v <= i16::MAX as i64 && v >= i16::MIN as i64 {
+            elem_type = TlvElementType::Int16;
+        } else if v <= i32::MAX as i64 && v >= i32::MIN as i64 {
+            elem_type = TlvElementType::Int32;
+        } else {
+            elem_type = TlvElementType::Int64;
+        }
+
+        return self.write_element_head(elem_type, tag, v as u64);
+    }
+
+    fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
+        verify_or_return_error!(
+            buf.len() <= u32::MAX as usize,
+            Err(chip_error_message_too_long!())
+        );
+        return self.write_element_with_data(TlvType::KtlvTypeByteString, tag, &buf[..]);
+    }
+
+    fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult {
+        // Rust str is UTF-8 encoded and doesn't have terminating null.
+        return self.write_element_with_data(TlvType::KtlvTypeUTF8String, tag, buf.as_bytes());
+    }
+
+    fn put_string_f(&mut self, tag: Tag, args: fmt::Arguments) -> ChipErrorResult {
+        // TODO: use heap??
+        const MAX_STR_SIZE_BYTES: usize = 32;
+        let mut tmp_buf: [u8; MAX_STR_SIZE_BYTES] = [0; MAX_STR_SIZE_BYTES];
+        let the_str = private::format_args_to_str(&mut tmp_buf[..], args);
+        if the_str.is_err() {
+            return Err(chip_error_no_memory!());
+        }
+        let the_str = the_str.unwrap();
+
+        return self.put_string(tag, the_str);
+    }
+
+    fn put_null(&mut self, tag: Tag) -> ChipErrorResult {
+        return self.write_element_head(TlvElementType::Null, tag, 0);
+    }
 }
 
 impl<BackingStoreType> TlvWriterBasic<BackingStoreType>
@@ -358,27 +467,6 @@ where
         chip_ok!()
     }
 
-    pub fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
-        let type_bool = if v == true {
-            TlvElementType::BooleanTrue
-        } else {
-            TlvElementType::BooleanFalse
-        };
-
-        self.write_element_head(type_bool, tag, 0)
-    }
-
-    pub fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult {
-        return self.put_u64(tag, v as u64);
-    }
-
-    pub fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult {
-        self.put_u64(tag, v as u64)
-    }
-
-    pub fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult {
-        self.put_u64(tag, v as u64)
-    }
 
     pub fn put_u8_preserve_size(
         &mut self,
@@ -418,22 +506,6 @@ where
         }
     }
 
-    pub fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
-        let mut elem_type: TlvElementType;
-
-        if v <= u8::MAX as u64 {
-            elem_type = TlvElementType::UInt8;
-        } else if v <= u16::MAX as u64 {
-            elem_type = TlvElementType::UInt16;
-        } else if v <= u32::MAX as u64 {
-            elem_type = TlvElementType::UInt32;
-        } else {
-            elem_type = TlvElementType::UInt64;
-        }
-
-        return self.write_element_head(elem_type, tag, v);
-    }
-
     pub fn put_u64_preserve_size(
         &mut self,
         tag: Tag,
@@ -445,18 +517,6 @@ where
         } else {
             self.put_u64(tag, v)
         }
-    }
-
-    pub fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult {
-        self.put_i64(tag, v as i64)
-    }
-
-    pub fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult {
-        self.put_i64(tag, v as i64)
-    }
-
-    pub fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult {
-        self.put_i64(tag, v as i64)
     }
 
     pub fn put_i8_preserve_size(
@@ -498,22 +558,6 @@ where
         }
     }
 
-    pub fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
-        let mut elem_type: TlvElementType;
-
-        if v <= i8::MAX as i64 && v >= i8::MIN as i64 {
-            elem_type = TlvElementType::Int8;
-        } else if v <= i16::MAX as i64 && v >= i16::MIN as i64 {
-            elem_type = TlvElementType::Int16;
-        } else if v <= i32::MAX as i64 && v >= i32::MIN as i64 {
-            elem_type = TlvElementType::Int32;
-        } else {
-            elem_type = TlvElementType::Int64;
-        }
-
-        return self.write_element_head(elem_type, tag, v as u64);
-    }
-
     pub fn put_i64_preserve_size(
         &mut self,
         tag: Tag,
@@ -525,36 +569,6 @@ where
         } else {
             self.put_i64(tag, v)
         }
-    }
-
-    pub fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
-        verify_or_return_error!(
-            buf.len() <= u32::MAX as usize,
-            Err(chip_error_message_too_long!())
-        );
-        return self.write_element_with_data(TlvType::KtlvTypeByteString, tag, &buf[..]);
-    }
-
-    pub fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult {
-        // Rust str is UTF-8 encoded and doesn't have terminating null.
-        return self.write_element_with_data(TlvType::KtlvTypeUTF8String, tag, buf.as_bytes());
-    }
-
-    pub fn put_string_f(&mut self, tag: Tag, args: fmt::Arguments) -> ChipErrorResult {
-        // TODO: use heap??
-        const MAX_STR_SIZE_BYTES: usize = 32;
-        let mut tmp_buf: [u8; MAX_STR_SIZE_BYTES] = [0; MAX_STR_SIZE_BYTES];
-        let the_str = private::format_args_to_str(&mut tmp_buf[..], args);
-        if the_str.is_err() {
-            return Err(chip_error_no_memory!());
-        }
-        let the_str = the_str.unwrap();
-
-        return self.put_string(tag, the_str);
-    }
-
-    pub fn put_null(&mut self, tag: Tag) -> ChipErrorResult {
-        return self.write_element_head(TlvElementType::Null, tag, 0);
     }
 
     pub fn copy_element(&mut self) -> ChipErrorResult {
@@ -1519,6 +1533,58 @@ mod test {
             }
 
             fn end_container(&mut self, _outer_container_type: TlvType) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_string_f(&mut self, tag: Tag, args: core::fmt::Arguments) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn put_null(&mut self, tag: Tag) -> ChipErrorResult {
                 chip_ok!()
             }
         }
