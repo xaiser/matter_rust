@@ -552,7 +552,7 @@ pub mod fabric_info {
             },
             credentials::{
                 chip_cert::{
-                    tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag,
+                    tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag, KeyPurposeFlags, decode_chip_cert, CertDecodeFlags,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
@@ -917,19 +917,49 @@ pub mod fabric_info {
             );
 
             writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &cert_data.m_auth_key_id);
+            writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &cert_data.m_subject_key_id);
+            writer.put_u32(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u32);
 
-            contin on this
+            // extended key usage
+            {
+                // start extended key usage extensions list
+                let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+                writer.start_container(
+                    context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+                    tlv_types::TlvType::KtlvTypeArray,
+                    &mut extensions_outer_container_list,
+                );
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KserverAuth) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits() as u8);
+                }
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KclientAuth) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KclientAuth.bits() as u8);
+                }
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KcodeSigning) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KcodeSigning.bits() as u8);
+                }
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KemailProtection) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KemailProtection.bits() as u8);
+                }
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KtimeStamping) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KtimeStamping.bits() as u8);
+                }
+
+                if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KoCSPSigning) {
+                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KoCSPSigning.bits() as u8);
+                }
+
+                // end entensions list
+                writer.end_container(extensions_outer_container_list);
+            }
 
             // end entensions list
             writer.end_container(extensions_outer_container_list);
-
-            /*
-
-            // make empty extensions
-            let key = make_subject_key_id(1, 2);
-            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
-            let key = make_subject_key_id(3, 4);
-            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
 
             // end struct container
             writer.end_container(outer_container);
@@ -938,8 +968,6 @@ pub mod fabric_info {
             cert.init(&raw_tlv[..writer.get_length_written()]);
 
             return Ok(cert);
-            */
-            Err(())
         }
 
         #[test]
@@ -1005,6 +1033,23 @@ pub mod fabric_info {
                     .public_key()
                     .const_bytes()
             );
+        }
+
+        #[test]
+        fn test_chip_data_to_tlv() {
+            let pub_key = stub_public_key();
+            let rcac = make_chip_cert(1, 2, &pub_key[..]).unwrap();
+            let mut cert_data = ChipCertificateData::default();
+
+            assert!(decode_chip_cert(rcac.const_bytes(), &mut cert_data, Some(CertDecodeFlags::KgenerateTBSHash)).is_ok());
+            let hash1 = cert_data.m_tbs_hash.clone();
+
+            let output_cert_buffer = make_chip_cert_by_data(&cert_data);
+            assert!(output_cert_buffer.is_ok());
+            let output_cert_buffer = output_cert_buffer.unwrap();
+            assert!(decode_chip_cert(rcac.const_bytes(), &mut cert_data, Some(CertDecodeFlags::KgenerateTBSHash)).is_ok());
+
+            assert_eq!(&hash1, &cert_data.m_tbs_hash);
         }
     } // end of mod tests
 } // end of mod fabric_info
