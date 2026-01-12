@@ -42,7 +42,7 @@ mod chip_certificate_set {
     use crate::chip_log_error;
     use core::str::FromStr;
 
-    enum EffectiveTime {
+    pub enum EffectiveTime {
         CurrentChipEpochTime(Seconds32),
         LastKnownGoodChipEpochTime(Seconds32),
     }
@@ -540,7 +540,7 @@ mod chip_certificate_set {
                     CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
                 },
                 chip_cert::{tests::make_subject_key_id, K_KEY_IDENTIFIER_LENGTH, decode_chip_cert},
-                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key},
+                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data},
             },
             crypto::{
                 ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
@@ -1832,6 +1832,40 @@ mod chip_certificate_set {
             // validate the root cert first
             assert!(sets
                 .validate_cert(root_ref, &mut context)
+                .inspect_err(|e| println!("{}", e))
+                .is_ok());
+        }
+
+        #[test]
+        fn test_make_chain_3() {
+            let (root, icac, noc) = make_x509_cert_chain_3();
+            let root_buffer = make_chip_cert_by_data(&root).unwrap();
+            let icac_buffer = make_chip_cert_by_data(&icac).unwrap();
+            let noc_buffer = make_chip_cert_by_data(&noc).unwrap();
+            let mut sets = ChipCertificateSet::new();
+
+            assert!(sets
+                .load_cert(root_buffer.const_bytes(), CertDecodeFlags::KisTrustAnchor)
+                .inspect_err(|e| println!("{}", e))
+                .is_ok());
+
+            assert!(sets
+                .load_cert(icac_buffer.const_bytes(), CertDecodeFlags::Knone)
+                .inspect_err(|e| println!("{}", e))
+                .is_ok());
+
+            assert!(sets
+                .load_cert(noc_buffer.const_bytes(), CertDecodeFlags::Knone)
+                .inspect_err(|e| println!("{}", e))
+                .is_ok());
+
+            let mut context = IgorePolicyValidate::default();
+            context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs(
+                    2
+            ));
+
+            assert!(sets
+                .validate_cert(&noc, &mut context)
                 .inspect_err(|e| println!("{}", e))
                 .is_ok());
         }

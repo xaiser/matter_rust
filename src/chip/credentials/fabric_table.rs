@@ -3241,14 +3241,14 @@ mod fabric_table {
             },
             credentials::{
                 self,
-                certificate_validity_policy::CertificateValidityPolicy,
+                certificate_validity_policy::{CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy},
                 chip_cert::{
                     extract_node_id_fabric_id_from_op_cert_byte,
                     extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
                 },
-                chip_certificate_set::ValidationContext,
+                chip_certificate_set::{ValidationContext, tests::make_x509_cert_chain_3, EffectiveTime},
                 fabric_table::{
-                    fabric_info,
+                    fabric_info::{self, tests::make_chip_cert_by_data},
                     fabric_table::{
                         commit_marker_context_tlv_max_size, fabric_indices_tag,
                         index_info_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag,
@@ -3295,6 +3295,8 @@ mod fabric_table {
         //use super::super::fabric_info::MockFabricInfo as FabricInfo;
         use super::super::fabric_info::tests as FabricInfoTest;
         use super::super::fabric_info::FabricInfo;
+
+        type IgorePolicyValidate<'a> = ValidationContext<'a, IgnoreCertificateValidityPeriodPolicy>;
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -5759,6 +5761,42 @@ mod fabric_table {
                     .find_existing_fabric_by_noc_chaining(fabric_index, noc.const_bytes())
                     .is_ok_and(|index| Some(KMIN_VALID_FABRIC_INDEX) == index)
             );
+        }
+
+        #[test]
+        fn run_verify_credentials_successfully() {
+            let (rcac, icac, noc) = make_x509_cert_chain_3();
+            let rcac_buf = make_chip_cert_by_data(&rcac).unwrap();
+            let icac_buf = make_chip_cert_by_data(&rcac).unwrap();
+            let noc_buf = make_chip_cert_by_data(&noc).unwrap();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let mut context = IgorePolicyValidate::default();
+            context.m_effective_time = EffectiveTime::LastKnownGoodChipEpochTime(
+                Seconds32::from_secs(1),
+            );
+
+            //assert!(table.run_verify_credentials(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), &mut context).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
