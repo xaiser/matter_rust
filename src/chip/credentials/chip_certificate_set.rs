@@ -1865,7 +1865,7 @@ mod chip_certificate_set {
             ));
 
             assert!(sets
-                .validate_cert(&noc, &mut context)
+                .validate_cert(sets.get_last_cert().unwrap(), &mut context)
                 .inspect_err(|e| println!("{}", e))
                 .is_ok());
         }
