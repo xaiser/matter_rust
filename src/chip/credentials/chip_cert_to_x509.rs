@@ -15,6 +15,7 @@ use crate::chip::{
         },
         tag_not_after, tag_not_before, CertDecodeFlags, CertFlags, ChipCertExtensionTag,
         ChipCertTag, ChipCertificateData, KeyPurposeFlags, KeyUsageFlags, chip_epoch_to_asn1_time,
+        ChipCertBasicConstraintTag,
     },
     crypto::crypto_pal::hash_sha256,
 };
@@ -194,6 +195,44 @@ pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>, Wr
     chip_ok!()
 }
 
+pub fn decode_convert_basic_constraints_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
+    reader: &mut Reader,
+    _writer: &mut Writer,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    cert_data.m_cert_flags.insert(CertFlags::KextPresentBasicConstraints);
+
+    reader.expect_type_tag(TlvType::KtlvTypeStructure, context_tag(ChipCertExtensionTag::KtagBasicConstraints as u8))?;
+    let container_type = reader.enter_container()?;
+
+    reader.next_tag(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8))?;
+    let is_ca = reader.get_boolean()?;
+    if is_ca {
+        cert_data.m_cert_flags.insert(CertFlags::KisCA);
+    }
+
+    if let Err(e) = reader.next() {
+        if e != chip_error_end_of_tlv!() {
+            return Err(e);
+        }
+    }
+
+    if reader.get_tag() == context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsPathLenConstraint as u8) {
+        cert_data.m_path_len_constraint = reader.get_u8()?;
+        cert_data.m_cert_flags.insert(CertFlags::KpathLenConstraintPresent);
+        if let Err(e) = reader.next() {
+            if e != chip_error_end_of_tlv!() {
+                return Err(e);
+            }
+        }
+    }
+
+    reader.verify_end_of_container()?;
+    reader.exit_container(container_type)?;
+
+    chip_ok!()
+}
+
 pub fn decode_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
     writer: &mut Writer,
@@ -219,7 +258,7 @@ pub fn decode_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
                 decode_convert_key_usage_extension(reader, writer, cert_data)?;
             }
             v if v == ChipCertExtensionTag::KtagBasicConstraints as u32 => {
-                return Err(chip_error_not_implemented!());
+                decode_convert_basic_constraints_extension(reader, writer, cert_data)?;
             }
             v if v == ChipCertExtensionTag::KtagExtendedKeyUsage as u32 => {
                 decode_convert_extended_key_usage_extension(reader, writer, cert_data)?;
