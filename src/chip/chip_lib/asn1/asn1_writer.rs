@@ -28,6 +28,7 @@ pub trait Asn1Writer {
     fn put_octet_string(&mut self, value: &[u8]) -> ChipErrorResult;
     fn put_octet_string_cls_tag(&mut self, cls: Class, tag: Tag, value: &[u8]) -> ChipErrorResult;
     fn const_raw_bytes(&self) -> Option<&[u8]>;
+    fn put_boolean(&mut self, val: bool) -> ChipErrorResult;
 }
 
 pub fn highest_bit(mut v: u32) -> u8 {
@@ -113,6 +114,10 @@ mod asn1_writer {
 
         fn const_raw_bytes(&self) -> Option<&[u8]> {
             None
+        }
+
+        fn put_boolean(&mut self, val: bool) -> ChipErrorResult {
+            chip_ok!()
         }
     }
 
@@ -308,6 +313,16 @@ mod asn1_writer {
         fn const_raw_bytes(&self) -> Option<&[u8]> {
             self.m_buf.as_deref()
         }
+
+        fn put_boolean(&mut self, val: bool) -> ChipErrorResult {
+            self.encode_head(Asn1TagClasses::Kasn1TagClassUniversal as Class, Asn1UniversalTag::Kasn1UniversalTagBoolean as Tag, false, 1)?;
+
+            if val {
+                return self.write_data(&[0xFF]);
+            } else {
+                return self.write_data(&[0x0]);
+            }
+        }
     }
 
     #[cfg(test)]
@@ -359,6 +374,32 @@ mod asn1_writer {
             let time = Asn1UniversalTime::default();
 
             assert!(writer.put_time(&time).is_ok());
+        }
+
+        #[test]
+        fn put_bool_true_successfully() {
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0xFFu8; 256];
+            writer.init(&mut buf);
+
+            assert!(writer.put_boolean(true).is_ok());
+            assert_eq!(3, writer.get_length_written());
+            assert_eq!(0x1, buf[0]);
+            assert_eq!(0x1, buf[1]);
+            assert_eq!(0xFF, buf[2]);
+        }
+
+        #[test]
+        fn put_bool_false_successfully() {
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0xFFu8; 256];
+            writer.init(&mut buf);
+
+            assert!(writer.put_boolean(false).is_ok());
+            assert_eq!(3, writer.get_length_written());
+            assert_eq!(0x1, buf[0]);
+            assert_eq!(0x1, buf[1]);
+            assert_eq!(0x0, buf[2]);
         }
     }
 } // end of asn1_writer
