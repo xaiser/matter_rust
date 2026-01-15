@@ -197,7 +197,7 @@ pub fn decode_convert_extended_key_usage_extension<'a, Reader: TlvReader<'a>, Wr
 
 pub fn decode_convert_basic_constraints_extension<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
-    _writer: &mut Writer,
+    writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
     cert_data.m_cert_flags.insert(CertFlags::KextPresentBasicConstraints);
@@ -208,6 +208,7 @@ pub fn decode_convert_basic_constraints_extension<'a, Reader: TlvReader<'a>, Wri
     reader.next_tag(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8))?;
     let is_ca = reader.get_boolean()?;
     if is_ca {
+        writer.put_boolean(true)?;
         cert_data.m_cert_flags.insert(CertFlags::KisCA);
     }
 
@@ -219,6 +220,7 @@ pub fn decode_convert_basic_constraints_extension<'a, Reader: TlvReader<'a>, Wri
 
     if reader.get_tag() == context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsPathLenConstraint as u8) {
         cert_data.m_path_len_constraint = reader.get_u8()?;
+        writer.put_integer(cert_data.m_path_len_constraint as u64)?;
         cert_data.m_cert_flags.insert(CertFlags::KpathLenConstraintPresent);
         if let Err(e) = reader.next() {
             if e != chip_error_end_of_tlv!() {

@@ -553,6 +553,7 @@ pub mod fabric_info {
             credentials::{
                 chip_cert::{
                     tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag, KeyPurposeFlags, decode_chip_cert, CertDecodeFlags,
+                    CertFlags, ChipCertBasicConstraintTag,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
@@ -919,6 +920,20 @@ pub mod fabric_info {
             writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &cert_data.m_auth_key_id);
             writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &cert_data.m_subject_key_id);
             writer.put_u32(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u32);
+
+            if cert_data.m_cert_flags.intersects(CertFlags::KisCA) {
+                // basic constraint
+                let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+                writer.start_container(
+                    context_tag(ChipCertExtensionTag::KtagBasicConstraints as u8),
+                    tlv_types::TlvType::KtlvTypeStructure,
+                    &mut outer_container,
+                );
+                writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
+
+                // end basic constraint
+                writer.end_container(outer_container);
+            }
 
             // extended key usage
             {

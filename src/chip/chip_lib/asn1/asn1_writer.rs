@@ -29,6 +29,7 @@ pub trait Asn1Writer {
     fn put_octet_string_cls_tag(&mut self, cls: Class, tag: Tag, value: &[u8]) -> ChipErrorResult;
     fn const_raw_bytes(&self) -> Option<&[u8]>;
     fn put_boolean(&mut self, val: bool) -> ChipErrorResult;
+    fn put_integer(&mut self, val: u64) -> ChipErrorResult;
 }
 
 pub fn highest_bit(mut v: u32) -> u8 {
@@ -117,6 +118,10 @@ mod asn1_writer {
         }
 
         fn put_boolean(&mut self, val: bool) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn put_integer(&mut self, val: u64) -> ChipErrorResult {
             chip_ok!()
         }
     }
@@ -323,6 +328,26 @@ mod asn1_writer {
                 return self.write_data(&[0x0]);
             }
         }
+
+        fn put_integer(&mut self, val: u64) -> ChipErrorResult {
+            let mut val_start: usize = 0;
+            let encoded_val = val.to_be_bytes();
+
+            for i in 0..(encoded_val.len() - 1) {
+                if encoded_val[i] == 0x00 && (encoded_val[i + 1] & 0x80) == 0 {
+                    val_start += 1;
+                    continue;
+                }
+                if encoded_val[i] == 0xFF && (encoded_val[i + 1] & 0x80) == 0x80 {
+                    val_start += 1;
+                    continue;
+                }
+                break;
+            }
+            let val_len: usize = (encoded_val.len() - val_start) as usize;
+
+            return self.put_value(Asn1TagClasses::Kasn1TagClassUniversal as Class, Asn1UniversalTag::Kasn1UniversalTagInteger as Tag, false, &encoded_val[val_start..(val_start + val_len)]);
+        }
     }
 
     #[cfg(test)]
@@ -400,6 +425,24 @@ mod asn1_writer {
             assert_eq!(0x1, buf[0]);
             assert_eq!(0x1, buf[1]);
             assert_eq!(0x0, buf[2]);
+        }
+
+        #[test]
+        fn put_integer_successfully() {
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0xFFu8; 256];
+            writer.init(&mut buf);
+
+            assert!(writer.put_integer(0).is_ok());
+        }
+
+        #[test]
+        fn put_integer_1_successfully() {
+            let mut writer = TestAsn1Writer::default();
+            let mut buf = [0xFFu8; 256];
+            writer.init(&mut buf);
+
+            assert!(writer.put_integer(1).is_ok());
         }
     }
 } // end of asn1_writer

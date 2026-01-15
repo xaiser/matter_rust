@@ -457,6 +457,7 @@ mod chip_certificate_set {
                     chip_error_ca_cert_not_found!()
                 })?;
 
+
             // Verify signature of the current certificate against public key of the CA certificate. If signature verification
             // succeeds, the current certificate is valid.
             return verify_cert_signature(cert, ca_cert);
