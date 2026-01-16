@@ -298,6 +298,28 @@ pub fn decode_extensions<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     chip_ok!()
 }
 
+pub fn decode_ecdsa_signature<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
+    reader: &mut Reader,
+    _writer: &mut Writer,
+    cert_data: &mut ChipCertificateData,
+) -> ChipErrorResult {
+    reader.next_type_tag(
+        TlvType::KtlvTypeByteString,
+        context_tag(ChipCertTag::KtagECDSASignature as u8),
+    )?;
+
+    let signature = reader.get_bytes()?;
+    let signature_size = signature.len();
+
+    if signature_size > cert_data.m_signature.const_bytes().len() {
+        return Err(chip_error_no_memory!());
+    }
+
+    cert_data.m_signature.bytes()[..signature_size].copy_from_slice(signature);
+
+    chip_ok!()
+}
+
 pub fn decode_chip_cert_with_reader_writer<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     reader: &mut Reader,
     writer: &mut Writer,
@@ -337,6 +359,8 @@ pub fn decode_chip_cert_with_reader_writer<'a, Reader: TlvReader<'a>, Writer: As
 
     // get extensions
     decode_extensions(reader, writer, cert_data)?;
+
+    decode_ecdsa_signature(reader, writer, cert_data)?;
 
     reader.verify_end_of_container()?;
 

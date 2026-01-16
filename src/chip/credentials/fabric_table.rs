@@ -542,7 +542,9 @@ pub mod fabric_info {
     pub mod tests {
         use super::*;
         use crate::chip::{
+            asn1::{Oid, Asn1Oid},
             chip_lib::{
+                asn1::asn1_writer::{Asn1Writer, TestAsn1Writer},
                 core::{
                     tlv_tags::{self, context_tag, is_context_tag, tag_num_from_tag},
                     tlv_types::{self, TlvType},
@@ -553,11 +555,14 @@ pub mod fabric_info {
             credentials::{
                 chip_cert::{
                     tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag, KeyPurposeFlags, decode_chip_cert, CertDecodeFlags,
-                    CertFlags, ChipCertBasicConstraintTag,
+                    CertFlags, ChipCertBasicConstraintTag, chip_epoch_to_asn1_time,
+                    internal::K_MAX_CHIP_CERT_DECODE_BUF_LENGTH,
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
             crypto::{
+                crypto_pal::hash_sha256,
+                K_SHA256_HASH_LENGTH,
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
                 ECPKeyTarget, ECPKeypair, P256Keypair, P256KeypairBase, K_P256_PUBLIC_KEY_LENGTH,
                 *,
@@ -589,6 +594,11 @@ pub mod fabric_info {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+            let mut asn1_writer = TestAsn1Writer::default();
+            let mut asn1_buf = [0u8; K_MAX_CHIP_CERT_DECODE_BUF_LENGTH];
+            asn1_writer.init(&mut asn1_buf);
+
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
             writer.start_container(
@@ -653,18 +663,24 @@ pub mod fabric_info {
             // end of list conatiner
             writer.end_container(subject_outer_container_dn_list);
 
-            // add to cert
+            // add public key to cert
             writer
                 .put_bytes(
                     tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
                     public_key,
                 )
                 .inspect_err(|e| println!("{:?}", e));
+            asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
+            asn1_writer.put_bit_string(0, public_key);
 
             // put a not before
             writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
+            let asn1_not_before = chip_epoch_to_asn1_time(not_before.as_secs()).unwrap();
+            asn1_writer.put_time(&asn1_not_before);
             // put a not after
             writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
+            let asn1_not_after = chip_epoch_to_asn1_time(not_after.as_secs()).unwrap();
+            asn1_writer.put_time(&asn1_not_after);
 
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
@@ -675,6 +691,10 @@ pub mod fabric_info {
                 &mut extensions_outer_container_list,
             );
             writer.end_container(extensions_outer_container_list);
+
+            let asn1_written = asn1_written.const_raw_bytes().unwrap();
+            let mut tbs_hash = [0u8; K_SHA256_HASH_LENGTH];
+            hash_sha256(&asn1_witten[..writer.get_length_written()], &mut tbs_hash);
 
             // end struct container
             writer.end_container(outer_container);
