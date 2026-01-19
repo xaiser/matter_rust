@@ -542,7 +542,7 @@ pub mod fabric_info {
     pub mod tests {
         use super::*;
         use crate::chip::{
-            asn1::{Oid, Asn1Oid},
+            asn1::{Oid, Asn1Oid, Asn1TagClasses, Class},
             chip_lib::{
                 asn1::asn1_writer::{Asn1Writer, TestAsn1Writer},
                 core::{
@@ -584,12 +584,19 @@ pub mod fabric_info {
             return fake_public_key;
         }
 
+        pub fn stub_keypair() -> P256Keypair {
+            let mut keypair = P256Keypair::default();
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
+            return keypair;
+        }
+
         pub fn make_chip_cert_with_time(
             matter_id_value: u64,
             fabric_id_value: u64,
             public_key: &[u8],
             not_before: Seconds32,
             not_after: Seconds32,
+            key_pair: Option<&P256Keypair>,
         ) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -675,11 +682,11 @@ pub mod fabric_info {
 
             // put a not before
             writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
-            let asn1_not_before = chip_epoch_to_asn1_time(not_before.as_secs()).unwrap();
+            let asn1_not_before = chip_epoch_to_asn1_time(not_before.as_secs() as u32).unwrap();
             asn1_writer.put_time(&asn1_not_before);
             // put a not after
             writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
-            let asn1_not_after = chip_epoch_to_asn1_time(not_after.as_secs()).unwrap();
+            let asn1_not_after = chip_epoch_to_asn1_time(not_after.as_secs() as u32).unwrap();
             asn1_writer.put_time(&asn1_not_after);
 
             // make empty extensions
@@ -692,9 +699,17 @@ pub mod fabric_info {
             );
             writer.end_container(extensions_outer_container_list);
 
-            let asn1_written = asn1_written.const_raw_bytes().unwrap();
-            let mut tbs_hash = [0u8; K_SHA256_HASH_LENGTH];
-            hash_sha256(&asn1_witten[..writer.get_length_written()], &mut tbs_hash);
+            if let Some(sign_key) = key_pair {
+                let mut sig = P256EcdsaSignature::default();
+                let asn1_written = asn1_writer.const_raw_bytes().unwrap();
+                sign_key.ecdsa_sign_msg(&asn1_written[..writer.get_length_written()], &mut sig);
+                writer
+                    .put_bytes(
+                        tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
+                        &sig.const_bytes()[..sig.length()],
+                    )
+                    .inspect_err(|e| println!("{:?}", e));
+            }
 
             // end struct container
             writer.end_container(outer_container);
@@ -709,10 +724,16 @@ pub mod fabric_info {
             matter_id_value: u64,
             fabric_id_value: u64,
             public_key: &[u8],
+            key_pair: Option<&P256Keypair>,
         ) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
+
+            let mut asn1_writer = TestAsn1Writer::default();
+            let mut asn1_buf = [0u8; K_MAX_CHIP_CERT_DECODE_BUF_LENGTH];
+            asn1_writer.init(&mut asn1_buf);
+
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
             writer.start_container(
@@ -785,11 +806,18 @@ pub mod fabric_info {
                     public_key,
                 )
                 .inspect_err(|e| println!("{:?}", e));
+            asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
+            asn1_writer.put_bit_string(0, public_key);
 
             // put a not before
             writer.put_u32(tag_not_before(), 0);
+            let asn1_not_before = chip_epoch_to_asn1_time(0u32).unwrap();
+            asn1_writer.put_time(&asn1_not_before);
+
             // put a not after
             writer.put_u32(tag_not_after(), 0);
+            let asn1_not_after = chip_epoch_to_asn1_time(0u32).unwrap();
+            asn1_writer.put_time(&asn1_not_after);
 
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
@@ -799,11 +827,28 @@ pub mod fabric_info {
                 tlv_types::TlvType::KtlvTypeList,
                 &mut extensions_outer_container_list,
             );
+
             let key = make_subject_key_id(1, 2);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+            asn1_writer.put_octet_string_cls_tag(Asn1TagClasses::Kasn1TagClassContextSpecific as Class, 0, &key);
+
             let key = make_subject_key_id(3, 4);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
+            asn1_writer.put_octet_string(&key);
+
             writer.end_container(extensions_outer_container_list);
+
+            if let Some(sign_key) = key_pair {
+                let mut sig = P256EcdsaSignature::default();
+                let asn1_written = asn1_writer.const_raw_bytes().unwrap();
+                assert!(sign_key.ecdsa_sign_msg(&asn1_written[..writer.get_length_written()], &mut sig).is_ok());
+                writer
+                    .put_bytes(
+                        tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
+                        &sig.const_bytes()[..sig.length()],
+                    )
+                    .inspect_err(|e| println!("{:?}", e));
+            }
 
             // end struct container
             writer.end_container(outer_container);
@@ -886,6 +931,15 @@ pub mod fabric_info {
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
             writer.end_container(extensions_outer_container_list);
+
+            // put a dummy signature since we won't check signature of CA ROOT.
+            let mut sig = P256EcdsaSignature::default();
+            writer
+                .put_bytes(
+                    tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
+                    sig.const_bytes(),
+                )
+                .inspect_err(|e| println!("{:?}", e));
 
             // end struct container
             writer.end_container(outer_container);
@@ -1033,8 +1087,8 @@ pub mod fabric_info {
             assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
 
             let pub_key = stub_public_key();
-            let rcac = make_chip_cert(1, 2, &pub_key[..]).unwrap();
-            let noc = make_chip_cert(3, 4, &pub_key[..]).unwrap();
+            let rcac = make_chip_cert(1, 2, &pub_key[..], None).unwrap();
+            let noc = make_chip_cert(3, 4, &pub_key[..], None).unwrap();
 
             let mut info_out = fabric_info_const_default();
             assert_eq!(
@@ -1073,7 +1127,7 @@ pub mod fabric_info {
         #[test]
         fn test_chip_data_to_tlv() {
             let pub_key = stub_public_key();
-            let rcac = make_chip_cert(1, 2, &pub_key[..]).unwrap();
+            let rcac = make_chip_cert(1, 2, &pub_key[..], None).unwrap();
             let mut cert_data = ChipCertificateData::default();
 
             assert!(decode_chip_cert(rcac.const_bytes(), &mut cert_data, Some(CertDecodeFlags::KgenerateTBSHash)).is_ok());
@@ -3433,12 +3487,14 @@ mod fabric_table {
                 (fabric_index + OFFSET) as u64,
                 (fabric_index + OFFSET + 1) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 2) as u64,
                 (fabric_index + OFFSET + 3) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
@@ -4984,18 +5040,21 @@ mod fabric_table {
                 (fabric_index + OFFSET) as u64,
                 (fabric_index + OFFSET + 1) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 1) as u64,
                 (fabric_index + OFFSET + 1) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 2) as u64,
                 (fabric_index + OFFSET + 3) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
@@ -5035,6 +5094,10 @@ mod fabric_table {
             let pub_key = pub_key.unwrap();
             ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+            let mut key_pair_buffer = crypto::P256SerializedKeypair::default();
+            assert!(ks.export_op_keypair_for_fabric(fabric_index, &mut key_pair_buffer).is_ok());
+            let mut key_pair = P256Keypair::default();
+            assert!(key_pair.deserialize(&key_pair_buffer).is_ok());
 
             // commit certs to storage
             pos.init(ptr::addr_of_mut!(pa));
@@ -5044,18 +5107,21 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(1),
                 Seconds32::from_secs(0),
+                Some(&key_pair),
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 1) as u64,
                 (fabric_index + OFFSET + 2) as u64,
                 pub_key.const_bytes(),
+                Some(&key_pair),
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 3) as u64,
                 (fabric_index + OFFSET + 4) as u64,
                 pub_key.const_bytes(),
+                Some(&key_pair),
             )
             .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
@@ -5114,6 +5180,7 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(1),
                 Seconds32::from_secs(0),
+                None,
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert_with_time(
@@ -5122,12 +5189,14 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(2),
                 Seconds32::from_secs(0),
+                None,
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
                 (fabric_index + OFFSET + 3) as u64,
                 (fabric_index + OFFSET + 4) as u64,
                 pub_key.const_bytes(),
+                None,
             )
             .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
@@ -5185,6 +5254,7 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(1),
                 Seconds32::from_secs(0),
+                None,
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert_with_time(
@@ -5193,6 +5263,7 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(2),
                 Seconds32::from_secs(0),
+                None,
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert_with_time(
@@ -5201,6 +5272,7 @@ mod fabric_table {
                 pub_key.const_bytes(),
                 Seconds32::from_secs(3),
                 Seconds32::from_secs(0),
+                None,
             )
             .unwrap();
             pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
@@ -5552,10 +5624,10 @@ mod fabric_table {
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
             let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             let noc =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             // only update rcac to storage
             assert_eq!(
@@ -5604,7 +5676,7 @@ mod fabric_table {
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
             let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             //let noc = FabricInfoTest::make_chip_cert(node_id as u64,fabric_id as u64, &pub_key[..]).unwrap();
             // only update rcac to storage
@@ -5655,10 +5727,10 @@ mod fabric_table {
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
             let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             let noc =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
 
             // no rcac commit
@@ -5703,13 +5775,14 @@ mod fabric_table {
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
             let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             // use different fabric id
             let noc = FabricInfoTest::make_chip_cert(
                 node_id as u64,
                 (fabric_id + 1) as u64,
                 &pub_key[..],
+                None
             )
             .unwrap();
             // only update rcac to storage
@@ -5759,10 +5832,10 @@ mod fabric_table {
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
             let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             let noc =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..])
+                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
             // only update rcac to storage
             assert_eq!(

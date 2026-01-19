@@ -2224,7 +2224,7 @@ pub(super) mod tests {
         #[test]
         fn decode_with_hash_flag_successfully() {
             let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]);
+            let cert = make_chip_cert(1, 2, &key[..], None);
             assert!(cert.is_ok());
             let cert = cert.unwrap();
 

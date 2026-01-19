@@ -275,6 +275,11 @@ mod chip_certificate_set {
                 Err(chip_error_cert_usage_not_allowed!())
             );
 
+            chip_log_detail!(
+                SecureChannel,
+                "depth {}",
+                depth
+            );
             if depth > 0 {
                 // If the depth is greater than 0 then the certificate is required to be a CA certificate...
 
@@ -416,6 +421,12 @@ mod chip_certificate_set {
             // If the certificate itself is trusted, then it is implicitly valid.  Record this certificate as the trust
             // anchor and return success.
             if cert.m_cert_flags.contains(CertFlags::KisTrustAnchor) {
+
+                chip_log_detail!(
+                    SecureChannel,
+                    "depth {}: is CA",
+                    depth
+                );
                 context.m_trust_anchor = Some(cert.m_subject_key_id.clone());
                 return chip_ok!();
             }
@@ -439,6 +450,12 @@ mod chip_certificate_set {
                 Err(chip_error_cert_path_too_long!())
             );
 
+            chip_log_detail!(
+                SecureChannel,
+                "depth {}: try CA",
+                depth
+            );
+
             // Search for a valid CA certificate that matches the Issuer DN and Authority Key Id of the current certificate.
             // Fail if no acceptable certificate is found.
             let ca_cert = self
@@ -457,6 +474,11 @@ mod chip_certificate_set {
                     chip_error_ca_cert_not_found!()
                 })?;
 
+            chip_log_detail!(
+                SecureChannel,
+                "depth {}: try sig",
+                depth
+            );
 
             // Verify signature of the current certificate against public key of the CA certificate. If signature verification
             // succeeds, the current certificate is valid.
@@ -541,7 +563,7 @@ mod chip_certificate_set {
                     CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
                 },
                 chip_cert::{tests::make_subject_key_id, K_KEY_IDENTIFIER_LENGTH, decode_chip_cert},
-                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data},
+                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data, stub_keypair},
             },
             crypto::{
                 ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
@@ -614,7 +636,7 @@ mod chip_certificate_set {
 
             let noc_cert = {
                 let key = stub_public_key();
-                let noc_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let noc_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 let mut noc = ChipCertificateData::default();
                 assert!(
@@ -736,7 +758,7 @@ mod chip_certificate_set {
 
             let noc_cert = {
                 let key = stub_public_key();
-                let noc_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let noc_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 let mut noc = ChipCertificateData::default();
                 assert!(
@@ -782,8 +804,8 @@ mod chip_certificate_set {
         #[test]
         fn load_one_cert_correctlly() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -794,9 +816,9 @@ mod chip_certificate_set {
         #[test]
         fn load_two_cert_correctlly() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
-            let cert2 = make_chip_cert(3, 4, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
+            let cert2 = make_chip_cert(3, 4, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -811,8 +833,8 @@ mod chip_certificate_set {
         #[test]
         fn load_one_cert_twice_correctlly() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -827,8 +849,8 @@ mod chip_certificate_set {
         #[test]
         fn release_last_cert_correctlly() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -839,8 +861,8 @@ mod chip_certificate_set {
         #[test]
         fn find_cert() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -854,8 +876,8 @@ mod chip_certificate_set {
         #[test]
         fn is_cert_in_the_sets() {
             let mut sets = ChipCertificateSet::new();
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..]).unwrap();
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             assert!(sets
                 .load_cert(cert.const_bytes(), CertDecodeFlags::Knone)
                 .inspect_err(|e| println!("{}", e))
@@ -924,10 +946,10 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let root_buffer = make_chip_cert(1, 2, &key[..], Some(&root_keypair)).unwrap();
                 // load as trust anchor
                 assert!(sets
-                    .load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone)
+                    .load_cert(root_buffer.const_bytes(), CertDecodeFlags::KgenerateTBSHash)
                     .inspect_err(|e| println!("{}", e))
                     .is_ok());
                 assert!(sets.m_certs_internal_storage[1].is_some());
@@ -936,6 +958,7 @@ mod chip_certificate_set {
                     noc.m_not_before_time = expected_not_before;
                     noc.m_not_after_time = expected_not_after;
                     /* for test, just sign pubkey and sub key id */
+                    /*
                     let mut buf = [0u8; K_P256_PUBLIC_KEY_LENGTH + K_KEY_IDENTIFIER_LENGTH];
                     buf[..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(&noc.m_public_key[..]);
                     buf[K_P256_PUBLIC_KEY_LENGTH..].copy_from_slice(&noc.m_subject_key_id[..]);
@@ -955,6 +978,7 @@ mod chip_certificate_set {
                         .is_ok());
                     // set up hash present flag
                     noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
+                    */
 
                     // copy subject dn from root to issue dn from noc
                     noc.m_issuer_dn.clear();
@@ -1124,7 +1148,7 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let node_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let node_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 assert!(sets
                     .load_cert(node_buffer.const_bytes(), CertDecodeFlags::Knone)
@@ -1243,7 +1267,7 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let root_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 assert!(sets
                     .load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone)
@@ -1362,7 +1386,7 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let root_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 assert!(sets
                     .load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone)
@@ -1479,7 +1503,7 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let root_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 assert!(sets
                     .load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone)
@@ -1592,7 +1616,7 @@ mod chip_certificate_set {
 
             let noc = {
                 let key = stub_public_key();
-                let root_buffer = make_chip_cert(1, 2, &key[..]).unwrap();
+                let root_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 // load as trust anchor
                 assert!(sets
                     .load_cert(root_buffer.const_bytes(), CertDecodeFlags::Knone)
