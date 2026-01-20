@@ -834,14 +834,14 @@ pub mod fabric_info {
 
             let key = make_subject_key_id(3, 4);
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
-            asn1_writer.put_octet_string(&key);
+            assert!(asn1_writer.put_octet_string(&key[..]).is_ok());
 
             writer.end_container(extensions_outer_container_list);
 
             if let Some(sign_key) = key_pair {
                 let mut sig = P256EcdsaSignature::default();
                 let asn1_written = asn1_writer.const_raw_bytes().unwrap();
-                assert!(sign_key.ecdsa_sign_msg(&asn1_written[..writer.get_length_written()], &mut sig).is_ok());
+                assert!(sign_key.ecdsa_sign_msg(&asn1_written[..asn1_writer.get_length_written()], &mut sig).is_ok());
                 writer
                     .put_bytes(
                         tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),

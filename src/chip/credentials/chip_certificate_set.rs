@@ -275,11 +275,6 @@ mod chip_certificate_set {
                 Err(chip_error_cert_usage_not_allowed!())
             );
 
-            chip_log_detail!(
-                SecureChannel,
-                "depth {}",
-                depth
-            );
             if depth > 0 {
                 // If the depth is greater than 0 then the certificate is required to be a CA certificate...
 
@@ -366,22 +361,10 @@ mod chip_certificate_set {
                 EffectiveTime::CurrentChipEpochTime(time) => {
                     let time_secs = time.as_secs() as u32;
                     if time_secs < cert.m_not_before_time {
-                        chip_log_detail!(
-                            SecureChannel,
-                            "Certificate's m_not_before_time {} is after curren time {}",
-                            cert.m_not_before_time,
-                            time_secs
-                        );
                         validity_result = CertificateValidityResult::KnotYetValid;
                     } else if cert.m_not_after_time != K_NULL_CERT_TIME
                         && time_secs > cert.m_not_after_time
                     {
-                        chip_log_detail!(
-                            SecureChannel,
-                            "Certificate's m_not_after_time {} is before curren time {}",
-                            cert.m_not_after_time,
-                            time_secs
-                        );
                         validity_result = CertificateValidityResult::Kexpired;
                     } else {
                         // do nothing
@@ -399,12 +382,6 @@ mod chip_certificate_set {
                     if cert.m_not_after_time != K_NULL_CERT_TIME
                         && time_secs > cert.m_not_after_time
                     {
-                        chip_log_detail!(
-                            SecureChannel,
-                            "Certificate's m_not_after_time {} is before curren time {}",
-                            cert.m_not_after_time,
-                            time_secs
-                        );
                         validity_result = CertificateValidityResult::KexpiredAtLastKnownGoodTime;
                     } else {
                         validity_result = CertificateValidityResult::KnotExpiredAtLastKnownGoodTime;
@@ -421,12 +398,6 @@ mod chip_certificate_set {
             // If the certificate itself is trusted, then it is implicitly valid.  Record this certificate as the trust
             // anchor and return success.
             if cert.m_cert_flags.contains(CertFlags::KisTrustAnchor) {
-
-                chip_log_detail!(
-                    SecureChannel,
-                    "depth {}: is CA",
-                    depth
-                );
                 context.m_trust_anchor = Some(cert.m_subject_key_id.clone());
                 return chip_ok!();
             }
@@ -450,12 +421,6 @@ mod chip_certificate_set {
                 Err(chip_error_cert_path_too_long!())
             );
 
-            chip_log_detail!(
-                SecureChannel,
-                "depth {}: try CA",
-                depth
-            );
-
             // Search for a valid CA certificate that matches the Issuer DN and Authority Key Id of the current certificate.
             // Fail if no acceptable certificate is found.
             let ca_cert = self
@@ -474,11 +439,6 @@ mod chip_certificate_set {
                     chip_error_ca_cert_not_found!()
                 })?;
 
-            chip_log_detail!(
-                SecureChannel,
-                "depth {}: try sig",
-                depth
-            );
 
             // Verify signature of the current certificate against public key of the CA certificate. If signature verification
             // succeeds, the current certificate is valid.
@@ -957,28 +917,6 @@ mod chip_certificate_set {
                     // update the effec time
                     noc.m_not_before_time = expected_not_before;
                     noc.m_not_after_time = expected_not_after;
-                    /* for test, just sign pubkey and sub key id */
-                    /*
-                    let mut buf = [0u8; K_P256_PUBLIC_KEY_LENGTH + K_KEY_IDENTIFIER_LENGTH];
-                    buf[..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(&noc.m_public_key[..]);
-                    buf[K_P256_PUBLIC_KEY_LENGTH..].copy_from_slice(&noc.m_subject_key_id[..]);
-
-                    // get the hash result first
-                    let mut hasher = Sha256::new();
-                    hasher.update(&buf[..]);
-                    let result = hasher.finalize();
-
-                    assert!(result.as_slice().len() == K_SHA256_HASH_LENGTH);
-                    noc.m_tbs_hash[..K_SHA256_HASH_LENGTH].copy_from_slice(result.as_slice());
-
-                    // sign the buf: pubkey + sub key id
-                    assert!(root_keypair
-                        .ecdsa_sign_msg(&buf[..], &mut noc.m_signature)
-                        .inspect_err(|e| println!("{}", e))
-                        .is_ok());
-                    // set up hash present flag
-                    noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
-                    */
 
                     // copy subject dn from root to issue dn from noc
                     noc.m_issuer_dn.clear();
@@ -1004,6 +942,7 @@ mod chip_certificate_set {
             ));
             context.m_required_key_usages = noc.m_key_usage_flags.clone();
             context.m_required_cert_type = CertType::Knode;
+
             assert!(sets
                 .validate_cert(noc, &mut context)
                 .inspect_err(|e| println!("{}", e))

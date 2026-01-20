@@ -503,35 +503,20 @@ impl ECPKey for P256PublicKey {
         if verifying_key.is_err() {
             return Err(chip_error_internal!());
         }
-        chip_log_detail!(
-            SecureChannel,
-            "v1"
-        );
         let verifying_key = verifying_key.unwrap();
 
         let sig = Signature::from_slice(signature.const_bytes());
-        chip_log_detail!(
-            SecureChannel,
-            "pre v2, {:?}", signature.const_bytes()
-        );
 
         if sig.is_err() {
             return Err(chip_error_internal!());
         }
-        chip_log_detail!(
-            SecureChannel,
-            "v2, {}", signature.const_bytes().len()
-        );
 
         let sig = sig.unwrap();
+
 
         if verifying_key.verify(hash, &sig).is_err() {
             return Err(chip_error_internal!());
         }
-        chip_log_detail!(
-            SecureChannel,
-            "v3"
-        );
         chip_ok!()
     }
 
