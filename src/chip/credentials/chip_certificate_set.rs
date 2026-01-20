@@ -518,12 +518,13 @@ mod chip_certificate_set {
         use super::*;
 
         use crate::chip::{
+            asn1::Oid,
             credentials::{
                 certificate_validity_policy::{
                     CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
                 },
                 chip_cert::{tests::make_subject_key_id, K_KEY_IDENTIFIER_LENGTH, decode_chip_cert},
-                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data, stub_keypair},
+                fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data, stub_keypair, make_chip_cert_with_ids},
             },
             crypto::{
                 ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
@@ -867,11 +868,13 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(sets.m_certs_internal_storage[0].is_some());
                 if let Some(root) = sets.m_certs_internal_storage[0].as_mut() {
+                    /*
                     root.m_not_before_time = expected_not_before;
                     root.m_not_after_time = expected_not_after;
                     root.m_cert_flags
                         .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
                     root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
+                    */
                 } else {
                     assert!(false);
                 }
@@ -960,6 +963,7 @@ mod chip_certificate_set {
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let root_dn = {
+                // with default subject id (1,2)
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
                 assert!(sets
@@ -973,7 +977,7 @@ mod chip_certificate_set {
                     root.m_cert_flags
                         .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
                     root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
-                    root.m_subject_key_id = root_key_id.clone();
+                    //root.m_subject_key_id = root_key_id.clone();
                 } else {
                     assert!(false);
                 }
@@ -984,8 +988,8 @@ mod chip_certificate_set {
                 );
 
                 // this is the key in make_chip_cert
-                let key = make_subject_key_id(1, 2);
-                let root_ref = sets.find_cert(&key);
+                //let key = make_subject_key_id(1, 2);
+                let root_ref = sets.find_cert(&root_key_id);
                 assert!(root_ref.is_some());
                 let root_ref = root_ref.unwrap();
 
@@ -996,7 +1000,7 @@ mod chip_certificate_set {
                     .is_ok());
                 assert!(context
                     .m_trust_anchor
-                    .is_some_and(|c| c == key));
+                    .is_some_and(|c| c == root_key_id));
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root_ref.m_subject_dn.rdn.iter().enumerate() {
@@ -1009,10 +1013,14 @@ mod chip_certificate_set {
             let mut icac_keypair = P256Keypair::default();
             icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let icac_dn = {
-                let icac_buffer = make_ca_cert(1, icac_keypair.public_key().const_bytes()).unwrap();
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                //let mut issuer_dn = ChipDN::default();
+                //let icac_buffer = make_chip_cert_with_ids(1, icac_keypair.public_key().const_bytes()).unwrap();
+                let icac_buffer = make_chip_cert_with_ids(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(), &icac_key_id, &root_key_id, Some(&root_keypair)).unwrap();
                 // load as trust anchor
                 assert!(sets
-                    .load_cert(icac_buffer.const_bytes(), CertDecodeFlags::Knone)
+                    .load_cert(icac_buffer.const_bytes(), CertDecodeFlags::KgenerateTBSHash)
                     .inspect_err(|e| println!("{}", e))
                     .is_ok());
                 assert!(sets.m_certs_internal_storage[1].is_some());
@@ -1022,41 +1030,6 @@ mod chip_certificate_set {
                     icac.m_cert_flags
                         .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
                     icac.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
-                    // replace RCAC id with ICAC id
-                    icac.m_subject_dn.clear();
-                    icac.m_subject_dn.add_attribute(
-                        crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId.into(),
-                        2,
-                    );
-                    icac.m_subject_key_id = icac_key_id.clone();
-                    icac.m_auth_key_id = root_key_id.clone();
-
-                    // copy subject dn from root to issue dn from noc
-                    icac.m_issuer_dn.clear();
-                    for (index, value) in root_dn.rdn.iter().enumerate() {
-                        icac.m_issuer_dn.rdn[index] = value.clone();
-                    }
-
-                    /* for test, just sign pubkey and sub key id */
-                    let mut buf = [0u8; K_P256_PUBLIC_KEY_LENGTH + K_KEY_IDENTIFIER_LENGTH];
-                    buf[..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(&icac.m_public_key[..]);
-                    buf[K_P256_PUBLIC_KEY_LENGTH..].copy_from_slice(&icac.m_subject_key_id[..]);
-
-                    // get the hash result first
-                    let mut hasher = Sha256::new();
-                    hasher.update(&buf[..]);
-                    let result = hasher.finalize();
-
-                    assert!(result.as_slice().len() == K_SHA256_HASH_LENGTH);
-                    icac.m_tbs_hash[..K_SHA256_HASH_LENGTH].copy_from_slice(result.as_slice());
-
-                    // sign the buf: pubkey + sub key id
-                    assert!(root_keypair
-                        .ecdsa_sign_msg(&buf[..], &mut icac.m_signature)
-                        .inspect_err(|e| println!("{}", e))
-                        .is_ok());
-                    // set up hash present flag
-                    icac.m_cert_flags.insert(CertFlags::KtbsHashPresent);
                 } else {
                     assert!(false);
                 }
@@ -1085,12 +1058,19 @@ mod chip_certificate_set {
                 icac_dn
             };
 
+            let noc_keypair = stub_keypair();
             let noc = {
-                let key = stub_public_key();
-                let node_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
+                let subject_id = make_subject_key_id(1, 2);
+                let auth_id = make_subject_key_id(3, 4);
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+
+                //let node_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
+                let node_buffer = make_chip_cert_with_ids(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(), &node_key_id, &icac_key_id, Some(&icac_keypair)).unwrap();
                 // load as trust anchor
                 assert!(sets
-                    .load_cert(node_buffer.const_bytes(), CertDecodeFlags::Knone)
+                    .load_cert(node_buffer.const_bytes(), CertDecodeFlags::KgenerateTBSHash)
                     .inspect_err(|e| println!("{}", e))
                     .is_ok());
                 assert!(sets.m_certs_internal_storage[2].is_some());
@@ -1098,36 +1078,6 @@ mod chip_certificate_set {
                     // update the effec time
                     noc.m_not_before_time = expected_not_before;
                     noc.m_not_after_time = expected_not_after;
-                    /* for test, just sign pubkey and sub key id */
-                    let mut buf = [0u8; K_P256_PUBLIC_KEY_LENGTH + K_KEY_IDENTIFIER_LENGTH];
-                    buf[..K_P256_PUBLIC_KEY_LENGTH].copy_from_slice(&noc.m_public_key[..]);
-                    buf[K_P256_PUBLIC_KEY_LENGTH..].copy_from_slice(&noc.m_subject_key_id[..]);
-
-                    // update key id
-                    noc.m_subject_key_id = node_key_id.clone();
-                    noc.m_auth_key_id = icac_key_id.clone();
-
-                    // get the hash result first
-                    let mut hasher = Sha256::new();
-                    hasher.update(&buf[..]);
-                    let result = hasher.finalize();
-
-                    assert!(result.as_slice().len() == K_SHA256_HASH_LENGTH);
-                    noc.m_tbs_hash[..K_SHA256_HASH_LENGTH].copy_from_slice(result.as_slice());
-
-                    // sign the buf: pubkey + sub key id
-                    assert!(icac_keypair
-                        .ecdsa_sign_msg(&buf[..], &mut noc.m_signature)
-                        .inspect_err(|e| println!("{}", e))
-                        .is_ok());
-                    // set up hash present flag
-                    noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
-
-                    // copy subject dn from root to issue dn from noc
-                    noc.m_issuer_dn.clear();
-                    for (index, value) in icac_dn.rdn.iter().enumerate() {
-                        noc.m_issuer_dn.rdn[index] = value.clone();
-                    }
                 } else {
                     assert!(false);
                 }
