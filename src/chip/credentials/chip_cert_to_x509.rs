@@ -326,9 +326,17 @@ pub fn decode_chip_cert_with_reader_writer<'a, Reader: TlvReader<'a>, Writer: As
     writer: &mut Writer,
     cert_data: &mut ChipCertificateData,
 ) -> ChipErrorResult {
+    chip_log_detail!(
+        FabricProvisioning,
+        "in the start"
+    );
     if reader.get_type() == TlvType::KtlvTypeNotSpecified {
         reader.next()?;
     }
+    chip_log_detail!(
+        FabricProvisioning,
+        "in the start .3"
+    );
 
     reader.expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
     let container_type = reader.enter_container()?;
@@ -352,6 +360,11 @@ pub fn decode_chip_cert_with_reader_writer<'a, Reader: TlvReader<'a>, Writer: As
     cert_data.m_not_before_time = reader.get_u32()?;
     let asn1_time = chip_epoch_to_asn1_time(cert_data.m_not_before_time)?;
     writer.put_time(&asn1_time)?;
+
+    chip_log_detail!(
+        FabricProvisioning,
+        "in the middle"
+    );
     // not after time
     reader.next_tag(tag_not_after())?;
     cert_data.m_not_after_time = reader.get_u32()?;

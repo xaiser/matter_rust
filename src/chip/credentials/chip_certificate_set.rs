@@ -274,6 +274,11 @@ mod chip_certificate_set {
                     .contains(CertFlags::KextPresentFutureIsCritical),
                 Err(chip_error_cert_usage_not_allowed!())
             );
+            chip_log_error!(
+                SecureChannel,
+                "start depth {}",
+                depth
+            );
 
             if depth > 0 {
                 // If the depth is greater than 0 then the certificate is required to be a CA certificate...
@@ -348,6 +353,12 @@ mod chip_certificate_set {
                 }
             }
 
+            chip_log_error!(
+                SecureChannel,
+                "mid start depth {}",
+                depth
+            );
+
             // Verify NotBefore and NotAfter validity of the certificates.
             //
             // See also ASN1ToChipEpochTime().
@@ -419,6 +430,12 @@ mod chip_certificate_set {
             verify_or_return_error!(
                 depth < self.m_cert_count,
                 Err(chip_error_cert_path_too_long!())
+            );
+
+            chip_log_error!(
+                SecureChannel,
+                "issuer dn {:?}",
+                cert.m_auth_key_id
             );
 
             // Search for a valid CA certificate that matches the Issuer DN and Authority Key Id of the current certificate.
@@ -691,6 +708,7 @@ mod chip_certificate_set {
                     .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
                 icac.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
                 // replace RCAC id with ICAC id
+                /*
                 icac.m_subject_dn.clear();
                 icac.m_subject_dn.add_attribute(
                     crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId.into(),
@@ -698,13 +716,15 @@ mod chip_certificate_set {
                 );
                 icac.m_subject_key_id = icac_key_id.clone();
                 icac.m_auth_key_id = root_key_id.clone();
+                */
 
                 // copy subject dn from root to issue dn from noc
+                /*
                 icac.m_issuer_dn.clear();
                 for (index, value) in root_dn.rdn.iter().enumerate() {
                     icac.m_issuer_dn.rdn[index] = value.clone();
                 }
-
+                */
 
                 let mut icac_dn = ChipDN::default();
                 for (index, value) in icac.m_subject_dn.rdn.iter().enumerate() {
@@ -1658,12 +1678,12 @@ mod chip_certificate_set {
                 .is_ok());
 
             assert!(sets
-                .load_cert(icac_buffer.const_bytes(), CertDecodeFlags::Knone)
+                .load_cert(icac_buffer.const_bytes(), CertDecodeFlags::KgenerateTBSHash)
                 .inspect_err(|e| println!("{}", e))
                 .is_ok());
 
             assert!(sets
-                .load_cert(noc_buffer.const_bytes(), CertDecodeFlags::Knone)
+                .load_cert(noc_buffer.const_bytes(), CertDecodeFlags::KgenerateTBSHash)
                 .inspect_err(|e| println!("{}", e))
                 .is_ok());
 

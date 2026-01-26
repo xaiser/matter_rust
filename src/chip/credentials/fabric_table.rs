@@ -1084,6 +1084,9 @@ pub mod fabric_info {
             // end entensions list
             writer.end_container(extensions_outer_container_list);
 
+            // signature
+            writer.put_bytes(context_tag(ChipCertTag::KtagECDSASignature as u8), cert_data.m_signature.const_bytes());
+
             // end struct container
             writer.end_container(outer_container);
 
