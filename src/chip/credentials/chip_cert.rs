@@ -57,10 +57,8 @@ use crate::verify_or_return_value;
 
 use bitflags::{bitflags, Flags};
 
-// we use this buffer to store the vid verification statement too
-// As the development goes, we push more and more data to cert, so we extend 128 bytes first.
 pub const K_MAX_CHIP_CERT_LENGTH: usize =
-    crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE + 128;
+    crate::chip::crypto::K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE + 256;
 pub const K_MAX_RDN_STRING_LENGTH: usize = 10;
 pub const K_KEY_IDENTIFIER_LENGTH: usize = crate::chip::crypto::K_SUBJECT_KEY_IDENTIFIER_LENGTH;
 pub type ChipRDNString = DefaultString<K_MAX_RDN_STRING_LENGTH>;

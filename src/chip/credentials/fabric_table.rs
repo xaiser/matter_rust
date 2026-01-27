@@ -556,7 +556,7 @@ pub mod fabric_info {
                 chip_cert::{
                     tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag, KeyPurposeFlags, decode_chip_cert, CertDecodeFlags,
                     CertFlags, ChipCertBasicConstraintTag, chip_epoch_to_asn1_time, CertificateKeyId, ChipDN,
-                    internal::K_MAX_CHIP_CERT_DECODE_BUF_LENGTH,
+                    internal::K_MAX_CHIP_CERT_DECODE_BUF_LENGTH, CertType, KeyUsageFlags
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
@@ -573,7 +573,7 @@ pub mod fabric_info {
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
         //type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
-        const CHIP_CERT_SIZE: usize = 256 + K_P256_PUBLIC_KEY_LENGTH;
+        const CHIP_CERT_SIZE: usize = 512 + K_P256_PUBLIC_KEY_LENGTH;
 
         pub fn stub_public_key() -> [u8; K_P256_PUBLIC_KEY_LENGTH] {
             let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
@@ -868,7 +868,7 @@ pub mod fabric_info {
             let mut issuer_dn = ChipDN::default();
             issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
             issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
-            return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, key_pair);
+            return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, key_pair, CertType::Knode);
         }
 
         pub fn make_chip_cert_with_ids(
@@ -878,8 +878,9 @@ pub mod fabric_info {
             subject_id: &CertificateKeyId,
             auth_id: &CertificateKeyId,
             key_pair: Option<&P256Keypair>,
+            cert_type: CertType,
         ) -> Result<CertBuffer, ()> {
-            return make_chip_cert_with_ids_and_times(subject_dn, auth_dn, public_key, subject_id, auth_id, 0u32, 0u32, key_pair);
+            return make_chip_cert_with_ids_and_times(subject_dn, auth_dn, public_key, subject_id, auth_id, 0u32, 0u32, key_pair, cert_type);
         }
 
         pub fn make_chip_cert_with_ids_and_times(
@@ -891,6 +892,7 @@ pub mod fabric_info {
             not_before: u32,
             not_after: u32,
             key_pair: Option<&P256Keypair>,
+            cert_type: CertType,
         ) -> Result<CertBuffer, ()> {
             let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
             let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
@@ -950,6 +952,50 @@ pub mod fabric_info {
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), subject_id).inspect_err(|e| println!("{}", e)).is_ok());
             assert!(asn1_writer.put_octet_string(&subject_id[..]).is_ok());
 
+            let mut key_usage_flag = KeyUsageFlags::empty();
+
+            match cert_type {
+                CertType::Kroot => {
+                    key_usage_flag.insert(KeyUsageFlags::KkeyCertSign);
+                },
+                _ => {}
+            }
+
+            assert!(writer.put_u16(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagKeyUsage as u8), key_usage_flag.bits()).inspect_err(|e| println!("{}", e)).is_ok());
+            assert!(asn1_writer.put_bit_string_with_value(key_usage_flag.bits().into()).is_ok());
+
+            match cert_type {
+                CertType::Kroot => {
+                    // basic constraint
+                    let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
+                    writer.start_container(
+                        context_tag(ChipCertExtensionTag::KtagBasicConstraints as u8),
+                        tlv_types::TlvType::KtlvTypeStructure,
+                        &mut outer_container,
+                    );
+                    assert!(asn1_writer.put_boolean(true).is_ok());
+                    writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
+
+                    // end basic constraint
+                    writer.end_container(outer_container);
+                },
+                _ => {}
+            }
+
+            // empty extended key usage
+            {
+                // start extended key usage extensions list
+                let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
+                writer.start_container(
+                    context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
+                    tlv_types::TlvType::KtlvTypeArray,
+                    &mut extensions_outer_container_list,
+                );
+
+                // end entensions list
+                writer.end_container(extensions_outer_container_list);
+            }
+
             writer.end_container(extensions_outer_container_list);
 
             if let Some(sign_key) = key_pair {
@@ -981,7 +1027,7 @@ pub mod fabric_info {
             let mut issuer_dn = ChipDN::default();
             let keypair = stub_keypair();
 
-            return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, Some(&keypair));
+            return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, Some(&keypair), CertType::Kroot);
         }
 
         pub fn make_chip_cert_by_data(
@@ -999,7 +1045,8 @@ pub mod fabric_info {
             );
 
             // start a issuer_dn list
-            cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagIssuer as u8));
+            //cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagIssuer as u8));
+            cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
 
             // start a subject dn list
             cert_data.m_subject_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
@@ -1027,7 +1074,8 @@ pub mod fabric_info {
 
             writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &cert_data.m_auth_key_id);
             writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &cert_data.m_subject_key_id);
-            writer.put_u32(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u32);
+            //writer.put_u32(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u32);
+            writer.put_u16(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u16);
 
             if cert_data.m_cert_flags.intersects(CertFlags::KisCA) {
                 // basic constraint
@@ -1091,7 +1139,7 @@ pub mod fabric_info {
             writer.end_container(outer_container);
 
             let mut cert = CertBuffer::default();
-            cert.init(&raw_tlv[..writer.get_length_written()]);
+            assert!(cert.init(&raw_tlv[..writer.get_length_written()]).is_ok());
 
             return Ok(cert);
         }
