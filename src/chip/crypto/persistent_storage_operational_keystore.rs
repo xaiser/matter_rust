@@ -247,6 +247,11 @@ where
 
         None
     }
+
+    #[cfg(test)]
+    pub fn get_pending_keypair(&self) -> Option<&'_ P256Keypair> {
+        return self.m_pending_keypair.as_ref();
+    }
 }
 
 impl<PA> OperationalKeystore for PersistentStorageOperationalKeystore<PA>

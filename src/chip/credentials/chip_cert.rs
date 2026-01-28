@@ -1571,8 +1571,8 @@ pub(super) mod tests {
             //tlv_reader::{TlvContiguousBufferReader, TlvReader},
             tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
         };
-        use crate::chip::crypto::{ECPKey, ECPKeyTarget, P256Keypair, K_P256_PUBLIC_KEY_LENGTH};
-        use crate::chip::credentials::fabric_table::fabric_info::tests::{make_chip_cert, stub_public_key};
+        use crate::chip::crypto::{ECPKey, ECPKeyTarget, P256Keypair, K_P256_PUBLIC_KEY_LENGTH, ECPKeypair};
+        use crate::chip::credentials::fabric_table::fabric_info::tests::{make_chip_cert, stub_public_key, stub_keypair};
 
         #[test]
         fn extract_node_id_fabrid_id() {
@@ -1600,119 +1600,13 @@ pub(super) mod tests {
 
         #[test]
         fn extract_node_id_fabrid_id_from_bytes() {
-            const RAW_SIZE: usize = K_P256_PUBLIC_KEY_LENGTH + 128;
-            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::anonymous_tag(),
-                        tlv_types::TlvType::KtlvTypeStructure,
-                        &mut outer_container
-                    )
-                    .is_ok()
-            );
-
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                        tlv_types::TlvType::KtlvTypeList,
-                        &mut outer_container_dn_list
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            assert_eq!(true, writer.end_container(outer_container_dn_list).is_ok());
-
-            // make a stub public key
-            let fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
-                [0; K_P256_PUBLIC_KEY_LENGTH];
-            // add to cert
-            assert_eq!(
-                true,
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                        &fake_public_key[..]
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-
-            // put a extension
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            assert!(writer
-                .start_container(
-                    context_tag(ChipCertTag::KtagExtensions as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut extensions_outer_container_list
-                )
-                .is_ok());
-            writer.end_container(extensions_outer_container_list);
-
-            // end struct container
-            assert_eq!(true, writer.end_container(outer_container).is_ok());
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair));
+            assert!(cert.is_ok());
+            let cert = cert.unwrap();
 
             if let Ok((node_id, fabric_id)) =
-                extract_node_id_fabric_id_from_op_cert_byte(&raw_tlv[..writer.get_length_written()])
+                extract_node_id_fabric_id_from_op_cert_byte(cert.const_bytes())
                     .inspect_err(|e| println!("{:?}", e))
             {
                 assert_eq!(1, node_id);
@@ -1724,125 +1618,16 @@ pub(super) mod tests {
 
         #[test]
         fn extract_public_key_from_bytes() {
-            const RAW_SIZE: usize = K_P256_PUBLIC_KEY_LENGTH + 128;
-            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::anonymous_tag(),
-                        tlv_types::TlvType::KtlvTypeStructure,
-                        &mut outer_container
-                    )
-                    .is_ok()
-            );
-
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                        tlv_types::TlvType::KtlvTypeList,
-                        &mut outer_container_dn_list
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            assert_eq!(true, writer.end_container(outer_container_dn_list).is_ok());
-
-            // make a stub public key
-            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
-                [0; K_P256_PUBLIC_KEY_LENGTH];
-            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
-                fake_public_key[i] = i as u8;
-            }
-            // add to cert
-            assert_eq!(
-                true,
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                        &fake_public_key[..]
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-
-            // put a extension
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            assert!(writer
-                .start_container(
-                    context_tag(ChipCertTag::KtagExtensions as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut extensions_outer_container_list
-                )
-                .is_ok());
-            writer.end_container(extensions_outer_container_list);
-
-            // end struct container
-            assert_eq!(true, writer.end_container(outer_container).is_ok());
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair));
+            assert!(cert.is_ok());
+            let cert = cert.unwrap();
 
             if let Ok(key) =
-                extract_public_key_from_chip_cert_byte(&raw_tlv[..writer.get_length_written()])
+                extract_public_key_from_chip_cert_byte(cert.const_bytes())
                     .inspect_err(|e| println!("{:?}", e))
             {
-                assert_eq!(&fake_public_key[..], key.const_bytes());
+                assert_eq!(keypair.public_key().const_bytes(), key.const_bytes());
             } else {
                 assert!(false);
             }
@@ -1850,127 +1635,18 @@ pub(super) mod tests {
 
         #[test]
         fn equality() {
-            const RAW_SIZE: usize = K_P256_PUBLIC_KEY_LENGTH + 128;
-            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::anonymous_tag(),
-                        tlv_types::TlvType::KtlvTypeStructure,
-                        &mut outer_container
-                    )
-                    .is_ok()
-            );
-
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                        tlv_types::TlvType::KtlvTypeList,
-                        &mut outer_container_dn_list
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            assert_eq!(true, writer.end_container(outer_container_dn_list).is_ok());
-
-            // make a stub public key
-            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
-                [0; K_P256_PUBLIC_KEY_LENGTH];
-            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
-                fake_public_key[i] = i as u8;
-            }
-            // add to cert
-            assert_eq!(
-                true,
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                        &fake_public_key[..]
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-
-            // put a extension
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            assert!(writer
-                .start_container(
-                    context_tag(ChipCertTag::KtagExtensions as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut extensions_outer_container_list
-                )
-                .is_ok());
-            writer.end_container(extensions_outer_container_list);
-
-            // end struct container
-            assert_eq!(true, writer.end_container(outer_container).is_ok());
+            let keypair = stub_keypair();
+            let cert_buffer = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair));
+            assert!(cert_buffer.is_ok());
+            let cert_buffer = cert_buffer.unwrap();
 
             let mut cert1 = ChipCertificateData::default();
             let mut cert2 = ChipCertificateData::default();
             assert!(
-                decode_chip_cert(&raw_tlv[..writer.get_length_written()], &mut cert1, None).is_ok()
+                decode_chip_cert(cert_buffer.const_bytes(), &mut cert1, None).is_ok()
             );
             assert!(
-                decode_chip_cert(&raw_tlv[..writer.get_length_written()], &mut cert2, None).is_ok()
+                decode_chip_cert(cert_buffer.const_bytes(), &mut cert2, None).is_ok()
             );
 
             assert!(cert1.is_equal(&cert2));
@@ -1978,251 +1654,32 @@ pub(super) mod tests {
 
         #[test]
         fn not_same() {
-            const RAW_SIZE: usize = K_P256_PUBLIC_KEY_LENGTH + 128;
-            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::anonymous_tag(),
-                        tlv_types::TlvType::KtlvTypeStructure,
-                        &mut outer_container
-                    )
-                    .is_ok()
-            );
+            let keypair = stub_keypair();
+            let cert_buffer = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair));
+            assert!(cert_buffer.is_ok());
+            let cert_buffer = cert_buffer.unwrap();
 
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                        tlv_types::TlvType::KtlvTypeList,
-                        &mut outer_container_dn_list
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            assert_eq!(true, writer.end_container(outer_container_dn_list).is_ok());
-
-            // make a stub public key
-            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
-                [0; K_P256_PUBLIC_KEY_LENGTH];
-            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
-                fake_public_key[i] = i as u8;
-            }
-            // add to cert
-            assert_eq!(
-                true,
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                        &fake_public_key[..]
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-
-            // put a extension
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            assert!(writer
-                .start_container(
-                    context_tag(ChipCertTag::KtagExtensions as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut extensions_outer_container_list
-                )
-                .is_ok());
-            writer.end_container(extensions_outer_container_list);
-
-            // end struct container
-            assert_eq!(true, writer.end_container(outer_container).is_ok());
+            let cert_buffer_1 = make_chip_cert(1, 3, keypair.public_key().const_bytes(), Some(&keypair));
+            assert!(cert_buffer_1.is_ok());
+            let cert_buffer_1 = cert_buffer_1.unwrap();
 
             let mut cert1 = ChipCertificateData::default();
-            assert!(
-                decode_chip_cert(&raw_tlv[..writer.get_length_written()], &mut cert1, None).is_ok()
-            );
-
-            let mut raw_tlv: [u8; RAW_SIZE] = [0; RAW_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::anonymous_tag(),
-                        tlv_types::TlvType::KtlvTypeStructure,
-                        &mut outer_container
-                    )
-                    .is_ok()
-            );
-
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x01u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            let mut outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            assert_eq!(
-                true,
-                writer
-                    .start_container(
-                        tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                        tlv_types::TlvType::KtlvTypeList,
-                        &mut outer_container_dn_list
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            // NOT SAME
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                0x02u64,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                0x02u64,
-            );
-            // end of list conatiner
-            assert_eq!(true, writer.end_container(outer_container_dn_list).is_ok());
-
-            // make a stub public key
-            let mut fake_public_key: [u8; crate::chip::crypto::K_P256_PUBLIC_KEY_LENGTH] =
-                [0; K_P256_PUBLIC_KEY_LENGTH];
-            for i in 0..K_P256_PUBLIC_KEY_LENGTH {
-                fake_public_key[i] = i as u8;
-            }
-            // add to cert
-            assert_eq!(
-                true,
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                        &fake_public_key[..]
-                    )
-                    .inspect_err(|e| println!("{:?}", e))
-                    .is_ok()
-            );
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-
-            // put a extension
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            assert!(writer
-                .start_container(
-                    context_tag(ChipCertTag::KtagExtensions as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut extensions_outer_container_list
-                )
-                .is_ok());
-            writer.end_container(extensions_outer_container_list);
-
-            // end struct container
-            assert_eq!(true, writer.end_container(outer_container).is_ok());
-
             let mut cert2 = ChipCertificateData::default();
             assert!(
-                decode_chip_cert(&raw_tlv[..writer.get_length_written()], &mut cert2, None).is_ok()
+                decode_chip_cert(cert_buffer.const_bytes(), &mut cert1, None).is_ok()
             );
+            assert!(
+                decode_chip_cert(cert_buffer_1.const_bytes(), &mut cert2, None).is_ok()
+            );
+
 
             assert_eq!(false, cert1.is_equal(&cert2));
         }
 
         #[test]
         fn decode_with_hash_flag_successfully() {
-            let key = stub_public_key();
-            let cert = make_chip_cert(1, 2, &key[..], None);
+            let keypair = stub_keypair();
+            let cert = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair));
             assert!(cert.is_ok());
             let cert = cert.unwrap();
 

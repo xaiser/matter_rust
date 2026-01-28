@@ -718,7 +718,6 @@ mod chip_certificate_set {
                     decode_chip_cert(icac_buffer.const_bytes(), &mut icac, Some(CertDecodeFlags::KgenerateTBSHash))
                     .inspect_err(|e| println!("{}", e))
                     .is_ok());
-                println!("the tbs is {:?}, sig is {:?}", icac.m_tbs_hash, icac.m_signature.const_bytes());
                 //icac.m_not_before_time = expected_not_before;
                 //icac.m_not_after_time = expected_not_after;
                 icac.m_cert_flags

@@ -382,6 +382,7 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
         writer.init(&mut buf);
         decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
         if let Some(written_buf) = writer.const_raw_bytes() {
+            let msg = &written_buf[..writer.get_length_written()];
             hash_sha256(&written_buf[..writer.get_length_written()], &mut cert_data.m_tbs_hash[..])?;
         } else {
             // should not happen since the writer must have a buffer

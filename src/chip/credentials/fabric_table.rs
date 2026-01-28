@@ -569,6 +569,7 @@ pub mod fabric_info {
             },
         };
         use core::ptr;
+        use sha2::{Digest, Sha256};
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -928,12 +929,12 @@ pub mod fabric_info {
             asn1_writer.put_bit_string(0, public_key);
 
             // put a not before
-            writer.put_u32(tag_not_before(), 0);
+            writer.put_u32(tag_not_before(), not_before);
             let asn1_not_before = chip_epoch_to_asn1_time(not_before).unwrap();
             asn1_writer.put_time(&asn1_not_before);
 
             // put a not after
-            writer.put_u32(tag_not_after(), 0);
+            writer.put_u32(tag_not_after(), not_after);
             let asn1_not_after = chip_epoch_to_asn1_time(not_after).unwrap();
             asn1_writer.put_time(&asn1_not_after);
 
@@ -1001,6 +1002,11 @@ pub mod fabric_info {
             if let Some(sign_key) = key_pair {
                 let mut sig = P256EcdsaSignature::default();
                 let asn1_written = asn1_writer.const_raw_bytes().unwrap();
+                let msg =  &asn1_written[..asn1_writer.get_length_written()];
+                let mut hasher = Sha256::new();
+                hasher.update(&msg[..]);
+                let hash_result = hasher.finalize();
+                //println!("the sig hash is {:?}", hash_result.as_slice());
                 assert!(sign_key.ecdsa_sign_msg(&asn1_written[..asn1_writer.get_length_written()], &mut sig).is_ok());
                 writer
                     .put_bytes(
@@ -1171,9 +1177,10 @@ pub mod fabric_info {
             // commit first
             assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
 
-            let pub_key = stub_public_key();
-            let rcac = make_chip_cert(1, 2, &pub_key[..], None).unwrap();
-            let noc = make_chip_cert(3, 4, &pub_key[..], None).unwrap();
+            //let pub_key = stub_public_key();
+            let keypair = stub_keypair();
+            let rcac = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
+            let noc = make_chip_cert(3, 4, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
 
             let mut info_out = fabric_info_const_default();
             assert_eq!(
@@ -3559,31 +3566,39 @@ mod fabric_table {
             let pub_key = pub_key.unwrap();
             ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
+            let mut serialized_keypair = P256SerializedKeypair::default();
+            assert!(ks.export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair).is_ok());
+            let mut keypair = P256Keypair::default();
+            assert!(keypair.deserialize(&serialized_keypair).is_ok());
 
             // commit fabric info to storage
             let mut info = get_stub_fabric_info_with_index(fabric_index);
             unsafe {
                 assert_eq!(true, info.commit_to_storge(pa.as_mut().unwrap()).is_ok());
             }
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let mut root_subject_dn = ChipDN::default();
+            root_subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+            let empty_dn = ChipDN::default();
+            let mut random_keypair = P256Keypair::default();
+            random_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_buffer = make_chip_cert_with_ids_and_times(&root_subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
+                &root_key_id, &root_key_id, 0, 0, Some(&random_keypair), CertType::Kroot).unwrap();
+
+            let node_key_id = make_subject_key_id(5, 6);
+            let noc_keypair = stub_keypair();
+            let mut subject_dn = ChipDN::default();
+            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+
+            let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_subject_dn, noc_keypair.public_key().const_bytes(),
+                &node_key_id, &root_key_id, 0, 0, Some(&root_keypair), CertType::Knode).unwrap();
 
             // commit certs to storage
-            pos.init(pa);
-            let rcac = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET) as u64,
-                (fabric_index + OFFSET + 1) as u64,
-                pub_key.const_bytes(),
-                None,
-            )
-            .unwrap();
-            let noc = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 2) as u64,
-                (fabric_index + OFFSET + 3) as u64,
-                pub_key.const_bytes(),
-                None,
-            )
-            .unwrap();
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
-            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), &[]);
+            pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer);
+            pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer, &[]);
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
         }
 
