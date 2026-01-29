@@ -483,7 +483,6 @@ pub mod fabric_info {
             rcac: &'a [u8],
             noc: &'a [u8],
         ) -> ChipErrorResult {
-            //verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
             self.m_fabric_index = new_fabric_index;
             {
                 (self.m_node_id, self.m_fabric_id) =
@@ -1618,8 +1617,8 @@ mod fabric_table {
                             self.m_states[index].load_from_storage(
                                 self.m_storage.as_mut().unwrap(),
                                 fabric_index,
-                                noc_buf.const_bytes(),
                                 rcac_buf.const_bytes(),
+                                noc_buf.const_bytes(),
                             )
                         })
                 });
@@ -3398,6 +3397,7 @@ mod fabric_table {
     #[cfg(test)]
     mod tests {
         use crate::chip::{
+            asn1::Oid,
             chip_lib::{
                 core::{
                     case_auth_tag::CatValues,
@@ -3424,12 +3424,13 @@ mod fabric_table {
                 self,
                 certificate_validity_policy::{CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy},
                 chip_cert::{
-                    extract_node_id_fabric_id_from_op_cert_byte,
+                    extract_node_id_fabric_id_from_op_cert_byte, ChipDN, CertType,
                     extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
+                    tests::make_subject_key_id,
                 },
                 chip_certificate_set::{ValidationContext, tests::make_x509_cert_chain_3, EffectiveTime},
                 fabric_table::{
-                    fabric_info::{self, tests::make_chip_cert_by_data},
+                    fabric_info::{self, tests::*},
                     fabric_table::{
                         commit_marker_context_tlv_max_size, fabric_indices_tag,
                         index_info_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag,
@@ -3585,20 +3586,26 @@ mod fabric_table {
             let mut random_keypair = P256Keypair::default();
             random_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_chip_cert_with_ids_and_times(&root_subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
-                &root_key_id, &root_key_id, 0, 0, Some(&random_keypair), CertType::Kroot).unwrap();
+                &root_key_id, &root_key_id, 0, 0, Some(&random_keypair), CertType::Kroot);
+            assert!(root_buffer.is_ok());
+            let root_buffer = root_buffer.unwrap();
 
             let node_key_id = make_subject_key_id(5, 6);
             let noc_keypair = stub_keypair();
             let mut subject_dn = ChipDN::default();
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+            assert!(subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64).is_ok());
+            assert!(subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64).is_ok());
 
             let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_subject_dn, noc_keypair.public_key().const_bytes(),
-                &node_key_id, &root_key_id, 0, 0, Some(&root_keypair), CertType::Knode).unwrap();
+                &node_key_id, &root_key_id, 0, 0, Some(&root_keypair), CertType::Knode);
 
+            assert!(noc_buffer.is_ok());
+            let noc_buffer = noc_buffer.unwrap();
+
+            pos.init(pa);
             // commit certs to storage
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer);
-            pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer, &[]);
+            assert!(pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes()).inspect_err(|e| println!("err {}", e)).is_ok());
+            assert!(pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), &[]).is_ok());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
         }
 

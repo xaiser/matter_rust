@@ -1696,6 +1696,8 @@ mod chip_certificate_set {
             let root_key_id = make_subject_key_id(1, 2);
             let mut subject_dn = ChipDN::default();
             subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 1 as u64);
             let empty_dn = ChipDN::default();
             let mut random_keypair = P256Keypair::default();
             random_keypair.initialize(ECPKeyTarget::Ecdh);
@@ -1709,6 +1711,7 @@ mod chip_certificate_set {
                 .is_ok());
             root.m_cert_flags
                 .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+            assert!(root.m_subject_dn.is_equal(&subject_dn));
 
             let root_buffer_2 = make_chip_cert_by_data(&root).unwrap();
 
