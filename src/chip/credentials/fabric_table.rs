@@ -726,140 +726,6 @@ pub mod fabric_info {
             public_key: &[u8],
             key_pair: Option<&P256Keypair>,
         ) -> Result<CertBuffer, ()> {
-            /*
-            let mut raw_tlv: [u8; CHIP_CERT_SIZE] = [0; CHIP_CERT_SIZE];
-            let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
-            writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
-
-            let mut asn1_writer = TestAsn1Writer::default();
-            let mut asn1_buf = [0u8; K_MAX_CHIP_CERT_DECODE_BUF_LENGTH];
-            asn1_writer.init(&mut asn1_buf);
-
-            let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a struct
-            writer.start_container(
-                tlv_tags::anonymous_tag(),
-                tlv_types::TlvType::KtlvTypeStructure,
-                &mut outer_container,
-            );
-
-            let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a issuer_dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut issuer_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                matter_id_value,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                fabric_id_value,
-            );
-            // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
-
-            // start a subject dn list
-            let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a dn list
-            writer
-                .start_container(
-                    tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
-                    tlv_types::TlvType::KtlvTypeList,
-                    &mut subject_outer_container_dn_list,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
-            // no print string
-            let is_print_string: u8 = 0x0;
-            // put a matter id 0x1
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
-                matter_id_value,
-            );
-            // set up a tag number from fabric id
-            let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
-            // put a fabric id 0x02
-            writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
-                fabric_id_value,
-            );
-            // end of list conatiner
-            writer.end_container(subject_outer_container_dn_list);
-
-            // add to cert
-            writer
-                .put_bytes(
-                    tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
-                    public_key,
-                )
-                .inspect_err(|e| println!("{:?}", e));
-            asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
-            asn1_writer.put_bit_string(0, public_key);
-
-            // put a not before
-            writer.put_u32(tag_not_before(), 0);
-            let asn1_not_before = chip_epoch_to_asn1_time(0u32).unwrap();
-            asn1_writer.put_time(&asn1_not_before);
-
-            // put a not after
-            writer.put_u32(tag_not_after(), 0);
-            let asn1_not_after = chip_epoch_to_asn1_time(0u32).unwrap();
-            asn1_writer.put_time(&asn1_not_after);
-
-            // make empty extensions
-            let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            // start a list
-            writer.start_container(
-                context_tag(ChipCertTag::KtagExtensions as u8),
-                tlv_types::TlvType::KtlvTypeList,
-                &mut extensions_outer_container_list,
-            );
-
-            let key = make_subject_key_id(1, 2);
-            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
-            asn1_writer.put_octet_string_cls_tag(Asn1TagClasses::Kasn1TagClassContextSpecific as Class, 0, &key);
-
-            let key = make_subject_key_id(3, 4);
-            assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &key).inspect_err(|e| println!("{}", e)).is_ok());
-            assert!(asn1_writer.put_octet_string(&key[..]).is_ok());
-
-            writer.end_container(extensions_outer_container_list);
-
-            if let Some(sign_key) = key_pair {
-                let mut sig = P256EcdsaSignature::default();
-                let asn1_written = asn1_writer.const_raw_bytes().unwrap();
-                assert!(sign_key.ecdsa_sign_msg(&asn1_written[..asn1_writer.get_length_written()], &mut sig).is_ok());
-                writer
-                    .put_bytes(
-                        tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
-                        &sig.const_bytes()[..sig.length()],
-                    )
-                    .inspect_err(|e| println!("{:?}", e));
-            }
-
-            // end struct container
-            writer.end_container(outer_container);
-
-            let mut cert = CertBuffer::default();
-            cert.init(&raw_tlv[..writer.get_length_written()]);
-
-            return Ok(cert);
-            */
-
             let auth_id = make_subject_key_id(1, 2);
             let subject_id = make_subject_key_id(3, 4);
             let mut subject_dn = ChipDN::default();
@@ -1301,6 +1167,8 @@ mod fabric_table {
     use crate::chip_error_persisted_storage_value_not_found;
     use crate::chip_error_fabric_mismatch_on_ica;
     use crate::chip_error_wrong_cert_dn;
+    use crate::chip_error_wrong_node_id;
+    use crate::chip_error_unsupported_cert_format;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::chip_static_assert;
@@ -3186,11 +3054,11 @@ mod fabric_table {
         }
 
         fn validate_incoming_noc_chain<Policy: CertificateValidityPolicy>(
-            _noc: &[u8],
-            _icac: &[u8],
-            _rcac: &[u8],
-            existing_fabric_id: FabricId,
-            _policy: &Policy,
+            noc: &[u8],
+            icac: &[u8],
+            rcac: &[u8],
+            existing_fabric_id: Option<FabricId>,
+            policy: &Policy,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -3201,7 +3069,49 @@ mod fabric_table {
             ),
             ChipError,
         > {
-            Err(chip_error_not_implemented!())
+            matter_trace_scope!("ValidateIncomingNOCChain", "Fabric");
+            // Note that we do NOT set a time in the validation context.  This will
+            // cause the certificate chain NotBefore / NotAfter time validation logic
+            // to report CertificateValidityResult::kTimeUnknown.
+            //
+            // The default CHIPCert policy passes NotBefore / NotAfter validation for
+            // this case where time is unknown.  If an override policy is passed, it
+            // will be up to the passed policy to decide how to handle this.
+            //
+            // In the FabricTable::AddNewFabric and FabricTable::UpdateFabric calls,
+            // the passed policy always passes for all questions of time validity.  The
+            // rationale is that installed certificates should be valid at the time of
+            // installation by definition.  If they are not and the commissionee and
+            // commissioner disagree enough on current time, CASE will fail and our
+            // fail-safe timer will expire.
+            //
+            // This then is ultimately how we validate that NotBefore / NotAfter in
+            // newly installed certificates is workable.
+            let mut valid_context = ValidationContext::<Policy>::new();
+            valid_context.reset();
+            valid_context.m_required_key_usages.insert(KeyUsageFlags::KdigitalSignatre);
+            valid_context.m_required_key_purpose.insert(KeyPurposeFlags::KserverAuth);
+            valid_context.m_validity_policy = Some(policy);
+
+            chip_log_progress(FabricProvisioning, "Validating NOC chain");
+
+            let (out_compressed_fabric_id, out_fabric_id, out_node_id, out_noc_public_key, out_root_public_key) = 
+                self.run_verify_credentials(noc, icac, rcac, &mut valid_context).map_err(|e| {
+                    chip_log_error!(FabricProvisioning, "Failed NOC chain validation, VerifyCredentials returned: {}", e);
+
+                    if e != chip_error_wrong_node_id!() {
+                        return Err(chip_error_unsupported_cert_format!());
+                    }
+                    return Err(e);
+                })?;
+
+            if let Some(fabric_id) = existing_fabric_id {
+                verify_or_return_error!(fabric_id == out_fabric_id, Err(chip_error_unsupported_cert_format!()));
+            }
+
+            chip_log_progress!(FabricProvisioning, "NOC chain validation successfully");
+
+            chip_ok()
         }
 
         fn notify_fabric_updated(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
