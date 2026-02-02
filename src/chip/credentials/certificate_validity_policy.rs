@@ -17,7 +17,7 @@ pub mod certificate_validity_policy {
 
     pub trait CertificateValidityPolicy {
         fn apply_certificate_validity_policy(
-            &self,
+            &mut self,
             cert: &ChipCertificateData,
             depth: u8,
             result: CertificateValidityResult,
@@ -29,7 +29,7 @@ pub mod certificate_validity_policy {
 
     impl CertificateValidityPolicy for IgnoreCertificateValidityPeriodPolicy {
         fn apply_certificate_validity_policy(
-            &self,
+            &mut self,
             _cert: &ChipCertificateData,
             _depth: u8,
             _result: CertificateValidityResult,

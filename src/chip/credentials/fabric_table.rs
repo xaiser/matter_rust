@@ -1138,6 +1138,7 @@ mod fabric_table {
             self,
             certificate_validity_policy::{
                 CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
+                CertificateValidityResult,
             },
             chip_cert::{
                 extract_node_id_fabric_id_from_op_cert,
@@ -1203,6 +1204,7 @@ mod fabric_table {
     use core::{
         ptr,
         str::{self, FromStr},
+        cell::Cell,
     };
 
     #[cfg(test)]
@@ -1324,6 +1326,16 @@ mod fabric_table {
             fabric_table: &FabricTable<PSD, OK, OCS>,
             fabric_index: FabricIndex,
         );
+        fn on_fabric_updated(
+            &mut self,
+            fabric_table: &FabricTable<PSD, OK, OCS>,
+            fabric_index: FabricIndex,
+        );
+        fn on_fabric_commit(
+            &mut self,
+            fabric_table: &FabricTable<PSD, OK, OCS>,
+            fabric_index: FabricIndex,
+        );
         fn next(&self) -> Option<*mut dyn Delegate<PSD, OK, OCS>>;
         fn remove_next(&mut self);
         fn set_next(&mut self, next: Option<*mut dyn Delegate<PSD, OK, OCS>>);
@@ -1413,6 +1425,46 @@ mod fabric_table {
         pub fabric_binding_version: u8,
         //TODO; chech the type
         pub signature: [u8; 1],
+    }
+
+    /*
+     * A validation policy we can pass into VerifyCredentials to extract the
+     * latest NotBefore time in the certificate chain without having to load the
+     * certificates into memory again, and one which will pass validation for all
+     * questions of NotBefore / NotAfter validity.
+     *
+     * The rationale is that installed certificates should be valid at the time of
+     * installation by definition.  If they are not and the commissionee and
+     * commissioner disagree enough on current time, CASE will fail and our
+     * fail-safe timer will expire.
+     *
+     * This then is ultimately how we validate that NotBefore / NotAfter in
+     * newly installed certificates is workable.
+     */
+    struct NotBeforeCollector {
+        pub m_latest_not_before: Cell<Seconds32>,
+    }
+
+    impl NotBeforeCollector {
+        pub fn new() -> Self {
+            Self {
+                m_latest_not_before: Cell::new(Seconds32::from_secs(0)),
+            }
+        }
+    }
+
+    impl CertificateValidityPolicy for NotBeforeCollector {
+        fn apply_certificate_validity_policy(
+            &mut self,
+            cert: &ChipCertificateData,
+            _depth: u8,
+            _result: CertificateValidityResult,
+        ) -> ChipErrorResult {
+            if cert.m_not_before_time > self.m_latest_not_before.get().as_secs() as u32 {
+                self.m_latest_not_before.set(Seconds32::from_secs(cert.m_not_before_time as u64));
+            }
+            chip_ok!()
+        }
     }
 
     #[cfg(test)]
@@ -1685,19 +1737,6 @@ mod fabric_table {
                     delegate = next;
                 }
             }
-
-            /*
-            if let Some(mut delegate) = self.m_delegate_list_root {
-                unsafe {
-                    while !delegate.is_null() {
-                        let delegate_ref = delegate.as_mut().unwrap();
-                        let next_delegate = delegate_ref.next();
-                        delegate_ref.fabric_will_be_removed(self, fabric_index);
-                        delegate = next_delegate;
-                    }
-                }
-            }
-            */
 
             if self.has_pending_fabric_update()
                 && (self.m_pending_fabric.get_fabric_index() == fabric_index)
@@ -2242,6 +2281,7 @@ mod fabric_table {
             message: &[u8],
             out_signature: &mut P256EcdsaSignature,
         ) -> ChipErrorResult {
+            matter_trace_scope!("SignWithOpKeypair", "Fabric");
             if let Some(info) = self.find_fabric_with_index(fabric_index) {
                 if info.has_operational_key() {
                     return info.sign_with_op_keypair(message, out_signature);
@@ -3068,7 +3108,7 @@ mod fabric_table {
             icac: Option<&[u8]>,
             rcac: &[u8],
             existing_fabric_id: Option<FabricId>,
-            policy: &Policy,
+            policy: &mut Policy,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -3125,12 +3165,32 @@ mod fabric_table {
             Ok((out_compressed_fabric_id, out_fabric_id, out_node_id, out_noc_public_key, out_root_public_key))
         }
 
-        fn notify_fabric_updated(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn notify_fabric_updated(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+            let mut delegate = self.m_delegate_list_root;
+            unsafe {
+                while delegate.is_some() {
+                    let d = delegate.take().unwrap().as_mut().unwrap();
+                    let next = d.next();
+                    d.on_fabric_updated(self, fabric_index);
+                    delegate = next;
+                }
+            }
+
+            chip_ok!()
         }
 
-        fn notify_fabric_commited(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn notify_fabric_commited(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+            let mut delegate = self.m_delegate_list_root;
+            unsafe {
+                while delegate.is_some() {
+                    let d = delegate.take().unwrap().as_mut().unwrap();
+                    let next = d.next();
+                    d.on_fabric_commit(self, fabric_index);
+                    delegate = next;
+                }
+            }
+
+            chip_ok!()
         }
 
         fn store_commit_marker(&mut self, commit_marker: &CommitMarker) -> ChipErrorResult {
@@ -3447,6 +3507,18 @@ mod fabric_table {
             ) {
                 self.on_removed = fabric_index;
             }
+
+            fn on_fabric_updated(
+                &mut self,
+                _fabric_table: &FabricTable<PSD, OK, OCS>,
+                _fabric_index: FabricIndex,
+            ) { }
+
+            fn on_fabric_commit(
+                &mut self,
+                _fabric_table: &FabricTable<PSD, OK, OCS>,
+                _fabric_index: FabricIndex,
+            ) { }
 
             fn next(&self) -> Option<*mut dyn Delegate<PSD, OK, OCS>> {
                 return self.next.clone();
@@ -6323,9 +6395,9 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+            let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
 
-            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(2), &ignore).is_ok());
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(2), &mut ignore).is_ok());
         }
 
         #[test]
@@ -6354,9 +6426,9 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+            let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
 
-            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), None, &ignore).is_err());
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), None, &mut ignore).is_err());
         }
 
         #[test]
@@ -6384,9 +6456,9 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+            let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
 
-            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(0), &ignore).is_err());
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(0), &mut ignore).is_err());
         }
     } // end of mod tests
 } // end of mod fabric_table

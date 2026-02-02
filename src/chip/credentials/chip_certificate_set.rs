@@ -58,7 +58,7 @@ mod chip_certificate_set {
         pub m_required_key_usages: KeyUsageFlags,
         pub m_required_key_purpose: KeyPurposeFlags,
         pub m_required_cert_type: CertType,
-        pub m_validity_policy: Option<&'a ValidityPolicy>,
+        pub m_validity_policy: Option<&'a mut ValidityPolicy>,
     }
 
     impl<'a, ValidityPolicy> ValidationContext<'a, ValidityPolicy>
@@ -400,7 +400,7 @@ mod chip_certificate_set {
                 }
             }
 
-            if let Some(policy) = context.m_validity_policy {
+            if let Some(policy) = context.m_validity_policy.as_mut() {
                 policy.apply_certificate_validity_policy(cert, depth, validity_result)?;
             } else {
                 apply_default_policy(cert, depth, validity_result)?;
@@ -565,7 +565,7 @@ mod chip_certificate_set {
 
         impl CertificateValidityPolicy for CheckResultPolicy {
             fn apply_certificate_validity_policy(
-                &self,
+                &mut self,
                 _cert: &ChipCertificateData,
                 _depth: u8,
                 result: CertificateValidityResult,
@@ -1468,11 +1468,11 @@ mod chip_certificate_set {
 
             // use policy checking the result
             let mut context = CheckResultValidate::default();
-            let policy = CheckResultPolicy::default();
+            let mut policy = CheckResultPolicy::default();
             context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs(
                 (expected_not_before - 1).into(),
             ));
-            context.m_validity_policy = Some(&policy);
+            context.m_validity_policy = Some(&mut policy);
 
             // this is the key in make_chip_cert
             let key = make_subject_key_id(1, 2);
@@ -1513,11 +1513,11 @@ mod chip_certificate_set {
 
             // use policy checking the result
             let mut context = CheckResultValidate::default();
-            let policy = CheckResultPolicy::default();
+            let mut policy = CheckResultPolicy::default();
             context.m_effective_time = EffectiveTime::CurrentChipEpochTime(Seconds32::from_secs(
                 (expected_not_after + 1).into(),
             ));
-            context.m_validity_policy = Some(&policy);
+            context.m_validity_policy = Some(&mut policy);
 
             // this is the key in make_chip_cert
             let key = make_subject_key_id(1, 2);
@@ -1558,11 +1558,11 @@ mod chip_certificate_set {
 
             // use policy checking the result
             let mut context = CheckResultValidate::default();
-            let policy = CheckResultPolicy::default();
+            let mut policy = CheckResultPolicy::default();
             context.m_effective_time = EffectiveTime::LastKnownGoodChipEpochTime(
                 Seconds32::from_secs((expected_not_after + 1).into()),
             );
-            context.m_validity_policy = Some(&policy);
+            context.m_validity_policy = Some(&mut policy);
 
             // this is the key in make_chip_cert
             let key = make_subject_key_id(1, 2);
@@ -1603,11 +1603,11 @@ mod chip_certificate_set {
 
             // use policy checking the result
             let mut context = CheckResultValidate::default();
-            let policy = CheckResultPolicy::default();
+            let mut policy = CheckResultPolicy::default();
             context.m_effective_time = EffectiveTime::LastKnownGoodChipEpochTime(
                 Seconds32::from_secs((expected_not_after - 1).into()),
             );
-            context.m_validity_policy = Some(&policy);
+            context.m_validity_policy = Some(&mut policy);
 
             // this is the key in make_chip_cert
             let key = make_subject_key_id(1, 2);
