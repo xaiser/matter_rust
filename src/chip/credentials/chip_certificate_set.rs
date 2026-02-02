@@ -608,19 +608,6 @@ mod chip_certificate_set {
                     .is_ok());
                 root.m_cert_flags
                     .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
-                    /*
-                root.m_not_before_time = expected_not_before;
-                root.m_not_after_time = expected_not_after;
-                root.m_cert_flags
-                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
-                root.m_key_usage_flags.insert(KeyUsageFlags::KkeyCertSign);
-                root.m_subject_key_id = root_key_id.clone();
-
-                let mut context = IgorePolicyValidate::default();
-                context.m_effective_time = EffectiveTime::CurrentChipEpochTime(
-                    Seconds32::from_secs((expected_not_before + 1).into()),
-                );
-                    */
 
                 let mut root_dn = ChipDN::default();
                 for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
@@ -651,30 +638,6 @@ mod chip_certificate_set {
                     .inspect_err(|e| println!("{}", e))
                     .is_ok());
 
-                // update the effec time
-                /*
-                noc.m_not_before_time = expected_not_before;
-                noc.m_not_after_time = expected_not_after;
-
-                // update key id
-                noc.m_subject_key_id = node_key_id.clone();
-                noc.m_auth_key_id = root_key_id.clone();
-
-                // sign the buf: pubkey + sub key id
-                assert!(root_keypair
-                    .ecdsa_sign_raw_msg(&noc.m_tbs_hash, &mut noc.m_signature)
-                    .inspect_err(|e| println!("{}", e))
-                    .is_ok());
-
-                // set up hash present flag
-                noc.m_cert_flags.insert(CertFlags::KtbsHashPresent);
-
-                // copy subject dn from root to issue dn from noc
-                noc.m_issuer_dn.clear();
-                for (index, value) in root_dn.rdn.iter().enumerate() {
-                    noc.m_issuer_dn.rdn[index] = value.clone();
-                }
-                */
 
                 (noc, noc_buffer)
             };
@@ -692,6 +655,7 @@ mod chip_certificate_set {
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
@@ -721,6 +685,7 @@ mod chip_certificate_set {
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
                 subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();

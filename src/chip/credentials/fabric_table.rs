@@ -824,7 +824,9 @@ pub mod fabric_info {
                 CertType::Kroot => {
                     key_usage_flag.insert(KeyUsageFlags::KkeyCertSign);
                 },
-                _ => {}
+                _ => {
+                    key_usage_flag.insert(KeyUsageFlags::KdigitalSignature);
+                }
             }
 
             assert!(writer.put_u16(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagKeyUsage as u8), key_usage_flag.bits()).inspect_err(|e| println!("{}", e)).is_ok());
@@ -857,6 +859,13 @@ pub mod fabric_info {
                     tlv_types::TlvType::KtlvTypeArray,
                     &mut extensions_outer_container_list,
                 );
+
+                match cert_type {
+                    CertType::Knode => {
+                        writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits().into());
+                    },
+                    _ => {}
+                }
 
                 // end entensions list
                 writer.end_container(extensions_outer_container_list);
@@ -1136,9 +1145,9 @@ mod fabric_table {
                 extract_node_id_fabric_id_from_op_cert_byte,
                 extract_not_before_from_chip_cert_byte, extract_public_key_from_chip_cert_byte,
                 CertBuffer, K_MAX_CHIP_CERT_LENGTH,
-                CertDecodeFlags, ChipCertificateData,
+                CertDecodeFlags, ChipCertificateData, KeyUsageFlags, KeyPurposeFlags,
             },
-            chip_certificate_set::ChipCertificateSet,
+            chip_certificate_set::{ChipCertificateSet, ValidationContext},
             last_known_good_time::LastKnownGoodTime,
             operational_certificate_store::{CertChainElement, OperationalCertificateStore},
         },
@@ -1203,10 +1212,12 @@ mod fabric_table {
     //#[double]
     use super::fabric_info::FabricInfo;
 
+    /*
     type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<
         'a,
         IgnoreCertificateValidityPeriodPolicy,
     >;
+    */
 
     bitflags! {
         #[derive(Clone, Copy)]
@@ -2531,12 +2542,12 @@ mod fabric_table {
             }
         }
 
-        pub fn verify_credentials(
+        pub fn verify_credentials<'a, Policy: CertificateValidityPolicy>(
             &self,
             fabric_index: FabricIndex,
             noc: &[u8],
             icac: Option<&[u8]>,
-            context: &mut ValidationContext,
+            context: &mut ValidationContext<'a, Policy>
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2551,15 +2562,14 @@ mod fabric_table {
             let mut rcac = CertBuffer::default();
             self.fetch_root_cert(fabric_index, &mut rcac)?;
 
-            return self.run_verify_credentials(noc, icac, rcac.const_bytes(), context);
+            return Self::run_verify_credentials(noc, icac, rcac.const_bytes(), context);
         }
 
-        pub fn run_verify_credentials<'a>(
-            &self,
+        pub fn run_verify_credentials<'a, Policy: CertificateValidityPolicy>(
             noc: &[u8],
             icac: Option<&[u8]>,
             rcac: &[u8],
-            context: &'a mut ValidationContext,
+            context: &mut ValidationContext<'a, Policy>,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2618,7 +2628,7 @@ mod fabric_table {
                     verify_or_return_error!(rcac_fabric_id == out_fabric_id, Err(chip_error_wrong_cert_dn!()));
                 },
                 Err(e) => {
-                    // FabricId is optional field in ICAC and "not found" code is not treated as error.
+                    // FabricId is optional field in RCAC and "not found" code is not treated as error.
                     if e == chip_error_not_found!() {
                         // do nothing
                     } else {
@@ -3055,7 +3065,7 @@ mod fabric_table {
 
         fn validate_incoming_noc_chain<Policy: CertificateValidityPolicy>(
             noc: &[u8],
-            icac: &[u8],
+            icac: Option<&[u8]>,
             rcac: &[u8],
             existing_fabric_id: Option<FabricId>,
             policy: &Policy,
@@ -3087,22 +3097,23 @@ mod fabric_table {
             //
             // This then is ultimately how we validate that NotBefore / NotAfter in
             // newly installed certificates is workable.
-            let mut valid_context = ValidationContext::<Policy>::new();
+            //let mut valid_context = ValidationContext::new();
+            let mut valid_context = crate::chip::credentials::chip_certificate_set::ValidationContext::<Policy>::new();
             valid_context.reset();
-            valid_context.m_required_key_usages.insert(KeyUsageFlags::KdigitalSignatre);
+            valid_context.m_required_key_usages.insert(KeyUsageFlags::KdigitalSignature);
             valid_context.m_required_key_purpose.insert(KeyPurposeFlags::KserverAuth);
             valid_context.m_validity_policy = Some(policy);
 
-            chip_log_progress(FabricProvisioning, "Validating NOC chain");
+            chip_log_progress!(FabricProvisioning, "Validating NOC chain");
 
             let (out_compressed_fabric_id, out_fabric_id, out_node_id, out_noc_public_key, out_root_public_key) = 
-                self.run_verify_credentials(noc, icac, rcac, &mut valid_context).map_err(|e| {
+                Self::run_verify_credentials(noc, icac, rcac, &mut valid_context).map_err(|e| {
                     chip_log_error!(FabricProvisioning, "Failed NOC chain validation, VerifyCredentials returned: {}", e);
 
                     if e != chip_error_wrong_node_id!() {
-                        return Err(chip_error_unsupported_cert_format!());
+                        return chip_error_unsupported_cert_format!();
                     }
-                    return Err(e);
+                    return e;
                 })?;
 
             if let Some(fabric_id) = existing_fabric_id {
@@ -3111,7 +3122,7 @@ mod fabric_table {
 
             chip_log_progress!(FabricProvisioning, "NOC chain validation successfully");
 
-            chip_ok()
+            Ok((out_compressed_fabric_id, out_fabric_id, out_node_id, out_noc_public_key, out_root_public_key))
         }
 
         fn notify_fabric_updated(&mut self, _fabric_index: FabricIndex) -> ChipErrorResult {
@@ -6009,10 +6020,7 @@ mod fabric_table {
 
         #[test]
         fn run_verify_credentials_successfully() {
-            let (rcac, _, icac, _, noc, _) = make_x509_cert_chain_3();
-            let rcac_buf = make_chip_cert_by_data(&rcac).unwrap();
-            let icac_buf = make_chip_cert_by_data(&rcac).unwrap();
-            let noc_buf = make_chip_cert_by_data(&noc).unwrap();
+            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -6036,11 +6044,349 @@ mod fabric_table {
             );
 
             let mut context = IgorePolicyValidate::default();
+            /*
             context.m_effective_time = EffectiveTime::LastKnownGoodChipEpochTime(
                 Seconds32::from_secs(1),
             );
+            */
 
-            //assert!(table.run_verify_credentials(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), &mut context).is_ok());
+            assert!(TestFabricTable::run_verify_credentials(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), &mut context).is_ok());
+        }
+
+        #[test]
+        fn run_verify_credentials_mismatched_noc() {
+            let (rcac, rcac_buf, icac, icac_buf, _, _) = make_x509_cert_chain_3();
+            let (_, _, _, _, noc, noc_buf) = make_x509_cert_chain_3();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let mut context = IgorePolicyValidate::default();
+
+            assert!(TestFabricTable::run_verify_credentials(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), &mut context).is_err());
+        }
+
+        #[test]
+        fn run_verify_credentials_mismatched_fabric_id_on_icac() {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let icac_key_id = make_subject_key_id(3, 4);
+            let node_key_id = make_subject_key_id(5, 6);
+            let (root_cert, root_buffer, root_dn) = {
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let empty_dn = ChipDN::default();
+                let mut random_keypair = P256Keypair::default();
+                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
+                    &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
+                //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut root = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(root_buffer.const_bytes(), &mut root, Some(CertDecodeFlags::KisTrustAnchor))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                root.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                (root, root_buffer, root_dn)
+            };
+
+            let mut icac_keypair = P256Keypair::default();
+            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let (icac_cert, icac_buffer, icac_dn) = {
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                // incorrect fabric id
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
+                let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
+                    &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
+                let mut icac = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(icac_buffer.const_bytes(), &mut icac, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                icac.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                assert!(root_keypair.public_key().ecdsa_validate_hash_signature(&icac.m_tbs_hash[..], &icac.m_signature).is_ok());
+
+                let mut icac_dn = ChipDN::default();
+                for (index, value) in icac.m_subject_dn.rdn.iter().enumerate() {
+                    icac_dn.rdn[index] = value.clone();
+                }
+
+                (icac, icac_buffer, icac_dn)
+            };
+
+            let noc_keypair = stub_keypair();
+            let (noc_cert, noc_buffer) = {
+                let subject_id = make_subject_key_id(1, 2);
+                let auth_id = make_subject_key_id(3, 4);
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+
+                let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
+                    &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
+                let mut noc = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(noc_buffer.const_bytes(), &mut noc, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                (noc, noc_buffer)
+            };
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let mut context = IgorePolicyValidate::default();
+
+            assert!(TestFabricTable::run_verify_credentials(noc_buffer.const_bytes(), Some(icac_buffer.const_bytes()), root_buffer.const_bytes(), &mut context).is_err());
+        }
+
+        #[test]
+        fn run_verify_credentials_mismatched_fabric_id_on_rcac() {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let icac_key_id = make_subject_key_id(3, 4);
+            let node_key_id = make_subject_key_id(5, 6);
+            let (root_cert, root_buffer, root_dn) = {
+                let mut subject_dn = ChipDN::default();
+                // incorrect fabric if
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let empty_dn = ChipDN::default();
+                let mut random_keypair = P256Keypair::default();
+                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
+                    &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
+                //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut root = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(root_buffer.const_bytes(), &mut root, Some(CertDecodeFlags::KisTrustAnchor))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                root.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                (root, root_buffer, root_dn)
+            };
+
+            let mut icac_keypair = P256Keypair::default();
+            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let (icac_cert, icac_buffer, icac_dn) = {
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
+                    &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
+                let mut icac = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(icac_buffer.const_bytes(), &mut icac, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                icac.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                assert!(root_keypair.public_key().ecdsa_validate_hash_signature(&icac.m_tbs_hash[..], &icac.m_signature).is_ok());
+
+                let mut icac_dn = ChipDN::default();
+                for (index, value) in icac.m_subject_dn.rdn.iter().enumerate() {
+                    icac_dn.rdn[index] = value.clone();
+                }
+
+                (icac, icac_buffer, icac_dn)
+            };
+
+            let noc_keypair = stub_keypair();
+            let (noc_cert, noc_buffer) = {
+                let subject_id = make_subject_key_id(1, 2);
+                let auth_id = make_subject_key_id(3, 4);
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+
+                let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
+                    &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
+                let mut noc = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(noc_buffer.const_bytes(), &mut noc, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                (noc, noc_buffer)
+            };
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let mut context = IgorePolicyValidate::default();
+
+            assert!(TestFabricTable::run_verify_credentials(noc_buffer.const_bytes(), Some(icac_buffer.const_bytes()), root_buffer.const_bytes(), &mut context).is_err());
+        }
+
+        #[test]
+        fn validate_incoming_noc_successfully() {
+            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(2), &ignore).is_ok());
+        }
+
+        #[test]
+        fn validate_incoming_noc_wrong_noc() {
+            let (rcac, rcac_buf, icac, icac_buf, _, _) = make_x509_cert_chain_3();
+            let (_, _, _, _, noc, noc_buf) = make_x509_cert_chain_3();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), None, &ignore).is_err());
+        }
+
+        #[test]
+        fn validate_incoming_noc_mismatched_fabric_id() {
+            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // only update rcac to storage
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            let ignore = IgnoreCertificateValidityPeriodPolicy::default();
+
+            assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(0), &ignore).is_err());
         }
     } // end of mod tests
 } // end of mod fabric_table

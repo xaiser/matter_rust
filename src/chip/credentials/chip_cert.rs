@@ -871,7 +871,7 @@ pub fn extract_fabric_id_from_cert(cert: &ChipCertificateData) -> Result<FabricI
     let subject_dn = &cert.m_subject_dn;
 
     for i in 0..subject_dn.rdn_count() as usize {
-        let rdn = subject_dn.rdn[0];
+        let rdn = subject_dn.rdn[i];
         if rdn.m_attr_oid == Asn1Oid::KoidAttributeTypeMatterFabricId.into() {
             return Ok(rdn.m_chip_val as FabricId);
         }

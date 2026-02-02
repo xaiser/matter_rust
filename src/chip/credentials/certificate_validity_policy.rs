@@ -24,6 +24,7 @@ pub mod certificate_validity_policy {
         ) -> ChipErrorResult;
     }
 
+    #[derive(Default)]
     pub struct IgnoreCertificateValidityPeriodPolicy;
 
     impl CertificateValidityPolicy for IgnoreCertificateValidityPeriodPolicy {
