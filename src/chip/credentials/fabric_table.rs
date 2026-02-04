@@ -2176,9 +2176,22 @@ mod fabric_table {
 
         pub fn fetch_pending_non_fabric_associcated_root_cert(
             &self,
-            _out_cert: &mut [u8],
+            out_cert: &mut CertBuffer,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            matter_trace_scope!("FetchPendingNonFabricAssociatedRootCert", "Fabric");
+            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+
+            if !self.m_state_flag.intersects(StateFlags::KisTrustedRootPending) {
+                return Err(chip_error_not_found!());
+            }
+
+            if self.m_state_flag.intersects(StateFlags::KisAddPending) {
+                // The root certificate is already associated with a pending fabric, so
+                // does not exist for purposes of this API.
+                return Err(chip_error_not_found!());
+            }
+
+            return self.fetch_root_cert(self.m_fabric_index_with_pending_state, out_cert);
         }
 
         pub fn fetch_icac_cert(
