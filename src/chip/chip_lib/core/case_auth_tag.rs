@@ -7,16 +7,16 @@ pub type CaseAuthTag = u32;
 const KtagVersionMask: NodeId = 0x0000_0000_0000_FFFF;
 const K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES - 2;
 const K_UNDEFINED_CAT: CaseAuthTag = 0;
-const K_TAG_IDENTIFIER_MASK: CaseAuthTag = 0x0000_0000_FFFF_0000;
+const K_TAG_IDENTIFIER_MASK: NodeId = 0x0000_0000_FFFF_0000;
 const K_TAG_IDENTIFIER_SHIFT: u32 = 16;
-const K_TAG_VERSION_MASK: CaseAuthTag = 0x0000_0000_0000_FFFF;
+const K_TAG_VERSION_MASK: NodeId = 0x0000_0000_0000_FFFF;
 
 pub fn is_valid_case_auth_tag(a_cat: CaseAuthTag) -> bool {
-    (a_cat & (KtagVersionMask as u32)) > 0
+    (a_cat & (KtagVersionMask as CaseAuthTag)) > 0
 }
 
 pub const fn get_case_auth_tag_identifier(a_cat: CaseAuthTag) -> u16 {
-    ((a_cat & K_TAG_IDENTIFIER_MASK) >> K_TAG_IDENTIFIER_SHIFT) as u16
+    ((a_cat & (K_TAG_IDENTIFIER_MASK as CaseAuthTag)) >> K_TAG_IDENTIFIER_SHIFT) as u16
 }
 
 pub fn case_auth_tag_from_node_id(node_id: NodeId) -> CaseAuthTag {
@@ -26,13 +26,16 @@ pub fn case_auth_tag_from_node_id(node_id: NodeId) -> CaseAuthTag {
 }
 
 pub fn get_case_auth_tag_version(a_cat: CaseAuthTag) -> u16 {
-    (a_cat & K_TAG_VERSION_MASK) as u16
+    (a_cat & (K_TAG_VERSION_MASK as CaseAuthTag)) as u16
 }
 
 mod case_auth_tag {
     use super::*;
     use crate::{
+        ChipError,
+        ChipErrorResult,
         chip_core_error,
+        chip_error_no_memory,
         chip_error_internal,
         chip_no_error,
         chip_ok,
@@ -40,8 +43,15 @@ mod case_auth_tag {
         verify_or_die,
         verify_or_return_error,
         verify_or_return_value,
-        chip::chip_lib::core::node_id::{is_case_auth_tag, NodeId},
+        chip::chip_lib::core::{
+            node_id::{is_case_auth_tag, NodeId},
+            chip_encoding,
+        },
     };
+
+    static K_SERIALIZED_LENGTH: usize = K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT * core::mem::size_of::<CaseAuthTag>();
+
+    pub type Serialized = [u8; K_SERIALIZED_LENGTH];
 
     pub struct CATValues {
         pub values: [CaseAuthTag; K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT],
@@ -112,12 +122,70 @@ mod case_auth_tag {
                 if (cat_from_noc != K_UNDEFINED_CAT) &&
                     (get_case_auth_tag_identifier(cat_from_noc) == get_case_auth_tag_identifier(cat_from_subject)) &&
                         (get_case_auth_tag_version(cat_from_subject) > 0) &&
-                        (get_case_auth_tag_version(cat_from_noc) >= get_case_auth_tag_version(cat_from_subject)) {
-                } {
+                        (get_case_auth_tag_version(cat_from_noc) >= get_case_auth_tag_version(cat_from_subject))
+                {
                     return true;
                 }
                 false
             })
+        }
+
+        pub fn serialize(&self, out_serialized: &mut [u8]) -> ChipErrorResult {
+            let mut rest = out_serialized;
+            for v in self.values {
+                if let Some((current, next_rest)) = rest.split_at_mut_checked(core::mem::size_of::<CaseAuthTag>()) {
+                    chip_encoding::little_endian::put_u32(current, v);
+                    rest = next_rest;
+                } else {
+                    return Err(chip_error_no_memory!());
+                }
+            }
+
+            chip_ok!()
+        }
+
+        pub fn deserialize(&mut self, in_serialized: &[u8]) -> ChipErrorResult {
+            let mut rest = in_serialized;
+            for v in &mut self.values {
+                if let Some((current, next_rest)) = rest.split_at_checked(core::mem::size_of::<CaseAuthTag>()) {
+                    *v = CaseAuthTag::from_le_bytes(current.try_into().map_err(|_| chip_error_no_memory!())?);
+                    rest = next_rest;
+                } else {
+                    return Err(chip_error_no_memory!());
+                }
+            }
+
+            chip_ok!()
+        }
+    }
+
+    impl PartialEq for CATValues {
+        fn eq(&self, other: &Self) -> bool {
+            // Two sets of CATs confer equal permissions if the sets are exactly equal
+            // and the sets are valid.
+            // Ignoring kUndefinedCAT values, evaluate this.
+            if self.get_num_tags_present() != other.get_num_tags_present() {
+                return false;
+            }
+            if !self.are_valid() || !other.are_valid() {
+                return false;
+            }
+
+            if self.values.iter().any(|c| {
+                let cat = *c;
+                if cat == K_UNDEFINED_CAT {
+                    return false;
+                }
+                if !other.contains(cat) {
+                    return true;
+                }
+                false
+            }) 
+            {
+                return false;
+            }
+
+            true
         }
     }
 
@@ -160,6 +228,112 @@ mod case_auth_tag {
             values.values[0] = K_UNDEFINED_CAT + 1;
             values.values[1] = K_UNDEFINED_CAT + 1;
             assert!(!values.are_valid());
+        }
+
+        #[test]
+        fn check_against_subject_successfully() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            let subject: NodeId = 0xFFFF_FFFD_0001_0001;
+            values.values[0] = cat_in_noc;
+            assert!(values.check_subject_against_cats(subject));
+        }
+
+        #[test]
+        fn check_against_subject_not_case_tag() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            // <= min case tag
+            let subject: NodeId = 0xFFFF_FFFC_0001_0001;
+            values.values[0] = cat_in_noc;
+            assert!(!values.check_subject_against_cats(subject));
+        }
+
+        #[test]
+        fn check_against_subject_different_id() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0002_0001;
+            let subject: NodeId = 0xFFFF_FFFD_0001_0001;
+            values.values[0] = cat_in_noc;
+            assert!(!values.check_subject_against_cats(subject));
+        }
+
+        #[test]
+        fn check_against_subject_version_0() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            // make the subject version 0
+            let subject: NodeId = 0xFFFF_FFFD_0001_0000;
+            values.values[0] = cat_in_noc;
+            assert!(!values.check_subject_against_cats(subject));
+        }
+
+        #[test]
+        fn check_against_subject_version_is_less() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            // make the subject has bigger version
+            let subject: NodeId = 0xFFFF_FFFD_0001_0002;
+            values.values[0] = cat_in_noc;
+            assert!(!values.check_subject_against_cats(subject));
+        }
+
+        #[test]
+        fn eq() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            values.values[0] = cat_in_noc;
+
+            let mut values2 = CATValues::new();
+            values2.values[0] = cat_in_noc;
+            assert!(values == values2);
+        }
+
+        #[test]
+        fn not_eq_num_tag() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            values.values[0] = cat_in_noc;
+            values.values[1] = cat_in_noc + 1;
+
+            let mut values2 = CATValues::new();
+            values2.values[0] = cat_in_noc;
+            assert!(values != values2);
+        }
+
+        #[test]
+        fn not_eq_left_not_valid() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            values.values[0] = cat_in_noc;
+            values.values[1] = cat_in_noc;
+
+            let mut values2 = CATValues::new();
+            values2.values[0] = cat_in_noc;
+            assert!(values != values2);
+        }
+
+        #[test]
+        fn not_eq_right_not_valid() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            values.values[0] = cat_in_noc;
+
+            let mut values2 = CATValues::new();
+            values2.values[0] = cat_in_noc;
+            values2.values[1] = cat_in_noc;
+            assert!(values != values2);
+        }
+
+        #[test]
+        fn not_eq_not_contains() {
+            let mut values = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            values.values[0] = cat_in_noc;
+
+            let mut values2 = CATValues::new();
+            values2.values[0] = cat_in_noc + 1;
+            assert!(values != values2);
         }
     } // end of tests
 }
