@@ -50,6 +50,7 @@ mod case_auth_tag {
     };
 
     static K_SERIALIZED_LENGTH: usize = K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT * core::mem::size_of::<CaseAuthTag>();
+    static K_UNDEFINED_CATS: CATValues = CATValues::new();
 
     pub type Serialized = [u8; K_SERIALIZED_LENGTH];
 
@@ -335,5 +336,36 @@ mod case_auth_tag {
             values2.values[0] = cat_in_noc + 1;
             assert!(values != values2);
         }
+
+        #[test]
+        fn serialized_and_deserized() {
+            let mut to_serialized = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            to_serialized.values[0] = cat_in_noc;
+            to_serialized.values[1] = cat_in_noc + 0x1_0001;
+            to_serialized.values[2] = cat_in_noc + 0x2_0002;
+
+            let mut buffer = [0; K_SERIALIZED_LENGTH];
+            assert!(to_serialized.serialize(&mut buffer).is_ok());
+
+            let mut from_serialized = CATValues::new();
+            assert!(from_serialized.deserialize(&buffer).is_ok());
+
+            assert!(to_serialized == from_serialized);
+        }
+
+        #[test]
+        fn serialized_buffer_too_small() {
+            let mut to_serialized = CATValues::new();
+            let cat_in_noc: CaseAuthTag = 0x0001_0001;
+            to_serialized.values[0] = cat_in_noc;
+            to_serialized.values[1] = cat_in_noc + 0x1_0001;
+            to_serialized.values[2] = cat_in_noc + 0x2_0002;
+
+            let mut buffer = [0; 1];
+            assert!(to_serialized.serialize(&mut buffer).is_err());
+        }
     } // end of tests
 }
+
+pub use case_auth_tag::*;

@@ -2857,13 +2857,61 @@ mod fabric_table {
 
         fn add_or_update_inner(
             &mut self,
-            _fabric_index: FabricIndex,
-            _is_addition: bool,
-            _existing_op_key: &P256Keypair,
-            _is_existingg_op_key_externally_owned: bool,
-            _vendor_id: u16,
-            _advertise_identity: AdvertiseIdentity,
+            fabric_index: FabricIndex,
+            is_addition: bool,
+            existing_op_key: Option<&P256Keypair>,
+            is_existingg_op_key_externally_owned: bool,
+            vendor_id: u16,
+            advertise_identity: AdvertiseIdentity,
         ) -> ChipErrorResult {
+            let mut new_fabric_info = fabric_info::InitParams::const_default();
+            let fabric_entry: &mut FabricInfo;
+            let mut fabric_id_to_validate: Option<FabricId> = None;
+            let mut fabric_label: Option<&str> = None;
+            if is_addition {
+                // Initialization for Adding a fabric
+                // Find an available slot.
+                if let Some(fabric) = self.m_states.iter_mut().find(|f| !f.is_initialized()) {
+                    fabric_entry = fabric;
+                    new_fabric_info.m_vendor_id = VendorId::from(vendor_id);
+                    new_fabric_info.m_fabric_index = fabric_index;
+                } else {
+                    return Err(chip_error_no_memory!());
+                }
+            } else {
+                self.m_pending_fabric.reset();
+                let existing_fabric = self.find_fabric_with_index(fabric_index).ok_or(chip_error_internal!())?;
+                new_fabric_info.m_vendor_id = existing_fabric.get_vendor_id();
+                new_fabric_info.m_fabric_index = fabric_index;
+                fabric_id_to_validate = Some(existing_fabric.get_fabric_id());
+                fabric_label = existing_fabric.get_fabric_label();
+                fabric_entry = &mut self.m_pending_fabric;
+            }
+
+            let mut not_before_collector = NotBeforeCollector::new();
+            let mut noc_public_key = P256PublicKey::default();
+            {
+                let mut noc_buf = CertBuffer::default();
+                let mut icac_buf = CertBuffer::default();
+                let mut rcac_buf = CertBuffer::default();
+
+                self.fetch_noc_cert(fabric_index, &mut noc_buf)?;
+                self.fetch_icac_cert(fabric_index, &mut icac_buf)?;
+                self.fetch_root_cert(fabric_index, &mut rcac_buf)?;
+
+                (new_fabric_info.m_compressed_fabric_id, new_fabric_info.m_fabric_id, new_fabric_info.m_node_id, noc_public_key,
+                  new_fabric_info.m_root_publick_key) = Self::validate_incoming_noc_chain(noc_buf.const_bytes(), {
+                    if icac_buf.const_bytes().len() == 0 {
+                        None
+                    } else {
+                        Some(icac_buf.const_bytes())
+                    }
+                }, rcac_buf.const_bytes(), fabric_id_to_validate, &mut not_before_collector)?;
+            }
+
+            if let Some(existing_op_key_ref) = existing_op_key {
+                breakkkkk
+            }
             Err(chip_error_not_implemented!())
         }
 
