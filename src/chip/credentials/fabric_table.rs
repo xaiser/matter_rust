@@ -92,7 +92,7 @@ pub mod fabric_info {
     }
     */
 
-    pub(super) struct InitParams {
+    pub(super) struct InitParams<'a> {
         pub m_node_id: NodeId,
         pub m_fabric_id: FabricId,
         pub m_compressed_fabric_id: CompressedFabricId,
@@ -101,10 +101,11 @@ pub mod fabric_info {
         pub m_vendor_id: VendorId,
         pub m_has_externally_owned_operation_key: bool,
         pub m_should_advertise_identity: bool,
-        pub m_operation_key: *mut P256Keypair,
+        //pub m_operation_key: *mut P256Keypair,
+        pub m_operation_key: Option<&'a P256Keypair>,
     }
 
-    impl InitParams {
+    impl InitParams<'_> {
         pub(super) const fn const_default() -> Self {
             Self {
                 m_node_id: KUNDEFINED_NODE_ID,
@@ -115,7 +116,7 @@ pub mod fabric_info {
                 m_vendor_id: VendorId::NotSpecified,
                 m_has_externally_owned_operation_key: false,
                 m_should_advertise_identity: true,
-                m_operation_key: ptr::null_mut(),
+                m_operation_key: None,
             }
         }
 
@@ -134,13 +135,18 @@ pub mod fabric_info {
         }
     }
 
-    impl Default for InitParams {
+    impl Default for InitParams<'_> {
         fn default() -> Self {
             InitParams::const_default()
         }
     }
 
-    pub struct FabricInfo {
+    enum Keypair<'a> {
+        External(&'a P256Keypair),
+        Internal(P256Keypair),
+    }
+
+    pub struct FabricInfo<'a> {
         m_node_id: NodeId,
         m_fabric_id: FabricId,
         m_compressed_fabric_id: CompressedFabricId,
@@ -148,13 +154,16 @@ pub mod fabric_info {
         m_fabric_label: FabricLabelString,
         m_fabric_index: FabricIndex,
         m_vendor_id: VendorId,
-        m_has_externally_owned_operation_key: bool,
+        //m_has_externally_owned_operation_key: bool,
         m_should_advertise_identity: bool,
         // until we implement dynamic allocate, we just use a static allocation
-        m_internal_op_key_storage: Option<P256Keypair>,
-        m_operation_key: *mut P256Keypair,
+        //m_internal_op_key_storage: Option<P256Keypair>,
+        //m_operation_key: *mut P256Keypair,
+        //m_operation_key: Option<&P256Keypair>,
+        m_operation_key: Option<Keypair<'a>>,
     }
 
+    /*
     #[cfg(test)]
     mock! {
         pub FabricInfo {
@@ -178,11 +187,13 @@ pub mod fabric_info {
             pub(super) fn init(&mut self, init_params: &super::fabric_info::InitParams) -> ChipErrorResult;
             pub(super) fn set_operational_keypair(
                 &mut self,
-                keypair: *const P256Keypair,
+                //keypair: *const P256Keypair,
+                keypair: &P256Keypair,
             ) -> ChipErrorResult;
             pub(super) fn set_externally_owned_operational_keypair(
                 &mut self,
-                keypair: *mut P256Keypair,
+                //keypair: *mut P256Keypair,
+                keypair: &P256Keypair,
             ) -> ChipErrorResult;
             pub(super) fn sign_with_op_keypair(
                 &self,
@@ -203,21 +214,17 @@ pub mod fabric_info {
                 noc: &[u8],
             ) -> ChipErrorResult;
         } // end of FabricInfo declear
-
-        /*
-        impl Drop for FabricInfo {
-            fn drop(&mut self);
-        }
-        */
     } // end of FabricInfo mock
+    */
 
-    impl Default for FabricInfo {
+    impl Default for FabricInfo<'_> {
         fn default() -> Self {
-            fabric_info_const_default()
+            const_default()
         }
     }
 
-    pub const fn fabric_info_const_default() -> FabricInfo {
+    /*
+    pub const fn FabricInfo::const_default() -> FabricInfo {
         FabricInfo {
             m_node_id: KUNDEFINED_NODE_ID,
             m_fabric_id: KUNDEFINED_FABRIC_ID,
@@ -226,12 +233,14 @@ pub mod fabric_info {
             m_fabric_label: FabricLabelString::const_default(),
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             m_vendor_id: VendorId::NotSpecified,
-            m_has_externally_owned_operation_key: false,
+            //m_has_externally_owned_operation_key: false,
             m_should_advertise_identity: true,
-            m_internal_op_key_storage: None,
-            m_operation_key: ptr::null_mut(),
+            //m_internal_op_key_storage: None,
+            //m_operation_key: ptr::null_mut(),
+            m_operation_key: None,
         }
     }
+    */
 
     pub(super) const fn metadata_tlv_max_size() -> usize {
         tlv_estimate_struct_overhead!(
@@ -247,14 +256,31 @@ pub mod fabric_info {
         )
     }
 
-    impl FabricInfo {
+    impl<'a> FabricInfo<'a> {
+        pub const fn const_default() -> Self {
+            FabricInfo {
+                m_node_id: KUNDEFINED_NODE_ID,
+                m_fabric_id: KUNDEFINED_FABRIC_ID,
+                m_compressed_fabric_id: KUNDEFINED_COMPRESSED_FABRIC_ID,
+                m_root_publick_key: P256PublicKey::const_default(),
+                m_fabric_label: FabricLabelString::const_default(),
+                m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+                m_vendor_id: VendorId::NotSpecified,
+                //m_has_externally_owned_operation_key: false,
+                m_should_advertise_identity: true,
+                //m_internal_op_key_storage: None,
+                //m_operation_key: ptr::null_mut(),
+                m_operation_key: None,
+            }
+        }
+
         pub fn set_fabric_label(&mut self, label: &str) -> ChipErrorResult {
             self.m_fabric_label = FabricLabelString::from(label);
 
             chip_ok!()
         }
 
-        pub fn get_fabric_label<'a>(&'a self) -> Option<&'a str> {
+        pub fn get_fabric_label(&self) -> Option<&'a str> {
             self.m_fabric_label.str()
         }
 
@@ -314,14 +340,15 @@ pub mod fabric_info {
 
         pub fn has_operational_key(&self) -> bool {
             //unsafe { (*self.m_operation_key.get()).is_null() == false }
-            self.m_operation_key.is_null() == false
+            //self.m_operation_key.is_null() == false
+            self.m_operation_key.is_some()
         }
 
         pub fn should_advertise_identity(&self) -> bool {
             self.m_should_advertise_identity
         }
 
-        pub(super) fn init(&mut self, init_params: &InitParams) -> ChipErrorResult {
+        pub(super) fn init(&mut self, init_params: &InitParams<'a>) -> ChipErrorResult {
             init_params.are_valid()?;
 
             self.reset();
@@ -335,11 +362,20 @@ pub mod fabric_info {
             self.m_vendor_id = init_params.m_vendor_id;
             self.m_should_advertise_identity = init_params.m_should_advertise_identity;
 
+            /*
             if init_params.m_operation_key.is_null() == false {
                 if init_params.m_has_externally_owned_operation_key == true {
                     self.set_externally_owned_operational_keypair(init_params.m_operation_key)?;
                 } else {
                     self.set_operational_keypair(init_params.m_operation_key)?;
+                }
+            }
+            */
+            if let Some(keypair) = init_params.m_operation_key {
+                if init_params.m_has_externally_owned_operation_key == true {
+                    self.set_externally_owned_operational_keypair(keypair)?;
+                } else {
+                    self.set_operational_keypair(keypair)?;
                 }
             }
 
@@ -348,47 +384,50 @@ pub mod fabric_info {
 
         pub(super) fn set_operational_keypair(
             &mut self,
-            keypair: *const P256Keypair,
+            //keypair: *const P256Keypair,
+            keypair: &P256Keypair,
         ) -> ChipErrorResult {
-            verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
+            //verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
 
             let mut serialized = P256SerializedKeypair::default();
 
-            unsafe {
-                keypair.as_ref().unwrap().serialize(&mut serialized)?;
-            }
+            keypair.serialize(&mut serialized)?;
 
+            /*
             if self.m_has_externally_owned_operation_key == true {
                 // Drop it, so we will allocate an internally owned one.
                 self.m_operation_key = ptr::null_mut();
                 self.m_has_externally_owned_operation_key = false;
             }
+            */
 
             let mut internal_keypair = P256Keypair::default();
             internal_keypair.deserialize(&serialized)?;
-            self.m_operation_key = ptr::addr_of_mut!(internal_keypair);
-            self.m_internal_op_key_storage = Some(internal_keypair);
+            self.m_operation_key = Some(Keypair::Internal(internal_keypair));
+            //self.m_internal_op_key_storage = Some(internal_keypair);
 
             chip_ok!()
         }
 
         pub(super) fn set_externally_owned_operational_keypair(
             &mut self,
-            keypair: *mut P256Keypair,
+            //keypair: *mut P256Keypair,
+            keypair: &'a P256Keypair,
         ) -> ChipErrorResult {
-            verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
+            //verify_or_return_error!(!keypair.is_null(), Err(chip_error_invalid_argument!()));
 
-            if self.m_has_externally_owned_operation_key == false
-                && self.m_operation_key.is_null() == false
-                && self.m_internal_op_key_storage.is_some()
+            /*
+            if self.m_internal_op_key_storage.is_some()
             {
                 let mut internal_keypair = self.m_internal_op_key_storage.take().unwrap();
                 internal_keypair.clear();
-                self.m_operation_key = ptr::null_mut();
+            }
+            */
+            if let Some(Keypair::Internal(keypair)) = self.m_operation_key.as_mut() {
+                keypair.clear();
             }
 
-            self.m_has_externally_owned_operation_key = true;
-            self.m_operation_key = keypair;
+            self.m_operation_key = Some(Keypair::External(keypair));
 
             chip_ok!()
         }
@@ -399,16 +438,26 @@ pub mod fabric_info {
             out_signature: &mut P256EcdsaSignature,
         ) -> ChipErrorResult {
             verify_or_return_error!(
-                !self.m_operation_key.is_null(),
+                self.m_operation_key.is_some(),
                 Err(chip_error_key_not_found!())
             );
 
+            /*
             unsafe {
                 return self
                     .m_operation_key
                     .as_ref()
                     .unwrap()
                     .ecdsa_sign_msg(message, out_signature);
+            }
+            */
+            match self.m_operation_key.as_ref() {
+                Some(Keypair::Internal(keypair)) => {
+                    keypair.ecdsa_sign_msg(message, out_signature)
+                },
+                Some(Keypair::External(keypair)) => {
+                    keypair.ecdsa_sign_msg(message, out_signature)
+                }
             }
         }
 
@@ -421,6 +470,7 @@ pub mod fabric_info {
             self.m_vendor_id = VendorId::NotSpecified;
             self.m_fabric_label = FabricLabelString::default();
 
+            /*
             if !self.m_has_externally_owned_operation_key
                 && self.m_operation_key.is_null() == false
                 && self.m_internal_op_key_storage.is_some()
@@ -433,8 +483,14 @@ pub mod fabric_info {
             // TODO: Also, make sure the correct when we have a = b
 
             self.m_operation_key = ptr::null_mut();
+            */
 
-            self.m_has_externally_owned_operation_key = false;
+            if let Some(Keypair::Internal(keypair)) = self.m_operation_key.as_mut() {
+                keypair.clear();
+            }
+            self.m_operation_key = None;
+
+            //self.m_has_externally_owned_operation_key = false;
             self.m_should_advertise_identity = true;
 
             self.m_node_id = KUNDEFINED_NODE_ID;
@@ -445,8 +501,8 @@ pub mod fabric_info {
             self.m_should_advertise_identity = advertise_identity;
         }
 
-        pub(super) fn commit_to_storge<'a, Storage: PersistentStorageDelegate>(
-            &'a self,
+        pub(super) fn commit_to_storge<Storage: PersistentStorageDelegate>(
+            &self,
             storage: &'a mut Storage,
         ) -> ChipErrorResult {
             let mut buf: [u8; metadata_tlv_max_size()] = [0; { metadata_tlv_max_size() }];
@@ -476,8 +532,8 @@ pub mod fabric_info {
             );
         }
 
-        pub(super) fn load_from_storage<'a, Storage: PersistentStorageDelegate>(
-            &'a mut self,
+        pub(super) fn load_from_storage<Storage: PersistentStorageDelegate>(
+            &mut self,
             storage: &'a mut Storage,
             new_fabric_index: FabricIndex,
             rcac: &'a [u8],
@@ -531,7 +587,7 @@ pub mod fabric_info {
         }
     }
 
-    impl Drop for FabricInfo {
+    impl Drop for FabricInfo<'_> {
         fn drop(&mut self) {
             self.reset();
         }
@@ -1026,14 +1082,14 @@ pub mod fabric_info {
 
         #[test]
         fn default_init() {
-            let info = fabric_info_const_default();
+            let info = FabricInfo::const_default();
             assert_eq!(false, info.has_operational_key());
         }
 
         #[test]
         fn commit() {
             let mut pa = TestPersistentStorage::default();
-            let info = fabric_info_const_default();
+            let info = FabricInfo::const_default();
             assert_eq!(true, info.commit_to_storge(&mut pa).is_ok());
             assert_eq!(
                 true,
@@ -1044,7 +1100,7 @@ pub mod fabric_info {
         #[test]
         fn load() {
             let mut pa = TestPersistentStorage::default();
-            let mut info = fabric_info_const_default();
+            let mut info = FabricInfo::const_default();
             info.m_vendor_id = VendorId::Common;
             let label = "abc";
             info.m_fabric_label = FabricLabelString::from(label);
@@ -1056,7 +1112,7 @@ pub mod fabric_info {
             let rcac = make_chip_cert(1, 2, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
             let noc = make_chip_cert(3, 4, keypair.public_key().const_bytes(), Some(&keypair)).unwrap();
 
-            let mut info_out = fabric_info_const_default();
+            let mut info_out = FabricInfo::const_default();
             assert_eq!(
                 true,
                 info_out
@@ -1072,22 +1128,26 @@ pub mod fabric_info {
 
         #[test]
         fn set_op_keypair() {
-            let mut info = fabric_info_const_default();
+            let mut info = FabricInfo::const_default();
             let keypair = P256Keypair::default();
 
             assert_eq!(
                 true,
-                info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok()
+                //info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok()
+                info.set_operational_keypair(&keypair).is_ok()
             );
-            assert_eq!(true, info.m_internal_op_key_storage.is_some());
-            assert_eq!(
-                keypair.public_key().const_bytes(),
-                info.m_internal_op_key_storage
-                    .as_ref()
-                    .unwrap()
-                    .public_key()
-                    .const_bytes()
-            );
+            assert_eq!(true, info.m_operation_key.is_some());
+            match info.m_operation_key.as_ref() {
+                Some(Keypair::Internal(k)) => {
+                    assert_eq!(
+                        keypair.public_key().const_bytes(),
+                        k.public_key().const_bytes()
+                    );
+                },
+                Some(Keypair::External(keypair)) => {
+                    assert!(false);
+                }
+            }
         }
 
         #[test]
@@ -1179,6 +1239,7 @@ mod fabric_table {
     use crate::chip_error_wrong_cert_dn;
     use crate::chip_error_wrong_node_id;
     use crate::chip_error_unsupported_cert_format;
+    use crate::chip_error_invalid_public_key;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::chip_static_assert;
@@ -1196,9 +1257,9 @@ mod fabric_table {
     use crate::chip_log_progress;
 
     use bitflags::{bitflags, Flags};
-    //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, fabric_info_const_default}};
+    //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, FabricInfo::const_default}};
     use super::{
-        fabric_info::{self, fabric_info_const_default},
+        fabric_info,
         FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
     };
     use core::{
@@ -1358,15 +1419,15 @@ mod fabric_table {
         return (fabric_index + 1) as FabricIndex;
     }
 
-    pub struct FabricTable<PSD, OK, OCS>
+    pub struct FabricTable<'a, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        m_states: [FabricInfo; CHIP_CONFIG_MAX_FABRICS],
+        m_states: [FabricInfo<'a>; CHIP_CONFIG_MAX_FABRICS],
         // Used for UpdateNOC pending fabric updates
-        m_pending_fabric: FabricInfo,
+        m_pending_fabric: FabricInfo<'a>,
         m_storage: *mut PSD,
         m_operational_keystore: *mut OK,
         m_op_cert_store: *mut OCS,
@@ -1468,7 +1529,7 @@ mod fabric_table {
     }
 
     #[cfg(test)]
-    pub fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<PSD, OK, OCS>
+    pub fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<'static, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
@@ -1494,15 +1555,15 @@ mod fabric_table {
     }
 
     #[cfg(not(test))]
-    pub const fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<PSD, OK, OCS>
+    pub const fn fabric_table_const_default<PSD, OK, OCS>() -> FabricTable<'static, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
         FabricTable {
-            m_states: [const { fabric_info_const_default() }; CHIP_CONFIG_MAX_FABRICS],
-            m_pending_fabric: fabric_info_const_default(),
+            m_states: [const { FabricInfo::const_default() }; CHIP_CONFIG_MAX_FABRICS],
+            m_pending_fabric: FabricInfo::const_default(),
             m_storage: ptr::null_mut(),
             m_operational_keystore: ptr::null_mut(),
             m_op_cert_store: ptr::null_mut(),
@@ -1518,7 +1579,7 @@ mod fabric_table {
         }
     }
 
-    impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
+    impl<'a, PSD, OK, OCS> FabricTable<'a, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
@@ -1572,7 +1633,7 @@ mod fabric_table {
             chip_ok!()
         }
 
-        fn read_fabric_info<'a, Reader: TlvReader<'a>>(
+        fn read_fabric_info<'b, Reader: TlvReader<'b>>(
             &mut self,
             reader: &mut Reader,
         ) -> ChipErrorResult {
@@ -1711,7 +1772,7 @@ mod fabric_table {
         }
     }
 
-    impl<PSD, OK, OCS> FabricTable<PSD, OK, OCS>
+    impl<'a, PSD, OK, OCS> FabricTable<'a, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
@@ -2595,12 +2656,12 @@ mod fabric_table {
             }
         }
 
-        pub fn verify_credentials<'a, Policy: CertificateValidityPolicy>(
+        pub fn verify_credentials<'b, Policy: CertificateValidityPolicy>(
             &self,
             fabric_index: FabricIndex,
             noc: &[u8],
             icac: Option<&[u8]>,
-            context: &mut ValidationContext<'a, Policy>
+            context: &mut ValidationContext<'b, Policy>
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2618,11 +2679,11 @@ mod fabric_table {
             return Self::run_verify_credentials(noc, icac, rcac.const_bytes(), context);
         }
 
-        pub fn run_verify_credentials<'a, Policy: CertificateValidityPolicy>(
+        pub fn run_verify_credentials<'b, Policy: CertificateValidityPolicy>(
             noc: &[u8],
             icac: Option<&[u8]>,
             rcac: &[u8],
-            context: &mut ValidationContext<'a, Policy>,
+            context: &mut ValidationContext<'b, Policy>,
         ) -> Result<
             (
                 CompressedFabricId,
@@ -2910,7 +2971,11 @@ mod fabric_table {
             }
 
             if let Some(existing_op_key_ref) = existing_op_key {
-                breakkkkk
+                // Verify that public key in NOC matches public key of the provided keypair.
+                // When operational key is not injected (e.g. when mOperationalKeystore != nullptr)
+                // the check is done by the keystore in `ActivateOpKeypairForFabric`.
+
+                verify_or_return_error!(existing_op_key_ref.public_key().matches(&noc_public_key), Err(chip_error_invalid_public_key!()));
             }
             Err(chip_error_not_implemented!())
         }
