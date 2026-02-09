@@ -101,7 +101,6 @@ pub mod fabric_info {
         pub m_vendor_id: VendorId,
         pub m_has_externally_owned_operation_key: bool,
         pub m_should_advertise_identity: bool,
-        //pub m_operation_key: *mut P256Keypair,
         pub m_operation_key: Option<&'a P256Keypair>,
     }
 
@@ -141,7 +140,7 @@ pub mod fabric_info {
         }
     }
 
-    enum Keypair<'a> {
+    pub(super) enum Keypair<'a> {
         External(&'a P256Keypair),
         Internal(P256Keypair),
     }
@@ -1222,6 +1221,7 @@ mod fabric_table {
                 ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
                 P256PublicKey, P256SerializedKeypair, K_MIN_CSR_BUFFER_SIZE,
             },
+            OperationalKeystore,
             generate_compressed_fabric_id,
         },
         system::system_clock::Seconds32,
@@ -1263,7 +1263,7 @@ mod fabric_table {
     use bitflags::{bitflags, Flags};
     //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, FabricInfo::const_default}};
     use super::{
-        fabric_info,
+        fabric_info::{self, Keypair as FabricInfoOpKeypair},
         FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
     };
     use core::{
@@ -2924,7 +2924,7 @@ mod fabric_table {
             &mut self,
             fabric_index: FabricIndex,
             is_addition: bool,
-            existing_op_key: Option<&P256Keypair>,
+            existing_op_key: Option<&'a P256Keypair>,
             is_existingg_op_key_externally_owned: bool,
             vendor_id: u16,
             advertise_identity: AdvertiseIdentity,
@@ -2932,26 +2932,7 @@ mod fabric_table {
             let mut new_fabric_info = fabric_info::InitParams::const_default();
             let fabric_entry: &mut FabricInfo;
             let mut fabric_id_to_validate: Option<FabricId> = None;
-            let mut fabric_label: Option<&str> = None;
-            if is_addition {
-                // Initialization for Adding a fabric
-                // Find an available slot.
-                if let Some(fabric) = self.m_states.iter_mut().find(|f| !f.is_initialized()) {
-                    fabric_entry = fabric;
-                    new_fabric_info.m_vendor_id = VendorId::from(vendor_id);
-                    new_fabric_info.m_fabric_index = fabric_index;
-                } else {
-                    return Err(chip_error_no_memory!());
-                }
-            } else {
-                self.m_pending_fabric.reset();
-                let existing_fabric = self.find_fabric_with_index(fabric_index).ok_or(chip_error_internal!())?;
-                new_fabric_info.m_vendor_id = existing_fabric.get_vendor_id();
-                new_fabric_info.m_fabric_index = fabric_index;
-                fabric_id_to_validate = Some(existing_fabric.get_fabric_id());
-                fabric_label = existing_fabric.get_fabric_label();
-                fabric_entry = &mut self.m_pending_fabric;
-            }
+            //let mut fabric_label: Option<&str> = None;
 
             let mut not_before_collector = NotBeforeCollector::new();
             let mut noc_public_key = P256PublicKey::default();
@@ -2974,14 +2955,78 @@ mod fabric_table {
                 }, rcac_buf.const_bytes(), fabric_id_to_validate, &mut not_before_collector)?;
             }
 
+            if is_addition {
+                // Initialization for Adding a fabric
+                // Find an available slot.
+                if let Some(fabric) = self.m_states.iter_mut().find(|f| !f.is_initialized()) {
+                    fabric_entry = fabric;
+                    new_fabric_info.m_vendor_id = VendorId::from(vendor_id);
+                    new_fabric_info.m_fabric_index = fabric_index;
+                } else {
+                    return Err(chip_error_no_memory!());
+                }
+            } else {
+                self.m_pending_fabric.reset();
+                let existing_fabric = self.find_fabric_with_index(fabric_index).ok_or(chip_error_internal!())?;
+                new_fabric_info.m_vendor_id = existing_fabric.get_vendor_id();
+                new_fabric_info.m_fabric_index = fabric_index;
+                fabric_id_to_validate = Some(existing_fabric.get_fabric_id());
+                fabric_entry = &mut self.m_pending_fabric;
+            }
+
             if let Some(existing_op_key_ref) = existing_op_key {
                 // Verify that public key in NOC matches public key of the provided keypair.
                 // When operational key is not injected (e.g. when mOperationalKeystore != nullptr)
                 // the check is done by the keystore in `ActivateOpKeypairForFabric`.
 
                 verify_or_return_error!(existing_op_key_ref.public_key().matches(&noc_public_key), Err(chip_error_invalid_public_key!()));
+                new_fabric_info.m_operation_key = Some(existing_op_key_ref);
+                new_fabric_info.m_has_externally_owned_operation_key = true;
+            } else if !self.m_operational_keystore.is_null() {
+                unsafe {
+                    // If a keystore exists, we activate the operational key now, which also validates if it was previously installed
+                    if self.m_operational_keystore.as_ref().unwrap().has_pending_op_keypair() {
+                        self.m_operational_keystore.as_mut().unwrap().activate_op_keypair_for_fabric(fabric_index, &noc_public_key)?;
+                    } else {
+                        verify_or_return_error!(self.m_operational_keystore.as_ref().unwrap().has_op_keypair_for_fabric(fabric_index), Err(chip_error_key_not_found!()));
+                    }
+                }
+            } else {
+                return Err(chip_error_incorrect_state!());
             }
-            Err(chip_error_not_implemented!())
+
+            new_fabric_info.m_should_advertise_identity = if advertise_identity == AdvertiseIdentity::Yes { true } else { false };
+
+            // Update local copy of fabric data. For add it's a new entry, for update, it's `mPendingFabric` shadow entry.
+            fabric_entry.init(&new_fabric_info)?;
+
+            // No need to update label here since the default string is empty when addition.
+
+            if is_addition {
+                chip_log_progress!(FabricProvisioning, "Added new fabric at index {:#x}", fabric_entry.get_fabric_index());
+                chip_log_progress!(FabricProvisioning, "Assigned compressed fabric ID {:#x}, node ID: {:#x}", 
+                    fabric_entry.get_compressed_fabric_id(), fabric_entry.get_node_id());
+            } else {
+                chip_log_progress!(FabricProvisioning, "Updated new fabric at index {:#x}, Node ID {:#x}",
+                    fabric_entry.get_fabric_index(), fabric_entry.get_node_id());
+            }
+
+            // Failure to update pending Last Known Good Time is non-fatal.  If Last
+            // Known Good Time is incorrect and this causes the commissioner's
+            // certificates to appear invalid, the certificate validity policy will
+            // determine what to do.  And if the validity policy considers this fatal
+            // this will prevent CASE and cause the pending fabric and Last Known Good
+            // Time to be reverted.
+            self.m_last_known_good_time.update_pending_last_known_good_chip_epoch_time(not_before_collector.m_latest_not_before.get()).
+                inspect_err(|e| {
+                    chip_log_error!(FabricProvisioning, "Failed to update pending Last Known Good Time: {}", e);
+            });
+
+            if is_addition {
+                self.m_fabric_count += 1;
+            }
+
+            chip_ok!()
         }
 
         fn add_new_pending_fabric_common(
@@ -6615,6 +6660,11 @@ mod fabric_table {
             let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
 
             assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(0), &mut ignore).is_err());
+        }
+
+        #[test]
+        fn add_inner_successfully() {
+            assert!(false);
         }
     } // end of mod tests
 } // end of mod fabric_table
