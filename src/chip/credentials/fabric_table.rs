@@ -219,12 +219,11 @@ pub mod fabric_info {
 
     impl Default for FabricInfo<'_> {
         fn default() -> Self {
-            const_default()
+            fabric_info_const_default()
         }
     }
 
-    /*
-    pub const fn FabricInfo::const_default() -> FabricInfo {
+    pub const fn fabric_info_const_default() -> FabricInfo<'static> {
         FabricInfo {
             m_node_id: KUNDEFINED_NODE_ID,
             m_fabric_id: KUNDEFINED_FABRIC_ID,
@@ -240,7 +239,6 @@ pub mod fabric_info {
             m_operation_key: None,
         }
     }
-    */
 
     pub(super) const fn metadata_tlv_max_size() -> usize {
         tlv_estimate_struct_overhead!(
@@ -280,7 +278,7 @@ pub mod fabric_info {
             chip_ok!()
         }
 
-        pub fn get_fabric_label(&self) -> Option<&'a str> {
+        pub fn get_fabric_label(&self) -> Option<&str> {
             self.m_fabric_label.str()
         }
 
@@ -458,6 +456,9 @@ pub mod fabric_info {
                 Some(Keypair::External(keypair)) => {
                     keypair.ecdsa_sign_msg(message, out_signature)
                 }
+                None => {
+                    Err(chip_error_key_not_found!())
+                }
             }
         }
 
@@ -534,10 +535,10 @@ pub mod fabric_info {
 
         pub(super) fn load_from_storage<Storage: PersistentStorageDelegate>(
             &mut self,
-            storage: &'a mut Storage,
+            storage: &mut Storage,
             new_fabric_index: FabricIndex,
-            rcac: &'a [u8],
-            noc: &'a [u8],
+            rcac: &[u8],
+            noc: &[u8],
         ) -> ChipErrorResult {
             self.m_fabric_index = new_fabric_index;
             {
@@ -1145,6 +1146,9 @@ pub mod fabric_info {
                     );
                 },
                 Some(Keypair::External(keypair)) => {
+                    assert!(false);
+                },
+                None => {
                     assert!(false);
                 }
             }
@@ -2848,7 +2852,7 @@ mod fabric_table {
         fn get_mutable_fabric_by_index(
             &mut self,
             fabric_index: FabricIndex,
-        ) -> Option<&mut FabricInfo> {
+        ) -> Option<&mut FabricInfo<'a>> {
             if fabric_index == KUNDEFINED_FABRIC_INDEX {
                 return None;
             }
@@ -3387,30 +3391,44 @@ mod fabric_table {
         }
     }
 
-    impl<PSD, OK, OCS> Default for FabricTable<PSD, OK, OCS>
+    impl<PSD, OK, OCS> Default for FabricTable<'_, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
         fn default() -> Self {
-            fabric_table_const_default::<PSD, OK, OCS>()
+            //fabric_table_const_default::<PSD, OK, OCS>()
+            FabricTable {
+                m_states: core::array::from_fn(|_| FabricInfo::default()),
+                m_pending_fabric: FabricInfo::default(),
+                m_storage: ptr::null_mut(),
+                m_operational_keystore: ptr::null_mut(),
+                m_op_cert_store: ptr::null_mut(),
+                m_delegate_list_root: None,
+                m_fabric_index_with_pending_state: KUNDEFINED_FABRIC_INDEX,
+                m_deleted_fabric_index_from_init: KUNDEFINED_FABRIC_INDEX,
+                m_last_known_good_time: LastKnownGoodTime::<PSD>::const_default(),
+                m_next_available_fabric_index: None,
+                m_fabric_count: 0,
+                m_state_flag: StateFlags::KabortCommitForTest,
+            }
         }
     }
 
-    pub struct FabricIterator<'a> {
-        m_next: core::slice::Iter<'a, FabricInfo>,
-        m_pending: Option<&'a FabricInfo>,
+    pub struct FabricIterator<'a, 'b> {
+        m_next: core::slice::Iter<'a, FabricInfo<'b>>,
+        m_pending: Option<&'a FabricInfo<'b>>,
     }
 
-    impl<'a, PSD, OK, OCS> IntoIterator for &'a FabricTable<PSD, OK, OCS>
+    impl<'a, 'b, PSD, OK, OCS> IntoIterator for &'a FabricTable<'b, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        type Item = &'a FabricInfo;
-        type IntoIter = FabricIterator<'a>;
+        type Item = &'a FabricInfo<'b>;
+        type IntoIter = FabricIterator<'a, 'b>;
 
         fn into_iter(self) -> Self::IntoIter {
             let pending = if self.has_pending_fabric_update() {
@@ -3425,8 +3443,8 @@ mod fabric_table {
         }
     }
 
-    impl<'a> Iterator for FabricIterator<'a> {
-        type Item = &'a FabricInfo;
+    impl<'a, 'b> Iterator for FabricIterator<'a, 'b> {
+        type Item = &'a FabricInfo<'b>;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(info) = self.m_next.next() {
@@ -3450,19 +3468,19 @@ mod fabric_table {
         }
     }
 
-    pub struct FabricIteratorMut<'a> {
-        m_next: core::slice::IterMut<'a, FabricInfo>,
-        m_pending: Option<&'a mut FabricInfo>,
+    pub struct FabricIteratorMut<'a, 'b> {
+        m_next: core::slice::IterMut<'a, FabricInfo<'b>>,
+        m_pending: Option<&'a mut FabricInfo<'b>>,
     }
 
-    impl<'a, PSD, OK, OCS> IntoIterator for &'a mut FabricTable<PSD, OK, OCS>
+    impl<'a, 'b, PSD, OK, OCS> IntoIterator for &'a mut FabricTable<'b, PSD, OK, OCS>
     where
         PSD: PersistentStorageDelegate,
         OK: crypto::OperationalKeystore,
         OCS: credentials::OperationalCertificateStore,
     {
-        type Item = &'a mut FabricInfo;
-        type IntoIter = FabricIteratorMut<'a>;
+        type Item = &'a mut FabricInfo<'b>;
+        type IntoIter = FabricIteratorMut<'a, 'b>;
 
         fn into_iter(self) -> Self::IntoIter {
             let pending = if self.has_pending_fabric_update() {
@@ -3477,8 +3495,8 @@ mod fabric_table {
         }
     }
 
-    impl<'a> Iterator for FabricIteratorMut<'a> {
-        type Item = &'a mut FabricInfo;
+    impl<'a, 'b> Iterator for FabricIteratorMut<'a, 'b> {
+        type Item = &'a mut FabricInfo<'b>;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(info) = self.m_next.next() {
@@ -3590,9 +3608,9 @@ mod fabric_table {
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
-        type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
+        type TestFabricTable<'a> = FabricTable<'a, TestPersistentStorage, OK, OCS>;
 
-        type MockStorageTestFabricTable = FabricTable<
+        type MockStorageTestFabricTable<'a> = FabricTable<'a,
             TestPersistentStorage,
             MockOperationalKeystore,
             MockOperationalCertificateStore,
@@ -3659,7 +3677,7 @@ mod fabric_table {
             }
         }
 
-        fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo {
+        fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo<'static> {
             let mut init_pas = fabric_info::InitParams::default();
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
@@ -3821,11 +3839,11 @@ mod fabric_table {
             );
         }
 
-        pub fn create_table_with_param<PSD, OK, OCS>(
+        pub fn create_table_with_param<'a, PSD, OK, OCS>(
             pa: *mut PSD,
             ks: *mut OK,
             pos: *mut OCS,
-        ) -> FabricTable<PSD, OK, OCS>
+        ) -> FabricTable<'a ,PSD, OK, OCS>
         where
             PSD: PersistentStorageDelegate,
             OK: crypto::OperationalKeystore,
@@ -5665,10 +5683,16 @@ mod fabric_table {
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
             init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
+            use std::sync::OnceLock;
             // create an op key
-            let mut keypair = P256Keypair::default();
-            keypair.initialize(ECPKeyTarget::Ecdh);
-            init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
+            static TEST_KEY_PAIR: OnceLock<P256Keypair> = OnceLock::new();
+            let keypair = TEST_KEY_PAIR.get_or_init(|| {
+                let mut keypair = P256Keypair::default();
+                keypair.initialize(ECPKeyTarget::Ecdh);
+                keypair
+            });
+            //init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
+            init_pas.m_operation_key = Some(&keypair);
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
@@ -5755,9 +5779,15 @@ mod fabric_table {
             init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
             init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
             // create an op key
-            let mut keypair = P256Keypair::default();
-            keypair.initialize(ECPKeyTarget::Ecdh);
-            init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
+            //let mut keypair = P256Keypair::default();
+            use std::sync::OnceLock;
+            static TEST_KEY_PAIR: OnceLock<P256Keypair> = OnceLock::new();
+            let keypair = TEST_KEY_PAIR.get_or_init(|| {
+                let mut keypair = P256Keypair::default();
+                keypair.initialize(ECPKeyTarget::Ecdh);
+                keypair
+            });
+            init_pas.m_operation_key = Some(&keypair);
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
