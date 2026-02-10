@@ -2932,7 +2932,6 @@ mod fabric_table {
             let mut new_fabric_info = fabric_info::InitParams::const_default();
             let fabric_entry: &mut FabricInfo;
             let mut fabric_id_to_validate: Option<FabricId> = None;
-            //let mut fabric_label: Option<&str> = None;
 
             let mut not_before_collector = NotBeforeCollector::new();
             let mut noc_public_key = P256PublicKey::default();
@@ -3599,14 +3598,14 @@ mod fabric_table {
                     extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
                     tests::make_subject_key_id, ChipCertificateData, decode_chip_cert, CertDecodeFlags, CertFlags,
                 },
-                chip_certificate_set::{ValidationContext, tests::{make_x509_cert_chain_3, make_x509_cert_chain_2}, EffectiveTime},
+                chip_certificate_set::{ValidationContext, tests::{make_x509_cert_chain_3, make_x509_cert_chain_3_with_keypair, make_x509_cert_chain_3_with_keypair_store, make_x509_cert_chain_2}, EffectiveTime},
                 fabric_table::{
                     fabric_info::{self, tests::*},
                     fabric_table::{
                         commit_marker_context_tlv_max_size, fabric_indices_tag,
                         index_info_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag,
                         next_available_fabric_index_tag, Delegate, FabricTable, InitParams,
-                        StateFlags,
+                        StateFlags, AdvertiseIdentity
                     },
                 },
                 last_known_good_time::LastKnownGoodTime,
@@ -6663,8 +6662,77 @@ mod fabric_table {
         }
 
         #[test]
-        fn add_inner_successfully() {
-            assert!(false);
+        fn add_inner_with_external_keypair_successfully() {
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // update all three certificates
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                pos.add_new_op_certs_for_fabric(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            assert!(
+                table.add_or_update_inner(fabric_index, is_addition, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+
+        }
+
+        #[test]
+        fn add_inner_without_external_keypair_successfully() {
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            ks.init(ptr::addr_of_mut!(pa));
+
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            // update all three certificates
+            assert_eq!(
+                true,
+                pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
+                    .is_ok()
+            );
+            assert_eq!(
+                true,
+                pos.add_new_op_certs_for_fabric(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes())
+                    .is_ok()
+            );
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            assert!(
+                table.add_or_update_inner(fabric_index, is_addition, None, false, 0x01u16, AdvertiseIdentity::Yes).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table

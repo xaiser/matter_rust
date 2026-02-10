@@ -540,6 +540,7 @@ mod chip_certificate_set {
         use super::*;
 
         use crate::chip::{
+            chip_lib::core::data_model_types::FabricIndex,
             asn1::Oid,
             credentials::{
                 certificate_validity_policy::{
@@ -550,7 +551,7 @@ mod chip_certificate_set {
             },
             crypto::{
                 ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
-                K_P256_PUBLIC_KEY_LENGTH,
+                K_P256_PUBLIC_KEY_LENGTH, OperationalKeystore, self, P256SerializedKeypair,
             },
         };
 
@@ -644,8 +645,9 @@ mod chip_certificate_set {
 
             (root_cert, root_buffer, noc_cert, noc_buffer)
         } // end of make_chip_cert_chain_2
-
-        pub fn make_x509_cert_chain_3() -> (ChipCertificateData, CertBuffer, ChipCertificateData, CertBuffer, ChipCertificateData, CertBuffer) {
+          
+        pub fn make_x509_cert_chain_3_with_keypair() -> 
+            (ChipCertificateData, CertBuffer, P256Keypair, ChipCertificateData, CertBuffer, P256Keypair, ChipCertificateData, CertBuffer, P256Keypair) {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
@@ -724,9 +726,110 @@ mod chip_certificate_set {
                 (noc, noc_buffer)
             };
 
-            (root_cert, root_buffer, icac_cert, icac_buffer, noc_cert, noc_buffer)
+            (root_cert, root_buffer, root_keypair, icac_cert, icac_buffer, icac_keypair, noc_cert, noc_buffer, noc_keypair)
         } // end of make_chip_cert_chain_3
 
+        pub fn make_x509_cert_chain_3() -> (ChipCertificateData, CertBuffer, ChipCertificateData, CertBuffer, ChipCertificateData, CertBuffer) {
+            let (root_cert, root_buffer, _, icac_cert, icac_buffer, _, noc_cert, noc_buffer, _) = make_x509_cert_chain_3_with_keypair();
+
+            return (root_cert, root_buffer, icac_cert, icac_buffer, noc_cert, noc_buffer);
+        } // end of make_chip_cert_chain_3
+          //
+        pub fn make_x509_cert_chain_3_with_keypair_store<Store: OperationalKeystore>(keypair_store: &mut Store, fabric_index: FabricIndex) -> 
+            (ChipCertificateData, CertBuffer, P256Keypair, ChipCertificateData, CertBuffer, P256Keypair, ChipCertificateData, CertBuffer, P256Keypair)
+        {
+            let expected_not_before: u32 = 1;
+            let expected_not_after: u32 = 100;
+            let mut root_keypair = P256Keypair::default();
+            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let root_key_id = make_subject_key_id(1, 2);
+            let icac_key_id = make_subject_key_id(3, 4);
+            let node_key_id = make_subject_key_id(5, 6);
+            let (root_cert, root_buffer, root_dn) = {
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let empty_dn = ChipDN::default();
+                let mut random_keypair = P256Keypair::default();
+                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
+                    &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
+                //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
+                // load as trust anchor
+                let mut root = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(root_buffer.const_bytes(), &mut root, Some(CertDecodeFlags::KisTrustAnchor))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                root.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+
+                let mut root_dn = ChipDN::default();
+                for (index, value) in root.m_subject_dn.rdn.iter().enumerate() {
+                    root_dn.rdn[index] = value.clone();
+                }
+
+                (root, root_buffer, root_dn)
+            };
+
+            let mut icac_keypair = P256Keypair::default();
+            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let (icac_cert, icac_buffer, icac_dn) = {
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
+                    &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
+                let mut icac = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(icac_buffer.const_bytes(), &mut icac, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+                icac.m_cert_flags
+                    .insert(CertFlags::KisCA | CertFlags::KextPresentKeyUsage);
+                assert!(root_keypair.public_key().ecdsa_validate_hash_signature(&icac.m_tbs_hash[..], &icac.m_signature).is_ok());
+
+                let mut icac_dn = ChipDN::default();
+                for (index, value) in icac.m_subject_dn.rdn.iter().enumerate() {
+                    icac_dn.rdn[index] = value.clone();
+                }
+
+                (icac, icac_buffer, icac_dn)
+            };
+
+            let mut noc_keypair = P256Keypair::default();
+            // commit the noc keypair to keypair store
+            let mut signing_request = [0u8; crypto::K_MIN_CSR_BUFFER_SIZE];
+            assert!(keypair_store.new_op_keypair_for_fabric(fabric_index, &mut signing_request).is_ok());
+            let noc_public_key = keypair_store.get_pending_pub_key();
+            assert!(noc_public_key.is_some());
+            let noc_public_key = noc_public_key.unwrap();
+            assert!(keypair_store.activate_op_keypair_for_fabric(fabric_index, &noc_public_key).is_ok());
+            assert!(keypair_store.commit_op_keypair_for_fabric(fabric_index).is_ok());
+            let mut keypair_buffer = P256SerializedKeypair::default();
+            assert!(keypair_store.export_op_keypair_for_fabric(fabric_index, &mut keypair_buffer).is_ok());
+            assert!(noc_keypair.deserialize(&keypair_buffer).is_ok());
+
+            let (noc_cert, noc_buffer) = {
+                let subject_id = make_subject_key_id(1, 2);
+                let auth_id = make_subject_key_id(3, 4);
+                let mut subject_dn = ChipDN::default();
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+
+                let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
+                    &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
+                let mut noc = ChipCertificateData::default();
+                assert!(
+                    decode_chip_cert(noc_buffer.const_bytes(), &mut noc, Some(CertDecodeFlags::KgenerateTBSHash))
+                    .inspect_err(|e| println!("{}", e))
+                    .is_ok());
+
+                (noc, noc_buffer)
+            };
+
+            (root_cert, root_buffer, root_keypair, icac_cert, icac_buffer, icac_keypair, noc_cert, noc_buffer, noc_keypair)
+        }
         #[test]
         fn new() {
             let sets = ChipCertificateSet::new();

@@ -64,4 +64,7 @@ pub trait OperationalKeystore {
     fn allocate_ephemeral_keypair_for_case(&self) -> *mut crypto::P256Keypair;
 
     fn release_ephemeral_keypair(keypair: *mut crypto::P256Keypair);
+
+    // TODO: add this for test, remove this once we complete the commit process
+    fn get_pending_pub_key(&self) -> Option<crypto::P256PublicKey>;
 }

@@ -237,16 +237,6 @@ where
         self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
     }
 
-    // TODO: add this for test, remove this once we complete the commit process
-    pub fn get_pending_pub_key(&self) -> Option<P256PublicKey> {
-        if let Some(keypair) = &self.m_pending_keypair {
-            return Some(P256PublicKey::default_with_raw_value(
-                keypair.public_key().const_bytes(),
-            ));
-        }
-
-        None
-    }
 
     #[cfg(test)]
     pub fn get_pending_keypair(&self) -> Option<&'_ P256Keypair> {
@@ -258,6 +248,17 @@ impl<PA> OperationalKeystore for PersistentStorageOperationalKeystore<PA>
 where
     PA: PersistentStorageDelegate,
 {
+    // TODO: add this for test, remove this once we complete the commit process
+    fn get_pending_pub_key(&self) -> Option<P256PublicKey> {
+        if let Some(keypair) = &self.m_pending_keypair {
+            return Some(P256PublicKey::default_with_raw_value(
+                keypair.public_key().const_bytes(),
+            ));
+        }
+
+        None
+    }
+
     fn has_pending_op_keypair(&self) -> bool {
         false
     }
