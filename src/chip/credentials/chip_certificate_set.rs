@@ -274,11 +274,13 @@ mod chip_certificate_set {
                     .contains(CertFlags::KextPresentFutureIsCritical),
                 Err(chip_error_cert_usage_not_allowed!())
             );
+            /*
             chip_log_error!(
                 SecureChannel,
                 "start depth {}",
                 depth
             );
+            */
 
             if depth > 0 {
                 // If the depth is greater than 0 then the certificate is required to be a CA certificate...
@@ -353,11 +355,13 @@ mod chip_certificate_set {
                 }
             }
 
+            /*
             chip_log_error!(
                 SecureChannel,
                 "mid start depth {}",
                 depth
             );
+            */
 
             // Verify NotBefore and NotAfter validity of the certificates.
             //
@@ -432,11 +436,13 @@ mod chip_certificate_set {
                 Err(chip_error_cert_path_too_long!())
             );
 
+            /*
             chip_log_error!(
                 SecureChannel,
                 "issuer dn {:?}",
                 cert.m_auth_key_id
             );
+            */
 
             // Search for a valid CA certificate that matches the Issuer DN and Authority Key Id of the current certificate.
             // Fail if no acceptable certificate is found.
@@ -456,11 +462,13 @@ mod chip_certificate_set {
                     chip_error_ca_cert_not_found!()
                 })?;
 
+            /*
             chip_log_error!(
                 SecureChannel,
                 "depth {}, find issuer dn {:?}, verify sig with hash {:?}, and sig {:?}",
                 depth, ca_cert.m_subject_key_id, cert.m_tbs_hash, cert.m_signature.const_bytes()
             );
+            */
 
             // Verify signature of the current certificate against public key of the CA certificate. If signature verification
             // succeeds, the current certificate is valid.

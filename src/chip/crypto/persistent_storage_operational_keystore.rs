@@ -260,7 +260,7 @@ where
     }
 
     fn has_pending_op_keypair(&self) -> bool {
-        false
+        self.m_pending_keypair.is_some()
     }
 
     fn has_op_keypair_for_fabric(&self, fabric_index: FabricIndex) -> bool {

@@ -1244,6 +1244,7 @@ mod fabric_table {
     use crate::chip_error_wrong_node_id;
     use crate::chip_error_unsupported_cert_format;
     use crate::chip_error_invalid_public_key;
+    use crate::chip_error_fabric_exists;
     use crate::chip_ok;
     use crate::chip_sdk_error;
     use crate::chip_static_assert;
@@ -3030,14 +3031,77 @@ mod fabric_table {
 
         fn add_new_pending_fabric_common(
             &mut self,
-            _noc: &[u8],
-            _icac: &[u8],
-            _vendor_id: u16,
-            _existeding_op_key: &P256Keypair,
-            _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: AdvertiseIdentity,
+            noc: &[u8],
+            icac: &[u8],
+            vendor_id: u16,
+            existeding_op_key: Option<&'a P256Keypair>,
+            is_existing_op_key_externally_owned: bool,
+            advertise_identity: AdvertiseIdentity,
         ) -> Result<FabricIndex, ChipError> {
-            Err(chip_error_not_implemented!())
+            matter_trace_scope!("AddNewPendingFabricCommon", "Fabric");
+
+            verify_or_return_error!(!self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            chip_static_assert!(KMAX_VALID_FABRIC_INDEX <= u8::MAX, "Cannot create more fabrics than u8 MAX");
+
+            // We should already have a pending root when we get here
+            verify_or_return_error!(self.m_state_flag.intersects(StateFlags::KisTrustedRootPending), Err(chip_error_incorrect_state!()));
+            // We should not have pending update when we get here
+            verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KisUpdatePending), Err(chip_error_incorrect_state!()));
+
+            self.ensure_next_available_fabric_index_updated();
+            let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
+
+            if let Some(index) = self.m_next_available_fabric_index {
+                fabric_index_to_use = index;
+            } else {
+                // Fabric addition, but adding fabric would fail on table full: let's not allocate a fabric
+                return Err(chip_error_no_memory!());
+            }
+
+            verify_or_return_error!(is_valid_fabric_index(fabric_index_to_use), Err(chip_error_invalid_fabric_index!()));
+
+            if existeding_op_key.is_none() {
+                // If existing operational key not provided, we need to have a keystore present.
+                // It should already have an operational key pending.
+                // Make sure we have an operational key, pending or not
+                unsafe {
+                    if let Some(keystore) = self.m_operational_keystore.as_ref() {
+                        verify_or_return_error!(keystore.has_op_keypair_for_fabric(fabric_index_to_use) ||
+                            keystore.has_pending_op_keypair(), Err(chip_error_key_not_found!()));
+                    } else {
+                        return Err(chip_error_key_not_found!());
+                    }
+                }
+            }
+
+            // Check for new fabric colliding with an existing fabric
+            if !self.m_state_flag.intersects(StateFlags::KareCollidingFabricsIgnored) &&
+                self.find_existing_fabric_by_noc_chaining(fabric_index_to_use, noc)?.is_some() 
+            {
+                return Err(chip_error_fabric_exists!());
+            }
+
+            unsafe {
+                if let Some(op_store) = self.m_op_cert_store.as_mut() {
+                    op_store.add_new_op_certs_for_fabric(fabric_index_to_use, noc, icac)?;
+                } else {
+                    // shoud not reach here since we check the null pointer
+                    return Err(chip_error_incorrect_state!());
+                }
+            }
+
+            verify_or_return_error!(self.set_pending_data_fabric_index(fabric_index_to_use), Err(chip_error_incorrect_state!()));
+
+            self.add_or_update_inner(fabric_index_to_use, /* is_addition */ true, existeding_op_key, is_existing_op_key_externally_owned, vendor_id, advertise_identity)
+                .inspect_err(|_| self.revert_pending_op_certs_except_root() )?;
+
+
+            self.m_state_flag.insert(StateFlags::KisAddPending | StateFlags::KisPendingFabricDataPresent);
+
+            // Notify that NOC was added (at least transiently)
+            self.notify_fabric_updated(fabric_index_to_use);
+
+            return Ok(fabric_index_to_use);
         }
 
         fn update_pending_fabric_common(
@@ -6875,6 +6939,152 @@ mod fabric_table {
             assert!(
                 !table.add_or_update_inner(fabric_index, is_addition, None, false, 0x01u16, AdvertiseIdentity::Yes).is_ok());
 
+        }
+
+        #[test]
+        fn add_new_pending_fabric_with_external_keypair_successfully() {
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // insert root first
+            assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+            assert!(
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+            assert_eq!(1, table.fabric_count());
+
+        }
+
+        #[test]
+        fn add_new_pending_fabric_with_external_keypair_no_root() {
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            assert!(
+                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+        }
+
+        #[test]
+        fn add_new_pending_fabric_without_external_keypair_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            ks.init(ptr::addr_of_mut!(pa));
+
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // insert root first
+            assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+            assert!(
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, None, false, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+            assert_eq!(1, table.fabric_count());
+
+        }
+
+        #[test]
+        fn add_new_pending_fabric_with_external_keypair_collided() {
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // insert root first
+            assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+            assert!(
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+            assert_eq!(1, table.fabric_count());
+
+            let mut table2 = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            table2.m_state_flag.insert(StateFlags::KisTrustedRootPending);
+
+            assert!(
+                !table2.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+        }
+
+        #[test]
+        fn add_new_pending_fabric_with_external_keypair_mismatched_certs() {
+            let (_, rcac_buf, _, _, _, _, _, _, _) = make_x509_cert_chain_3_with_keypair();
+            let (_, _, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // insert root first
+            assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+            assert!(
+                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
