@@ -1252,6 +1252,7 @@ mod fabric_table {
     use crate::tlv_estimate_struct_overhead;
     use crate::verify_or_return_error;
     use crate::verify_or_return_value;
+    use crate::verify_or_die;
     use crate::ChipError;
     use crate::ChipErrorResult;
 
@@ -2589,6 +2590,112 @@ mod fabric_table {
         }
 
         pub fn commit_pending_fabric_data(&mut self) -> ChipErrorResult {
+            verify_or_return_error!(!self.m_storage.is_null() && !self.m_op_cert_store.is_null(), Err(chip_error_incorrect_state!()));
+            let has_new_trusted_root = self.m_state_flag.intersects(StateFlags::KisTrustedRootPending);
+            let is_adding = self.m_state_flag.intersects(StateFlags::KisAddPending);
+            let is_updating = self.m_state_flag.intersects(StateFlags::KisUpdatePending);
+            let has_pending = self.m_state_flag.intersects(StateFlags::KisPendingFabricDataPresent);
+            let only_have_new_trusted_root = has_pending && has_new_trusted_root && !(is_adding || is_updating);
+            let mut has_invalid_internal_state = has_pending && (!is_valid_fabric_index(self.m_fabric_index_with_pending_state) || !(is_adding || is_updating));
+
+            let fabric_index_begin_committed = self.m_fabric_index_with_pending_state;
+            // Proceed with Update/Add pre-flight checks
+            if has_pending && !has_invalid_internal_state {
+                if (is_adding && is_updating) || (is_adding && !has_new_trusted_root) {
+                    chip_log_error!(FabricProvisioning, "Found inconsistent interlocks during commit {}/{}/{}!", is_adding, is_updating, has_new_trusted_root);
+                    has_invalid_internal_state = true;
+                }
+            }
+
+            let pending_fabric_entry = self.find_fabric_with_index(fabric_index_begin_committed);
+
+            if is_updating && has_pending && !has_invalid_internal_state {
+                if pending_fabric_entry.is_some_and(|f| {
+                    !f.is_initialized() || (f.get_fabric_index() != fabric_index_begin_committed)
+                }) || pending_fabric_entry.is_none() {
+                    chip_log_error!(FabricProvisioning, "Missing pending fabric on update during commit!");
+                    has_invalid_internal_state = true;
+                }
+            }
+
+            if is_adding && has_pending && !has_invalid_internal_state {
+                let op_cert_store_has_root: bool;
+                unsafe {
+                    op_cert_store_has_root = if let Some(store) = self.m_op_cert_store.as_ref() {
+                        store.has_certificate_for_fabric(fabric_index_begin_committed, CertChainElement::Krcac)
+                    } else {
+                        false
+                    }
+                }
+                if !self.m_state_flag.intersects(StateFlags::KisTrustedRootPending) || !op_cert_store_has_root {
+                    chip_log_error!(FabricProvisioning, "Missing trusted root for fabric add during commit!");
+                    has_invalid_internal_state = true;
+                }
+            }
+
+            if (is_adding || is_updating) && has_pending && !has_invalid_internal_state {
+                if !self.has_operational_key_for_fabric(fabric_index_begin_committed) {
+                    chip_log_error!(FabricProvisioning, "Could not find an operational key during commit!");
+                    has_invalid_internal_state = true;
+                }
+            }
+
+            // If there was nothing pending, we are either in a completely OK state, or weird internally inconsistent
+            // state. In either case, let's clear all pending state anyway, in case it was partially stale!
+            if !has_pending || only_have_new_trusted_root || has_invalid_internal_state {
+                let mut err: ChipErrorResult = chip_ok!();
+
+                if only_have_new_trusted_root {
+                    chip_log_error!(FabricProvisioning, "Failed to commit: tried to commit with only a new trusted root cert. No Data committed.");
+                    err = Err(chip_error_incorrect_state!());
+                } else if has_invalid_internal_state {
+                    chip_log_error!(FabricProvisioning, "Failed to commit: internally inconsisstent state!");
+                    err = Err(chip_error_internal!());
+                } else {
+                    // There was nothing pending and no error...
+                }
+
+                // Clear all pending state anyway, in case it was partially stale!
+                {
+                    self.m_state_flag.clear();
+                    self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
+                    self.m_pending_fabric.reset();
+                    unsafe {
+                        if let Some(store) = self.m_op_cert_store.as_mut() {
+                            store.revert_pending_op_certs();
+                        }
+                        if let Some(store) = self.m_operational_keystore.as_mut() {
+                            store.revert_pending_keypair();
+                        }
+                    }
+                }
+                return err;
+            }
+
+            // ==== Start of actual commit transaction after pre-flight checks ====
+            let mut sticky_error = self.store_commit_marker(&CommitMarker::new(fabric_index_begin_committed, is_adding));
+            let failed_commit_marker = sticky_error.is_err();
+            if failed_commit_marker {
+                chip_log_error!(FabricProvisioning, "Failed to store commit marker, may be inconsistent if reboot happens during fail-safe!");
+            }
+
+            {
+                // This scope block is to illustrate the complete commit transaction
+                // state. We can see it contains a LARGE number of items...
+
+                // Atomically assume data no longer pending, since we are committing it. Do so here
+                // so that FindFabricBy* will return real data and never pending.
+                self.m_state_flag.remove(StateFlags::KisPendingFabricDataPresent);
+                if is_updating {
+                    if let Some(existing_fabric_to_update) = self.get_mutable_fabric_by_index(fabric_index_begin_committed) {
+                        // break here
+                        verify_or_die!(core::ptr::eq(existing_fabric_to_update, &self.m_pending_fabric));
+                    } else {
+                        verify_or_die!(false);
+                    }
+                }
+            }
+
             Err(chip_error_not_implemented!())
         }
 
