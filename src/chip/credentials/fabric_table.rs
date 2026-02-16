@@ -470,21 +470,6 @@ pub mod fabric_info {
             self.m_vendor_id = VendorId::NotSpecified;
             self.m_fabric_label = FabricLabelString::default();
 
-            /*
-            if !self.m_has_externally_owned_operation_key
-                && self.m_operation_key.is_null() == false
-                && self.m_internal_op_key_storage.is_some()
-            {
-                // force to drop the internal op key
-                let mut to_drop = self.m_internal_op_key_storage.take().unwrap();
-                to_drop.clear();
-            }
-
-            // TODO: Also, make sure the correct when we have a = b
-
-            self.m_operation_key = ptr::null_mut();
-            */
-
             if let Some(Keypair::Internal(keypair)) = self.m_operation_key.as_mut() {
                 keypair.clear();
             }
@@ -584,6 +569,21 @@ pub mod fabric_info {
                 reader.verify_end_of_container()?;
             }
             chip_ok!()
+        }
+
+        pub(super) fn take(&mut self) -> Self {
+            let mut other = FabricInfo::default();
+            other.m_node_id = self.m_node_id;
+            other.m_fabric_id = self.m_fabric_id;
+            other.m_compressed_fabric_id = self.m_compressed_fabric_id;
+            other.m_root_publick_key = self.m_root_publick_key.clone();
+            other.m_fabric_label = self.m_fabric_label;
+            other.m_fabric_index = self.m_fabric_index;
+            other.m_vendor_id = self.m_vendor_id;
+            other.m_should_advertise_identity = self.m_should_advertise_identity;
+            other.m_operation_key = self.m_operation_key.take();
+
+            other
         }
     }
 
@@ -2689,14 +2689,85 @@ mod fabric_table {
                 if is_updating {
                     if let Some(existing_fabric_to_update) = self.get_mutable_fabric_by_index(fabric_index_begin_committed) {
                         // break here
-                        verify_or_die!(core::ptr::eq(existing_fabric_to_update, &self.m_pending_fabric));
+                        verify_or_die!(!core::ptr::eq(existing_fabric_to_update, &self.m_pending_fabric));
+
+                        // Commit the pending entry to local in-memory fabric metadata, which
+                        // also moves operational keys if not backed by OperationalKeystore
+                        //*existing_fabric_to_update = self.m_pending_fabric;
+                    } else {
+                        verify_or_die!(false);
+                    }
+                    // to commit pending fabric
+                    let pending_fabric = self.m_pending_fabric.take();
+                    self.m_pending_fabric.reset();
+                    if let Some(existing_fabric_to_update) = self.get_mutable_fabric_by_index(fabric_index_begin_committed) {
+                        *existing_fabric_to_update = pending_fabric;
                     } else {
                         verify_or_die!(false);
                     }
                 }
+
+                let live_fabric_entry = self.find_fabric_with_index(fabric_index_begin_committed);
+                verify_or_die!(live_fabric_entry.is_some());
+                let live_fabric_entry = live_fabric_entry.unwrap();
+
+                sticky_error.and(self.store_fabric_metadata(live_fabric_entry).inspect_err(|e| {
+                    chip_log_error!(FabricProvisioning, "Failed to commit pending fabric metadata {}", e)
+                }));
+
+                unsafe {
+                    if let Some(key_store) = self.m_operational_keystore.as_mut() {
+                        if key_store.has_op_keypair_for_fabric(fabric_index_begin_committed) && key_store.has_pending_op_keypair() {
+                            sticky_error.and(key_store.commit_op_keypair_for_fabric(fabric_index_begin_committed).inspect_err(|e| {
+                                chip_log_error!(FabricProvisioning, "Failed to commit pending operational keypair {}", e);
+                                key_store.revert_pending_keypair();
+                            }));
+                        }
+                    }
+                    
+                    // Commit operational certs
+                    if let Some(op_store) = self.m_op_cert_store.as_mut() {
+                        sticky_error.and(op_store.commit_certs_for_fabric(fabric_index_begin_committed).inspect_err(|e| {
+                            chip_log_error!(FabricProvisioning, "Failed to commit pending operational certificates {}", e);
+                            op_store.revert_pending_op_certs();
+                        }));
+                    }
+                }
+                // Failure to commit Last Known Good Time is non-fatal.  If Last Known
+                // Good Time is incorrect and this causes incoming certificates to
+                // appear invalid, the certificate validity policy will see this
+                // condition and can act appropriately.
+                self.m_last_known_good_time.commit_last_known_good_chip_epoch_time().inspect_err(|e| {
+                    chip_log_error!(FabricProvisioning, "Failed to commit Last Known Good Time {}", e);
+                });
+
+                // If an Add occurred, let's update the fabric index
+                if self.m_state_flag.intersects(StateFlags::KisAddPending) {
+                    self.update_next_available_fabric_index();
+                    sticky_error.and(self.store_fabric_index_info().inspect_err(|e| {
+                        chip_log_error!(FabricProvisioning, "Failed to commit fabric indices {}", e)
+                    }));
+                }
             }
 
-            Err(chip_error_not_implemented!())
+            // Commit must have same side-effect as reverting all pending data
+            self.m_state_flag.clear();
+            self.m_fabric_index_with_pending_state = KUNDEFINED_FABRIC_INDEX;
+            self.m_pending_fabric.reset();
+
+            if sticky_error.is_err() {
+                // Blow-away everything if we got past any storage, even on Update: system state is broken
+                // TODO: Develop a way to properly revert in the future, but this is very difficult
+                self.delete(fabric_index_begin_committed);
+
+                self.revert_pending_fabric_data();
+            } else {
+                self.notify_fabric_commited(fabric_index_begin_committed);
+            }
+
+            self.clear_commit_marker();
+
+            sticky_error
         }
 
         pub fn revert_pending_fabric_data(&mut self) {
