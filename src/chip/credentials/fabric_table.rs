@@ -2325,18 +2325,34 @@ mod fabric_table {
 
         pub fn fetch_vid_verification_statement(
             &self,
-            _fabric_index: FabricIndex,
-            _out_vid_verification_statement: &mut [u8],
+            fabric_index: FabricIndex,
+            out_vid_verification_statement: &mut CertBuffer,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            unsafe {
+                if let Some(store) = self.m_op_cert_store.as_ref() {
+                    let size = store.get_vid_verification_element(fabric_index, VidVerificationElement::KvidVerificationStatement, out_vid_verification_statement.all_bytes())?;
+                    out_vid_verification_statement.set_length(size);
+                    return chip_ok!();
+                } else {
+                    return Err(chip_error_incorrect_state!());
+                }
+            }
         }
 
         pub fn fetch_vvsc(
             &self,
-            _fabric_index: FabricIndex,
-            _out_vvsc: &mut [u8],
+            fabric_index: FabricIndex,
+            out_vvsc: &mut CertBuffer,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            unsafe {
+                if let Some(store) = self.m_op_cert_store.as_ref() {
+                    let size = store.get_vid_verification_element(fabric_index, VidVerificationElement::Kvvsc, out_vvsc.all_bytes())?;
+                    out_vvsc.set_length(size);
+                    return chip_ok!();
+                } else {
+                    return Err(chip_error_incorrect_state!());
+                }
+            }
         }
 
         pub fn fetch_root_pubkey(
@@ -2996,15 +3012,47 @@ mod fabric_table {
             }
         }
 
-        pub fn peek_fabric_index_for_next_addition(&self) -> Result<FabricIndex, ChipError> {
-            Err(chip_error_not_implemented!())
+        pub fn peek_fabric_index_for_next_addition(&mut self) -> Result<FabricIndex, ChipError> {
+            self.ensure_next_available_fabric_index_updated();
+
+            if let Some(index) = self.m_next_available_fabric_index {
+                verify_or_return_error!(is_valid_fabric_index(index), Err(chip_error_invalid_fabric_index!()));
+                return Ok(index);
+            }
+
+            return Err(chip_error_no_memory!());
         }
 
         pub fn set_fabric_index_for_next_addition(
             &mut self,
-            _fabric_index: FabricIndex,
+            fabric_index: FabricIndex,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KisPendingFabricDataPresent), Err(chip_error_incorrect_state!()));
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(self.find_fabric_with_index(fabric_index).is_none(), Err(chip_error_fabric_exists!()));
+
+            self.m_next_available_fabric_index = Some(fabric_index);
+
+            chip_ok!()
+        }
+
+        pub fn set_should_advertise_identity(
+            &mut self,
+            fabric_index: FabricIndex,
+            advertise_identity: AdvertiseIdentity,
+        ) -> ChipErrorResult {
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_fabric_index!()));
+
+            if let Some(fabric_info) = self.get_mutable_fabric_by_index(fabric_index) {
+                if !fabric_info.is_initialized() {
+                    return Err(chip_error_invalid_fabric_index!());
+                }
+                fabric_info.set_should_advertise_identity(advertise_identity == AdvertiseIdentity::Yes);
+            } else {
+                return Err(chip_error_invalid_fabric_index!());
+            }
+
+            chip_ok!()
         }
 
         pub fn sign_vid_verification_request(
@@ -8000,6 +8048,38 @@ mod fabric_table {
             assert_eq!(1, table.fabric_count());
             pa.add_posion_key(DefaultStorageKeyAllocator::fabric_index_info().key_name_str());
             assert!(!table.commit_pending_fabric_data().is_ok());
+        }
+
+        #[test]
+        fn commit_pending_fabric_with_specified_index() {
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX + 10;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // specify index
+            assert!(table.set_fabric_index_for_next_addition(fabric_index).is_ok());
+
+            // insert root first
+            assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+            assert!(
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+            assert_eq!(1, table.fabric_count());
+            assert!(table.commit_pending_fabric_data().is_ok());
+            assert_eq!(fabric_index, table.m_states[0].get_fabric_index());
         }
     } // end of mod tests
 } // end of mod fabric_table
