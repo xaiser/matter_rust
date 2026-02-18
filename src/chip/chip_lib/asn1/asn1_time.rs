@@ -1,4 +1,9 @@
 use crate::{
+    chip_core_error,
+    chip_error_internal,
+    chip_no_error,
+    chip_ok,
+    chip_sdk_error,
     chip::{
         chip_lib::{
             support::default_string::DefaultString,
@@ -48,9 +53,9 @@ impl Asn1UniversalTime {
         // UTCTimes are encoded with a two-digit year.
         let mut time_string = Asn1UniversalTimeString::default();
         if self.year < 1950 || self.year >= 2050 {
-            write!(&mut time_string, "{:04}{:02}{:02}{:02}{:02}{:02}Z", self.year, self.month, self.day, self.hour, self.minute, self.second);
+            write!(&mut time_string, "{:04}{:02}{:02}{:02}{:02}{:02}Z", self.year, self.month, self.day, self.hour, self.minute, self.second).map_err(|_| chip_error_internal!())?;
         } else {
-            write!(&mut time_string, "{:02}{:02}{:02}{:02}{:02}{:02}Z", self.year % 100, self.month, self.day, self.hour, self.minute, self.second);
+            write!(&mut time_string, "{:02}{:02}{:02}{:02}{:02}{:02}Z", self.year % 100, self.month, self.day, self.hour, self.minute, self.second).map_err(|_| chip_error_internal!())?;
         }
 
         return Ok(time_string);

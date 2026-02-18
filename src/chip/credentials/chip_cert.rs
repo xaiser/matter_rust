@@ -1071,7 +1071,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1081,12 +1081,12 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | matter_id)),
                 0x01u64,
             );
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1094,7 +1094,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1121,7 +1121,7 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | matter_id)),
                 0x01u64,
             );
@@ -1132,7 +1132,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 false,
@@ -1154,7 +1154,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 false,
@@ -1173,7 +1173,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1183,9 +1183,9 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(tlv_tags::anonymous_tag(), 0x01u64);
+            let _ = writer.put_u64(tlv_tags::anonymous_tag(), 0x01u64);
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1193,7 +1193,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 false,
@@ -1212,7 +1212,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1222,12 +1222,12 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a 0x1
-            writer.put_u32(
+            let _ = writer.put_u32(
                 tlv_tags::context_tag((is_print_string | matter_id)),
                 0x01u32,
             );
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1235,7 +1235,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1259,7 +1259,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1269,9 +1269,9 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a 0x1
-            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1279,7 +1279,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1303,7 +1303,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1313,9 +1313,9 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a 0x1
-            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1323,7 +1323,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1348,7 +1348,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1357,9 +1357,9 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1367,7 +1367,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1381,7 +1381,7 @@ pub(super) mod tests {
             writer.init(raw_tlv1.as_mut_ptr(), raw_tlv1.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1390,9 +1390,9 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "456");
+            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "456");
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn1 = ChipDN::default();
 
@@ -1400,7 +1400,7 @@ pub(super) mod tests {
             reader.init(raw_tlv1.as_mut_ptr(), raw_tlv1.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,
@@ -1420,7 +1420,7 @@ pub(super) mod tests {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
@@ -1429,9 +1429,9 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
             // end container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut dn = ChipDN::default();
 
@@ -1439,7 +1439,7 @@ pub(super) mod tests {
             reader.init(raw_tlv.as_mut_ptr(), raw_tlv.len());
             // decode_from_tlv should be called after some outer paring function calls.
             // To simulate that, we just start the reader by next.
-            reader.next();
+            let _ = reader.next();
 
             assert_eq!(
                 true,

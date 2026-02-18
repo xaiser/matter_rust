@@ -124,14 +124,14 @@ mod test {
     #[test]
     fn write() {
         let mut s = DefaultString::<10>::const_default();
-        write!(&mut s, "123");
+        let _ = write!(&mut s, "123");
         assert_eq!("123", s.str().unwrap_or(&""));
     }
 
     #[test]
     fn write_over_size() {
         let mut s = DefaultString::<1>::const_default();
-        write!(&mut s, "123");
+        let _ = write!(&mut s, "123");
         assert_eq!("1", s.str().unwrap_or(&""));
     }
 

@@ -1393,7 +1393,7 @@ mod test {
         }
 
         #[test]
-        fn get_UTF8_string_1_byte_length_hello() {
+        fn get_utf8_string_1_byte_length_hello() {
             let mut reader = setup_with_values(&[0x0c, 0x06, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21]);
             assert_eq!(
                 true,
