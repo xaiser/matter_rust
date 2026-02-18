@@ -596,17 +596,17 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
                 // load as trust anchor
@@ -635,8 +635,8 @@ mod chip_certificate_set {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Knode).unwrap();
@@ -659,17 +659,17 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -691,11 +691,11 @@ mod chip_certificate_set {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -720,8 +720,8 @@ mod chip_certificate_set {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -749,17 +749,17 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -781,11 +781,11 @@ mod chip_certificate_set {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -822,8 +822,8 @@ mod chip_certificate_set {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -940,7 +940,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_dn = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
@@ -1038,7 +1038,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
@@ -1091,10 +1091,10 @@ mod chip_certificate_set {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let icac_dn = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 //let mut issuer_dn = ChipDN::default();
                 //let icac_buffer = make_chip_cert_with_ids(1, icac_keypair.public_key().const_bytes()).unwrap();
                 let icac_buffer = make_chip_cert_with_ids(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(), &icac_key_id, &root_key_id, Some(&root_keypair), CertType::Kroot).unwrap();
@@ -1143,8 +1143,8 @@ mod chip_certificate_set {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 //let node_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
                 let node_buffer = make_chip_cert_with_ids(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(), &node_key_id, &icac_key_id, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -1183,12 +1183,12 @@ mod chip_certificate_set {
         }
 
         #[test]
-        fn valid_one_noc_and_one_root_no_CA_flag() {
+        fn valid_one_noc_and_one_root_no_ca_flag() {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_dn = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
@@ -1271,12 +1271,12 @@ mod chip_certificate_set {
         }
 
         #[test]
-        fn valid_one_noc_and_one_root_no_CA_type() {
+        fn valid_one_noc_and_one_root_no_ca_type() {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_dn = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
@@ -1361,12 +1361,12 @@ mod chip_certificate_set {
         }
 
         #[test]
-        fn valid_one_noc_and_one_root_no_CA_existed() {
+        fn valid_one_noc_and_one_root_no_ca_existed() {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_dn = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
@@ -1459,7 +1459,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_dn = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
@@ -1509,7 +1509,7 @@ mod chip_certificate_set {
             let noc = {
                 let key = stub_public_key();
                 let mut rand_keypair = P256Keypair::default();
-                rand_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = rand_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert(1, 2, &key[..], Some(&rand_keypair)).unwrap();
 
                 // load as trust anchor
@@ -1559,7 +1559,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
             // load as trust anchor
             assert!(sets
@@ -1604,7 +1604,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
             // load as trust anchor
             assert!(sets
@@ -1649,7 +1649,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
             // load as trust anchor
             assert!(sets
@@ -1694,7 +1694,7 @@ mod chip_certificate_set {
             let expected_not_after: u32 = 100;
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
             // load as trust anchor
             assert!(sets
@@ -1738,15 +1738,15 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let mut subject_dn = ChipDN::default();
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 1 as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 1 as u64);
             let empty_dn = ChipDN::default();
             let mut random_keypair = P256Keypair::default();
-            random_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                 &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
 
@@ -1769,14 +1769,14 @@ mod chip_certificate_set {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let mut root_dn = ChipDN::default();
-            root_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+            let _ = root_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
             let mut subject_dn = ChipDN::default();
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let icac_key_id = make_subject_key_id(3, 4);
 
             let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),

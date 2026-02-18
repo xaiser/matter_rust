@@ -457,9 +457,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -469,7 +469,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -526,9 +526,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -538,7 +538,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -591,9 +591,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -603,7 +603,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -664,9 +664,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -676,7 +676,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -730,9 +730,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -742,7 +742,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -803,11 +803,11 @@ mod tests {
             .inspect_err(|e| println!("{}", e))
             .is_ok());
 
-        writer.end_container(outer_container_array);
+        let _ = writer.end_container(outer_container_array);
 
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -817,7 +817,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -884,11 +884,11 @@ mod tests {
             .inspect_err(|e| println!("{}", e))
             .is_ok());
 
-        writer.end_container(outer_container_array);
+        let _ = writer.end_container(outer_container_array);
 
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -898,7 +898,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -962,11 +962,11 @@ mod tests {
             .inspect_err(|e| println!("{}", e))
             .is_ok());
 
-        writer.end_container(outer_container_array);
+        let _ = writer.end_container(outer_container_array);
 
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -976,7 +976,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
@@ -1036,9 +1036,9 @@ mod tests {
             )
             .inspect_err(|e| println!("{}", e))
             .is_ok());
-        writer.end_container(outer_container_list);
+        let _ = writer.end_container(outer_container_list);
 
-        writer.end_container(outer_container);
+        let _ = writer.end_container(outer_container);
 
         let tlv_buffer = &raw_tlv[..writer.get_length_written()];
 
@@ -1048,7 +1048,7 @@ mod tests {
 
         let mut cert = ChipCertificateData::default();
 
-        reader.next();
+        let _ = reader.next();
         // enter the struct to simulate what we do in decode_chip_cert
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())

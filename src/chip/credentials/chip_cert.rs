@@ -1516,7 +1516,7 @@ pub(super) mod tests {
         #[test]
         fn encode_to_asn1_oid64_correctlly() {
             let mut dn = ChipDN::default();
-            dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1);
+            let _ = dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1);
             let mut writer = TestAsn1Writer::default();
             let mut buf = [0u8; 128];
             writer.init(&mut buf);
@@ -1533,7 +1533,7 @@ pub(super) mod tests {
         #[test]
         fn encode_to_asn1_oid32_correctlly() {
             let mut dn = ChipDN::default();
-            dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterCASEAuthTag as Oid, 1);
+            let _ = dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterCASEAuthTag as Oid, 1);
             let mut writer = TestAsn1Writer::default();
             let mut buf = [0u8; 128];
             writer.init(&mut buf);
@@ -1549,7 +1549,7 @@ pub(super) mod tests {
         #[test]
         fn encode_to_asn1_oid_correctlly() {
             let mut dn = ChipDN::default();
-            dn.add_attribute_string(Asn1Oid::KoidAttributeTypeDomainComponent as Oid, "1", false);
+            let _ = dn.add_attribute_string(Asn1Oid::KoidAttributeTypeDomainComponent as Oid, "1", false);
             let mut writer = TestAsn1Writer::default();
             let mut buf = [0u8; 128];
             writer.init(&mut buf);

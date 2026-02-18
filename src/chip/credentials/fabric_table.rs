@@ -660,11 +660,11 @@ pub mod fabric_info {
 
             let mut asn1_writer = TestAsn1Writer::default();
             let mut asn1_buf = [0u8; K_MAX_CHIP_CERT_DECODE_BUF_LENGTH];
-            asn1_writer.init(&mut asn1_buf);
+            let _ = asn1_writer.init(&mut asn1_buf);
 
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeStructure,
                 &mut outer_container,
@@ -672,7 +672,7 @@ pub mod fabric_info {
 
             let mut issuer_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a issuer_dn list
-            writer
+            let _ = writer
                 .start_container(
                     tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
                     tlv_types::TlvType::KtlvTypeList,
@@ -684,23 +684,23 @@ pub mod fabric_info {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | matter_id)),
                 matter_id_value,
             );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | fabric_id)),
                 fabric_id_value,
             );
             // end of list conatiner
-            writer.end_container(issuer_outer_container_dn_list);
+            let _ = writer.end_container(issuer_outer_container_dn_list);
 
             let mut subject_outer_container_dn_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a subject_dn list
-            writer
+            let _ = writer
                 .start_container(
                     tlv_tags::context_tag(ChipCertTag::KtagSubject as u8),
                     tlv_types::TlvType::KtlvTypeList,
@@ -712,54 +712,54 @@ pub mod fabric_info {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | matter_id)),
                 matter_id_value,
             );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
-            writer.put_u64(
+            let _ = writer.put_u64(
                 tlv_tags::context_tag((is_print_string | fabric_id)),
                 fabric_id_value,
             );
             // end of list conatiner
-            writer.end_container(subject_outer_container_dn_list);
+            let _ = writer.end_container(subject_outer_container_dn_list);
 
             // add public key to cert
-            writer
+            let _ = writer
                 .put_bytes(
                     tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
                     public_key,
                 )
                 .inspect_err(|e| println!("{:?}", e));
-            asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
-            asn1_writer.put_bit_string(0, public_key);
+            let _ = asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
+            let _ = asn1_writer.put_bit_string(0, public_key);
 
             // put a not before
-            writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
+            let _ = writer.put_u32(tag_not_before(), not_before.as_secs() as u32);
             let asn1_not_before = chip_epoch_to_asn1_time(not_before.as_secs() as u32).unwrap();
-            asn1_writer.put_time(&asn1_not_before);
+            let _ = asn1_writer.put_time(&asn1_not_before);
             // put a not after
-            writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
+            let _ = writer.put_u32(tag_not_after(), not_after.as_secs() as u32);
             let asn1_not_after = chip_epoch_to_asn1_time(not_after.as_secs() as u32).unwrap();
-            asn1_writer.put_time(&asn1_not_after);
+            let _ = asn1_writer.put_time(&asn1_not_after);
 
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 context_tag(ChipCertTag::KtagExtensions as u8),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut extensions_outer_container_list,
             );
-            writer.end_container(extensions_outer_container_list);
+            let _ = writer.end_container(extensions_outer_container_list);
 
             if let Some(sign_key) = key_pair {
                 let mut sig = P256EcdsaSignature::default();
                 let asn1_written = asn1_writer.const_raw_bytes().unwrap();
-                sign_key.ecdsa_sign_msg(&asn1_written[..writer.get_length_written()], &mut sig);
-                writer
+                let _ = sign_key.ecdsa_sign_msg(&asn1_written[..writer.get_length_written()], &mut sig);
+                let _ = writer
                     .put_bytes(
                         tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
                         &sig.const_bytes()[..sig.length()],
@@ -768,10 +768,10 @@ pub mod fabric_info {
             }
 
             // end struct container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut cert = CertBuffer::default();
-            cert.init(&raw_tlv[..writer.get_length_written()]);
+            let _ = cert.init(&raw_tlv[..writer.get_length_written()]);
 
             return Ok(cert);
         }
@@ -788,8 +788,8 @@ pub mod fabric_info {
             let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
             let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
             let mut issuer_dn = ChipDN::default();
-            issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
-            issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
+            let _ = issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
+            let _ = issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
             return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, key_pair, CertType::Knode);
         }
 
@@ -826,50 +826,50 @@ pub mod fabric_info {
 
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeStructure,
                 &mut outer_container,
             );
 
-            auth_dn.encode_to_tlv(&mut writer, tlv_tags::context_tag(ChipCertTag::KtagSubject as u8));
+            let _ = auth_dn.encode_to_tlv(&mut writer, tlv_tags::context_tag(ChipCertTag::KtagSubject as u8));
 
             // start a issuer_dn list
 
-            subject_dn.encode_to_tlv(&mut writer, tlv_tags::context_tag(ChipCertTag::KtagSubject as u8));
+            let _ = subject_dn.encode_to_tlv(&mut writer, tlv_tags::context_tag(ChipCertTag::KtagSubject as u8));
             // start a subject dn list
 
             // add to cert
-            writer
+            let _ = writer
                 .put_bytes(
                     tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
                     public_key,
                 )
                 .inspect_err(|e| println!("{:?}", e));
-            asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
-            asn1_writer.put_bit_string(0, public_key);
+            let _ = asn1_writer.put_object_id(Asn1Oid::KoidSigAlgoECDSAWithSHA256 as Oid);
+            let _ = asn1_writer.put_bit_string(0, public_key);
 
             // put a not before
-            writer.put_u32(tag_not_before(), not_before);
+            let _ = writer.put_u32(tag_not_before(), not_before);
             let asn1_not_before = chip_epoch_to_asn1_time(not_before).unwrap();
-            asn1_writer.put_time(&asn1_not_before);
+            let _ = asn1_writer.put_time(&asn1_not_before);
 
             // put a not after
-            writer.put_u32(tag_not_after(), not_after);
+            let _ = writer.put_u32(tag_not_after(), not_after);
             let asn1_not_after = chip_epoch_to_asn1_time(not_after).unwrap();
-            asn1_writer.put_time(&asn1_not_after);
+            let _ = asn1_writer.put_time(&asn1_not_after);
 
             // make empty extensions
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a list
-            writer.start_container(
+            let _ = writer.start_container(
                 context_tag(ChipCertTag::KtagExtensions as u8),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut extensions_outer_container_list,
             );
 
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), auth_id).inspect_err(|e| println!("{}", e)).is_ok());
-            asn1_writer.put_octet_string_cls_tag(Asn1TagClasses::Kasn1TagClassContextSpecific as Class, 0, auth_id);
+            let _ = asn1_writer.put_octet_string_cls_tag(Asn1TagClasses::Kasn1TagClassContextSpecific as Class, 0, auth_id);
 
             assert!(writer.put_bytes(context_tag(crate::chip::credentials::chip_cert::ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), subject_id).inspect_err(|e| println!("{}", e)).is_ok());
             assert!(asn1_writer.put_octet_string(&subject_id[..]).is_ok());
@@ -892,16 +892,16 @@ pub mod fabric_info {
                 CertType::Kroot => {
                     // basic constraint
                     let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-                    writer.start_container(
+                    let _ = writer.start_container(
                         context_tag(ChipCertExtensionTag::KtagBasicConstraints as u8),
                         tlv_types::TlvType::KtlvTypeStructure,
                         &mut outer_container,
                     );
                     assert!(asn1_writer.put_boolean(true).is_ok());
-                    writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
+                    let _ = writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
 
                     // end basic constraint
-                    writer.end_container(outer_container);
+                    let _ = writer.end_container(outer_container);
                 },
                 _ => {}
             }
@@ -910,7 +910,7 @@ pub mod fabric_info {
             {
                 // start extended key usage extensions list
                 let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-                writer.start_container(
+                let _ = writer.start_container(
                     context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
                     tlv_types::TlvType::KtlvTypeArray,
                     &mut extensions_outer_container_list,
@@ -918,16 +918,16 @@ pub mod fabric_info {
 
                 match cert_type {
                     CertType::Knode => {
-                        writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits().into());
+                        let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits().into());
                     },
                     _ => {}
                 }
 
                 // end entensions list
-                writer.end_container(extensions_outer_container_list);
+                let _ = writer.end_container(extensions_outer_container_list);
             }
 
-            writer.end_container(extensions_outer_container_list);
+            let _ = writer.end_container(extensions_outer_container_list);
 
             if let Some(sign_key) = key_pair {
                 let mut sig = P256EcdsaSignature::default();
@@ -938,7 +938,7 @@ pub mod fabric_info {
                 let hash_result = hasher.finalize();
                 //println!("the sig hash is {:?}", hash_result.as_slice());
                 assert!(sign_key.ecdsa_sign_msg(&asn1_written[..asn1_writer.get_length_written()], &mut sig).is_ok());
-                writer
+                let _ = writer
                     .put_bytes(
                         tlv_tags::context_tag(ChipCertTag::KtagECDSASignature as u8),
                         &sig.const_bytes()[..sig.length()],
@@ -947,10 +947,10 @@ pub mod fabric_info {
             }
 
             // end struct container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut cert = CertBuffer::default();
-            cert.init(&raw_tlv[..writer.get_length_written()]);
+            let _ = cert.init(&raw_tlv[..writer.get_length_written()]);
 
             return Ok(cert);
         }
@@ -974,7 +974,7 @@ pub mod fabric_info {
             writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
             let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 tlv_types::TlvType::KtlvTypeStructure,
                 &mut outer_container,
@@ -982,13 +982,13 @@ pub mod fabric_info {
 
             // start a issuer_dn list
             //cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagIssuer as u8));
-            cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
+            let _ = cert_data.m_issuer_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
 
             // start a subject dn list
-            cert_data.m_subject_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
+            let _ = cert_data.m_subject_dn.encode_to_tlv(&mut writer, context_tag(ChipCertTag::KtagSubject as u8));
 
             // add public key
-            writer
+            let _ = writer
                 .put_bytes(
                     tlv_tags::context_tag(ChipCertTag::KtagEllipticCurvePublicKey as u8),
                     &cert_data.m_public_key,
@@ -996,83 +996,83 @@ pub mod fabric_info {
                 .inspect_err(|e| println!("{:?}", e));
 
             // put a not before
-            writer.put_u32(tag_not_before(), cert_data.m_not_before_time);
+            let _ = writer.put_u32(tag_not_before(), cert_data.m_not_before_time);
             // put a not after
-            writer.put_u32(tag_not_after(), cert_data.m_not_after_time);
+            let _ = writer.put_u32(tag_not_after(), cert_data.m_not_after_time);
 
             // start extensions list
             let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-            writer.start_container(
+            let _ = writer.start_container(
                 context_tag(ChipCertTag::KtagExtensions as u8),
                 tlv_types::TlvType::KtlvTypeList,
                 &mut extensions_outer_container_list,
             );
 
-            writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &cert_data.m_auth_key_id);
-            writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &cert_data.m_subject_key_id);
+            let _ = writer.put_bytes(context_tag(ChipCertExtensionTag::KtagAuthorityKeyIdentifier as u8), &cert_data.m_auth_key_id);
+            let _ = writer.put_bytes(context_tag(ChipCertExtensionTag::KtagSubjectKeyIdentifier as u8), &cert_data.m_subject_key_id);
             //writer.put_u32(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u32);
-            writer.put_u16(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u16);
+            let _ = writer.put_u16(context_tag(ChipCertExtensionTag::KtagKeyUsage as u8), cert_data.m_key_usage_flags.bits() as u16);
 
             if cert_data.m_cert_flags.intersects(CertFlags::KisCA) {
                 // basic constraint
                 let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
-                writer.start_container(
+                let _ = writer.start_container(
                     context_tag(ChipCertExtensionTag::KtagBasicConstraints as u8),
                     tlv_types::TlvType::KtlvTypeStructure,
                     &mut outer_container,
                 );
-                writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
+                let _ = writer.put_boolean(context_tag(ChipCertBasicConstraintTag::KtagBasicConstraintsIsCA as u8), true);
 
                 // end basic constraint
-                writer.end_container(outer_container);
+                let _ = writer.end_container(outer_container);
             }
 
             // extended key usage
             {
                 // start extended key usage extensions list
                 let mut extensions_outer_container_list = tlv_types::TlvType::KtlvTypeNotSpecified;
-                writer.start_container(
+                let _ = writer.start_container(
                     context_tag(ChipCertExtensionTag::KtagExtendedKeyUsage as u8),
                     tlv_types::TlvType::KtlvTypeArray,
                     &mut extensions_outer_container_list,
                 );
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KserverAuth) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KserverAuth.bits() as u8);
                 }
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KclientAuth) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KclientAuth.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KclientAuth.bits() as u8);
                 }
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KcodeSigning) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KcodeSigning.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KcodeSigning.bits() as u8);
                 }
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KemailProtection) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KemailProtection.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KemailProtection.bits() as u8);
                 }
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KtimeStamping) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KtimeStamping.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KtimeStamping.bits() as u8);
                 }
 
                 if cert_data.m_key_purpose_flags.intersects(KeyPurposeFlags::KoCSPSigning) {
-                    writer.put_u8(anonymous_tag(), KeyPurposeFlags::KoCSPSigning.bits() as u8);
+                    let _ = writer.put_u8(anonymous_tag(), KeyPurposeFlags::KoCSPSigning.bits() as u8);
                 }
 
                 // end entensions list
-                writer.end_container(extensions_outer_container_list);
+                let _ = writer.end_container(extensions_outer_container_list);
             }
 
             // end entensions list
-            writer.end_container(extensions_outer_container_list);
+            let _ = writer.end_container(extensions_outer_container_list);
 
             // signature
-            writer.put_bytes(context_tag(ChipCertTag::KtagECDSASignature as u8), cert_data.m_signature.const_bytes());
+            let _ = writer.put_bytes(context_tag(ChipCertTag::KtagECDSASignature as u8), cert_data.m_signature.const_bytes());
 
             // end struct container
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             let mut cert = CertBuffer::default();
             assert!(cert.init(&raw_tlv[..writer.get_length_written()]).is_ok());
@@ -4139,7 +4139,7 @@ mod fabric_table {
             init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
 
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
+            let _ = fabric_info.init(&init_pas);
 
             fabric_info
         }
@@ -4150,7 +4150,7 @@ mod fabric_table {
             ks: &mut OK,
             pa: *mut TestPersistentStorage,
         ) {
-            const offset: u8 = 50;
+            let offset: u8 = 50;
             // commit public key to storage
             let _ = ks.init(pa);
             let mut out_csr: [u8; 256] = [0; 256];
@@ -4214,18 +4214,18 @@ mod fabric_table {
 
             let mut outer_container = TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 TlvType::KtlvTypeStructure,
                 &mut outer_container,
             );
 
-            writer.put_u8(marker_fabric_index_tag(), fabric_index as u8);
+            let _ = writer.put_u8(marker_fabric_index_tag(), fabric_index as u8);
 
-            writer.put_boolean(marker_is_addition_tag(), is_addition);
+            let _ = writer.put_boolean(marker_is_addition_tag(), is_addition);
 
             // end of struct conatiner
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             assert_eq!(
                 true,
@@ -4249,7 +4249,7 @@ mod fabric_table {
 
             let mut outer_container = TlvType::KtlvTypeNotSpecified;
             // start a struct
-            writer.start_container(
+            let _ = writer.start_container(
                 tlv_tags::anonymous_tag(),
                 TlvType::KtlvTypeStructure,
                 &mut outer_container,
@@ -4257,15 +4257,15 @@ mod fabric_table {
 
             if let Some(next_index) = next_index {
                 // put next available fabric index
-                writer.put_u8(next_available_fabric_index_tag(), next_index);
+                let _ = writer.put_u8(next_available_fabric_index_tag(), next_index);
             } else {
-                writer.put_null(next_available_fabric_index_tag());
+                let _ = writer.put_null(next_available_fabric_index_tag());
             }
 
             let mut outer_container_indices_array = TlvType::KtlvTypeNotSpecified;
 
             // start a index array
-            writer
+            let _ = writer
                 .start_container(
                     fabric_indices_tag(),
                     TlvType::KtlvTypeArray,
@@ -4275,14 +4275,14 @@ mod fabric_table {
 
             for i in indices {
                 // put a fabric index
-                writer.put_u8(anonymous_tag(), *i);
+                let _ = writer.put_u8(anonymous_tag(), *i);
             }
 
             // end of array conatiner
-            writer.end_container(outer_container_indices_array);
+            let _ = writer.end_container(outer_container_indices_array);
 
             // end of struct conatiner
-            writer.end_container(outer_container);
+            let _ = writer.end_container(outer_container);
 
             assert_eq!(
                 true,
@@ -4333,7 +4333,7 @@ mod fabric_table {
                 .insert(StateFlags::KisPendingFabricDataPresent);
 
             // set up the label to compare the result
-            table.m_pending_fabric.set_fabric_label("pending");
+            let _ = table.m_pending_fabric.set_fabric_label("pending");
         }
 
         #[test]
@@ -5127,11 +5127,11 @@ mod fabric_table {
             table.m_states[1] = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX + 1);
 
             // to set up a name for fabric info at 0
-            table.m_states[0].set_fabric_label("should be removed");
+            let _ = table.m_states[0].set_fabric_label("should be removed");
 
             // to simulate an existed pending fabric info
             table.m_pending_fabric = get_stub_fabric_info_with_index(KMIN_VALID_FABRIC_INDEX);
-            table.m_pending_fabric.set_fabric_label("pending");
+            let _ = table.m_pending_fabric.set_fabric_label("pending");
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
             table
                 .m_state_flag
@@ -5173,8 +5173,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("pending");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
             table
@@ -5217,8 +5217,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("pending");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
             table
@@ -5261,8 +5261,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("pending");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
             table
@@ -5305,8 +5305,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("pending");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("pending");
             table.m_pending_fabric = fabric_info;
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
             table
@@ -5351,8 +5351,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("at0");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("at0");
 
             table.m_states[0] = fabric_info;
 
@@ -5392,8 +5392,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("at0");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("at0");
 
             table.m_states[0] = fabric_info;
 
@@ -5435,8 +5435,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("at0");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("at0");
 
             table.m_states[0] = fabric_info;
 
@@ -5476,8 +5476,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("at0");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("at0");
 
             table.m_states[0] = fabric_info;
 
@@ -5517,8 +5517,8 @@ mod fabric_table {
             init_pas.m_fabric_id = expected_fabric_id;
             init_pas.m_node_id = expected_node_id;
             let mut fabric_info = FabricInfo::default();
-            fabric_info.init(&init_pas);
-            fabric_info.set_fabric_label("at0");
+            let _ = fabric_info.init(&init_pas);
+            let _ = fabric_info.set_fabric_label("at0");
 
             table.m_states[0] = fabric_info;
 
@@ -5553,7 +5553,7 @@ mod fabric_table {
                     .add_fabric_delegate(Some(ptr::addr_of_mut!(d)))
                     .is_ok()
             );
-            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            let _ = table.delete(KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
         }
 
@@ -5586,7 +5586,7 @@ mod fabric_table {
                     .add_fabric_delegate(Some(ptr::addr_of_mut!(d2)))
                     .is_ok()
             );
-            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            let _ = table.delete(KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
             assert_eq!(d2.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
         }
@@ -5615,7 +5615,7 @@ mod fabric_table {
             // delete
             table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d)));
 
-            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            let _ = table.delete(KMIN_VALID_FABRIC_INDEX + 10);
 
             assert_ne!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
         }
@@ -5658,7 +5658,7 @@ mod fabric_table {
             // delete
             table.remove_fabric_delegate(Some(ptr::addr_of_mut!(d2)));
 
-            table.delete(KMIN_VALID_FABRIC_INDEX + 10);
+            let _ = table.delete(KMIN_VALID_FABRIC_INDEX + 10);
 
             assert_eq!(d.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
             assert_ne!(d2.will_be_removed, KMIN_VALID_FABRIC_INDEX + 10);
