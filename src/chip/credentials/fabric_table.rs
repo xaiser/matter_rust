@@ -785,8 +785,8 @@ pub mod fabric_info {
             let auth_id = make_subject_key_id(1, 2);
             let subject_id = make_subject_key_id(3, 4);
             let mut subject_dn = ChipDN::default();
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
             let mut issuer_dn = ChipDN::default();
             issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, matter_id_value as u64);
             issuer_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, fabric_id_value as u64);
@@ -959,7 +959,7 @@ pub mod fabric_info {
             let subject_id = make_subject_key_id(1, 2);
             let auth_id = make_subject_key_id(1, 2);
             let mut subject_dn = ChipDN::default();
-            subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, rcac_id_value as u64);
+            let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, rcac_id_value as u64);
             let mut issuer_dn = ChipDN::default();
             let keypair = stub_keypair();
 
@@ -4150,15 +4150,15 @@ mod fabric_table {
             ks: &mut OK,
             pa: *mut TestPersistentStorage,
         ) {
-            const OFFSET: u8 = 50;
+            const offset: u8 = 50;
             // commit public key to storage
-            ks.init(pa);
+            let _ = ks.init(pa);
             let mut out_csr: [u8; 256] = [0; 256];
             let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
             let pub_key = ks.get_pending_pub_key();
             assert!(pub_key.is_some());
             let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            let _ = ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
             let mut serialized_keypair = P256SerializedKeypair::default();
             assert!(ks.export_op_keypair_for_fabric(fabric_index, &mut serialized_keypair).is_ok());
@@ -4171,13 +4171,13 @@ mod fabric_table {
                 assert_eq!(true, info.commit_to_storge(pa.as_mut().unwrap()).is_ok());
             }
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let mut root_subject_dn = ChipDN::default();
-            root_subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+            let _ = root_subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
             let empty_dn = ChipDN::default();
             let mut random_keypair = P256Keypair::default();
-            random_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_buffer = make_chip_cert_with_ids_and_times(&root_subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                 &root_key_id, &root_key_id, 0, 0, Some(&random_keypair), CertType::Kroot);
             assert!(root_buffer.is_ok());
@@ -4195,7 +4195,7 @@ mod fabric_table {
             assert!(noc_buffer.is_ok());
             let noc_buffer = noc_buffer.unwrap();
 
-            pos.init(pa);
+            let _ = pos.init(pa);
             // commit certs to storage
             assert!(pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes()).inspect_err(|e| println!("err {}", e)).is_ok());
             assert!(pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), &[]).is_ok());
@@ -5315,7 +5315,7 @@ mod fabric_table {
 
             // get other random public key
             let mut keypair = P256Keypair::default();
-            keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key = keypair.public_key().clone();
 
             assert_eq!(
@@ -5399,7 +5399,7 @@ mod fabric_table {
 
             // get other random public key
             let mut keypair = P256Keypair::default();
-            keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key = keypair.public_key().clone();
 
             assert_eq!(
@@ -5722,43 +5722,43 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let OFFSET = 50;
+            let offset = 50;
 
             // commit public key to storage
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
             let mut out_csr: [u8; 256] = [0; 256];
             let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
             let pub_key = ks.get_pending_pub_key();
             assert!(pub_key.is_some());
             let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            let _ = ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
 
             // commit certs to storage
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
             let rcac = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET) as u64,
-                (fabric_index + OFFSET + 1) as u64,
+                (fabric_index + offset) as u64,
+                (fabric_index + offset + 1) as u64,
                 pub_key.const_bytes(),
                 None,
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 1) as u64,
-                (fabric_index + OFFSET + 1) as u64,
+                (fabric_index + offset + 1) as u64,
+                (fabric_index + offset + 1) as u64,
                 pub_key.const_bytes(),
                 None,
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 2) as u64,
-                (fabric_index + OFFSET + 3) as u64,
+                (fabric_index + offset + 2) as u64,
+                (fabric_index + offset + 3) as u64,
                 pub_key.const_bytes(),
                 None,
             )
             .unwrap();
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
-            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            let _ = pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            let _ = pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
 
             // all the not before is 0
@@ -5783,16 +5783,16 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let OFFSET = 50;
+            let offset = 50;
 
             // commit public key to storage
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
             let mut out_csr: [u8; 256] = [0; 256];
             let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
             let pub_key = ks.get_pending_pub_key();
             assert!(pub_key.is_some());
             let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            let _ = ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
             let mut key_pair_buffer = crypto::P256SerializedKeypair::default();
             assert!(ks.export_op_keypair_for_fabric(fabric_index, &mut key_pair_buffer).is_ok());
@@ -5800,10 +5800,10 @@ mod fabric_table {
             assert!(key_pair.deserialize(&key_pair_buffer).is_ok());
 
             // commit certs to storage
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
             let rcac = FabricInfoTest::make_chip_cert_with_time(
-                (fabric_index + OFFSET) as u64,
-                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + offset) as u64,
+                (fabric_index + offset + 2) as u64,
                 pub_key.const_bytes(),
                 Seconds32::from_secs(1),
                 Seconds32::from_secs(0),
@@ -5811,21 +5811,21 @@ mod fabric_table {
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 1) as u64,
-                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + offset + 1) as u64,
+                (fabric_index + offset + 2) as u64,
                 pub_key.const_bytes(),
                 Some(&key_pair),
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 3) as u64,
-                (fabric_index + OFFSET + 4) as u64,
+                (fabric_index + offset + 3) as u64,
+                (fabric_index + offset + 4) as u64,
                 pub_key.const_bytes(),
                 Some(&key_pair),
             )
             .unwrap();
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
-            pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
+            let _ = pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac.const_bytes());
+            let _ = pos.add_new_op_certs_for_fabric(fabric_index, noc.const_bytes(), icac.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
 
             // to initialize the fabric
@@ -5860,24 +5860,24 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let OFFSET = 50;
+            let offset = 50;
 
             // commit public key to storage
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
             let mut out_csr: [u8; 256] = [0; 256];
             let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
             let pub_key = ks.get_pending_pub_key();
             assert!(pub_key.is_some());
             let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            let _ = ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
 
             // commit certs to storage
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
             /*
             let rcac = FabricInfoTest::make_chip_cert_with_time(
-                (fabric_index + OFFSET) as u64,
-                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + offset) as u64,
+                (fabric_index + offset + 2) as u64,
                 pub_key.const_bytes(),
                 Seconds32::from_secs(1),
                 Seconds32::from_secs(0),
@@ -5885,8 +5885,8 @@ mod fabric_table {
             )
             .unwrap();
             let icac = FabricInfoTest::make_chip_cert_with_time(
-                (fabric_index + OFFSET) as u64,
-                (fabric_index + OFFSET + 2) as u64,
+                (fabric_index + offset) as u64,
+                (fabric_index + offset + 2) as u64,
                 pub_key.const_bytes(),
                 Seconds32::from_secs(2),
                 Seconds32::from_secs(0),
@@ -5894,8 +5894,8 @@ mod fabric_table {
             )
             .unwrap();
             let noc = FabricInfoTest::make_chip_cert(
-                (fabric_index + OFFSET + 3) as u64,
-                (fabric_index + OFFSET + 4) as u64,
+                (fabric_index + offset + 3) as u64,
+                (fabric_index + offset + 4) as u64,
                 pub_key.const_bytes(),
                 None,
             )
@@ -5903,16 +5903,16 @@ mod fabric_table {
             */
 
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, 1, 0, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -5934,10 +5934,10 @@ mod fabric_table {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, 2, 0, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -5962,8 +5962,8 @@ mod fabric_table {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, 0, 0, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -5976,8 +5976,8 @@ mod fabric_table {
                 (noc, noc_buffer)
             };
 
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes());
-            pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), icac_buffer.const_bytes());
+            let _ = pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes());
+            let _ = pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), icac_buffer.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
 
             // to initialize the fabric
@@ -6011,31 +6011,31 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let OFFSET = 50;
+            let offset = 50;
 
             // commit public key to storage
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
             let mut out_csr: [u8; 256] = [0; 256];
             let _ = ks.new_op_keypair_for_fabric(fabric_index, &mut out_csr);
             let pub_key = ks.get_pending_pub_key();
             assert!(pub_key.is_some());
             let pub_key = pub_key.unwrap();
-            ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
+            let _ = ks.activate_op_keypair_for_fabric(fabric_index, &pub_key);
             assert_eq!(true, ks.commit_op_keypair_for_fabric(fabric_index).is_ok());
 
             // commit certs to storage
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, 1, 0, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -6057,10 +6057,10 @@ mod fabric_table {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, 2, 0, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -6085,8 +6085,8 @@ mod fabric_table {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, 3, 0, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -6098,8 +6098,8 @@ mod fabric_table {
 
                 (noc, noc_buffer)
             };
-            pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes());
-            pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), icac_buffer.const_bytes());
+            let _ = pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes());
+            let _ = pos.add_new_op_certs_for_fabric(fabric_index, noc_buffer.const_bytes(), icac_buffer.const_bytes());
             assert_eq!(true, pos.commit_certs_for_fabric(fabric_index).is_ok());
 
             // to initialize the fabric
@@ -6143,7 +6143,7 @@ mod fabric_table {
             static TEST_KEY_PAIR: OnceLock<P256Keypair> = OnceLock::new();
             let keypair = TEST_KEY_PAIR.get_or_init(|| {
                 let mut keypair = P256Keypair::default();
-                keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = keypair.initialize(ECPKeyTarget::Ecdh);
                 keypair
             });
             //init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
@@ -6151,7 +6151,7 @@ mod fabric_table {
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert_eq!(true, table.has_operational_key_for_fabric(fabric_index));
         }
@@ -6239,14 +6239,14 @@ mod fabric_table {
             static TEST_KEY_PAIR: OnceLock<P256Keypair> = OnceLock::new();
             let keypair = TEST_KEY_PAIR.get_or_init(|| {
                 let mut keypair = P256Keypair::default();
-                keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = keypair.initialize(ECPKeyTarget::Ecdh);
                 keypair
             });
             init_pas.m_operation_key = Some(&keypair);
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             let mut sig = P256EcdsaSignature::default();
 
@@ -6288,7 +6288,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6318,7 +6318,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6345,7 +6345,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6371,7 +6371,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6408,7 +6408,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6427,7 +6427,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -6450,7 +6450,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
@@ -6481,7 +6481,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert_eq!(
                 true,
@@ -6497,7 +6497,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
@@ -6531,7 +6531,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             // use an empty noc
             assert_eq!(
@@ -6548,7 +6548,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
@@ -6580,7 +6580,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert_eq!(
                 false,
@@ -6596,7 +6596,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
@@ -6637,7 +6637,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert_eq!(
                 false,
@@ -6653,7 +6653,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
@@ -6691,7 +6691,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert_eq!(
                 false,
@@ -6711,7 +6711,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -6747,7 +6747,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -6772,17 +6772,17 @@ mod fabric_table {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -6804,12 +6804,12 @@ mod fabric_table {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 // incorrect fabric id
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -6834,8 +6834,8 @@ mod fabric_table {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -6854,7 +6854,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -6879,18 +6879,18 @@ mod fabric_table {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
-            root_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
                 // incorrect fabric if
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
-                random_keypair.initialize(ECPKeyTarget::Ecdh);
+                let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -6912,11 +6912,11 @@ mod fabric_table {
             };
 
             let mut icac_keypair = P256Keypair::default();
-            icac_keypair.initialize(ECPKeyTarget::Ecdh);
+            let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
             let (icac_cert, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
                     &icac_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&root_keypair), CertType::Kroot).unwrap();
                 let mut icac = ChipCertificateData::default();
@@ -6941,8 +6941,8 @@ mod fabric_table {
                 let subject_id = make_subject_key_id(1, 2);
                 let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
-                subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
 
                 let noc_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &icac_dn, noc_keypair.public_key().const_bytes(),
                     &node_key_id, &icac_key_id, expected_not_before, expected_not_after, Some(&icac_keypair), CertType::Knode).unwrap();
@@ -6961,7 +6961,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -6991,7 +6991,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -7022,7 +7022,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -7052,7 +7052,7 @@ mod fabric_table {
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // only update rcac to storage
             assert_eq!(
@@ -7083,7 +7083,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7119,11 +7119,11 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7158,7 +7158,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             assert_eq!(
                 true,
@@ -7189,7 +7189,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7225,7 +7225,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7263,7 +7263,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7299,7 +7299,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7327,7 +7327,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7348,11 +7348,11 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7380,7 +7380,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7419,7 +7419,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7445,7 +7445,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7476,7 +7476,7 @@ mod fabric_table {
             init_pas.m_fabric_id = 0x01;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
 
             assert!(
@@ -7493,11 +7493,11 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (_, rcac_buf, rcac_keypair, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7528,7 +7528,7 @@ mod fabric_table {
             init_pas.m_fabric_id = 0x01;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
 
             assert!(
@@ -7546,7 +7546,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7575,7 +7575,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7606,7 +7606,7 @@ mod fabric_table {
             init_pas.m_fabric_id = 0x01;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
             assert!(
                 !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
@@ -7623,7 +7623,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             // update all three certificates
             assert_eq!(
@@ -7654,7 +7654,7 @@ mod fabric_table {
             init_pas.m_fabric_id = 0x01;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
 
 
             assert!(
@@ -7672,7 +7672,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7700,7 +7700,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7731,7 +7731,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7761,7 +7761,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7791,7 +7791,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7823,7 +7823,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7853,7 +7853,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7872,7 +7872,7 @@ mod fabric_table {
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
             init_pas.m_node_id = KUNDEFINED_NODE_ID + 1;
-            table.m_states[0].init(&init_pas);
+            let _ = table.m_states[0].init(&init_pas);
             // Remove pending keypair
             ks.revert_pending_keypair();
             assert!(!table.commit_pending_fabric_data().is_ok());
@@ -7891,7 +7891,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7924,7 +7924,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7956,7 +7956,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -7986,11 +7986,11 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -8016,11 +8016,11 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            ks.init(ptr::addr_of_mut!(pa));
+            let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -8049,7 +8049,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -8078,7 +8078,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -8107,7 +8107,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX + 10;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
@@ -8139,7 +8139,7 @@ mod fabric_table {
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let is_addition = true;
 
-            pos.init(ptr::addr_of_mut!(pa));
+            let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
