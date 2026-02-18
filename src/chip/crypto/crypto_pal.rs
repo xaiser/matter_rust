@@ -4,9 +4,12 @@
 use crate::chip::chip_lib::core::chip_config::{
     CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,
 };
-use crate::chip::chip_lib::support::buffer_reader as encoding;
+use crate::chip::chip_lib::support::{
+    buffer_writer::{self, BufferWriter, EndianBufferWriter},
+    buffer_reader as encoding,
+};
 use crate::chip::CryptoRng;
-use crate::chip::VendorId;
+use crate::chip::{VendorId, FabricId};
 use crate::chip_static_assert;
 
 use crate::chip_core_error;
@@ -22,7 +25,10 @@ use crate::ChipErrorResult;
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
-use core::str::FromStr;
+use core::{
+    str::FromStr,
+    mem::size_of,
+};
 
 use hkdf::Hkdf;
 use p256::ecdh::EphemeralSecret;
@@ -105,6 +111,24 @@ pub const K_PID_PREFIX_FOR_CN_ENCODING: &str = "Mpid:";
 pub const K_VID_AND_PID_HEX_LENGTH: usize = core::mem::size_of::<u16>() * 2;
 pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
 
+#[derive(Clone, Copy, PartialEq)]
+pub struct FabricBindingVersion(u8);
+
+impl FabricBindingVersion {
+    // Initial version using version 1.0 of the Matter Cryptographic Primitives.
+    pub const K_VERSION1: FabricBindingVersion = FabricBindingVersion(0x01);
+}
+
+// VidVerificationStatementVersion is on purpose different and non-overlapping with FabricBindingVersion.
+pub struct VidVerificationStatementVersion(u8);
+
+impl VidVerificationStatementVersion {
+    // Initial version using version 1.0 of the Matter Cryptographic Primitives.
+    pub const K_VERSION1: VidVerificationStatementVersion = VidVerificationStatementVersion(0x21);
+}
+
+pub const K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE: usize = 32;
+
 pub const K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE: usize = core::mem::size_of::<u8>()
     + K_SUBJECT_KEY_IDENTIFIER_LENGTH
     + K_P256_ECDSA_SIGNATURE_LENGTH_RAW;
@@ -113,6 +137,20 @@ chip_static_assert!(
     K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE == 85,
     "Expected size of VendorIdVerificationStatement version 1 was computed incorrectly due to changes of fundamental constants"
 );
+
+// vendor_fabric_binding_message := fabric_binding_version (1 byte) || root_public_key || fabric_id || vendor_id
+pub const K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE: usize = core::mem::size_of::<u8>() + CHIP_CRYPTO_PUBLIC_KEY_SIZE_BYTES + 
+   core::mem::size_of::<u64>() + core::mem::size_of::<u16>();
+chip_static_assert!(
+    K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE == 76,
+    "Expected size of VendorFabricBindingMessage version 1 was computed incorrectly due to changes of fundamental constants"
+);
+
+// vendor_id_verification_tbs := fabric_binding_version || client_challenge || attestation_challenge || fabric_index ||
+// vendor_fabric_binding_message || <vid_verification_statement>
+pub const K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE: usize = size_of::<u8>() + K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE +
+  CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES + size_of::<u8>() +
+  K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE + K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE;
 
 /*
  * Overhead to encode a raw ECDSA signature in X9.62 format in ASN.1 DER
@@ -1119,6 +1157,28 @@ pub fn generate_compressed_fabric_id(
     return Ok(u64::from_be_bytes(buffer));
 }
 
+pub fn generate_vendor_fabric_binding_message(fabric_binding_version: FabricBindingVersion, root_public_key: &P256PublicKey,
+    fabric_id: FabricId, vendor_id: u16, output: &mut [u8]) -> Result<usize, ChipError>
+{
+    match fabric_binding_version {
+        FabricBindingVersion::K_VERSION1 => {
+            // do nothing
+        },
+        _ => {
+            return Err(chip_error_invalid_argument!());
+        },
+    }
+
+    let mut writer = buffer_writer::big_endian::BufferWriter::default_with_buf(output);
+
+    // vendor_fabric_binding_message := fabric_binding_version (1 byte) || root_public_key || fabric_id || vendor_id
+    return writer.put_u8(fabric_binding_version.0)
+        .put(root_public_key.const_bytes())
+        .put_u64(fabric_id)
+        .put_u16(vendor_id)
+        .fit().map_err(|_| chip_error_buffer_too_small!());
+}
+
 pub enum CertificateChainValidationResult {
     KSuccess = 0,
 
@@ -1518,4 +1578,16 @@ mod test {
             assert_ne!(out1, out2);
         }
     } // end of test_hkdf_sha
+      
+    mod test_vv {
+        use super::super::*;
+        use super::*;
+        use std::*;
+        #[test]
+        fn generate_binding_message_successfull() {
+            // break build
+            assert!(false);
+        }
+    }// end of test_vv
+        
 }
