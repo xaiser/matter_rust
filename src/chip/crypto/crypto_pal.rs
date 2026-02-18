@@ -9,7 +9,7 @@ use crate::chip::chip_lib::support::{
     buffer_reader as encoding,
 };
 use crate::chip::CryptoRng;
-use crate::chip::{VendorId, FabricId};
+use crate::chip::{VendorId, FabricId, FabricIndex};
 use crate::chip_static_assert;
 
 use crate::chip_core_error;
@@ -112,7 +112,7 @@ pub const K_VID_AND_PID_HEX_LENGTH: usize = core::mem::size_of::<u16>() * 2;
 pub const K_MAX_COMMON_NAME_ATTR_LENGTH: usize = 64;
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct FabricBindingVersion(u8);
+pub struct FabricBindingVersion(pub u8);
 
 impl FabricBindingVersion {
     // Initial version using version 1.0 of the Matter Cryptographic Primitives.
@@ -120,7 +120,7 @@ impl FabricBindingVersion {
 }
 
 // VidVerificationStatementVersion is on purpose different and non-overlapping with FabricBindingVersion.
-pub struct VidVerificationStatementVersion(u8);
+pub struct VidVerificationStatementVersion(pub u8);
 
 impl VidVerificationStatementVersion {
     // Initial version using version 1.0 of the Matter Cryptographic Primitives.
@@ -1179,6 +1179,30 @@ pub fn generate_vendor_fabric_binding_message(fabric_binding_version: FabricBind
         .fit().map_err(|_| chip_error_buffer_too_small!());
 }
 
+pub fn generate_vendor_id_verification_to_be_signed(fabric_index: FabricIndex, client_challenge: &[u8], attestation_challenge: &[u8],
+    vendor_fabric_binding_message: &[u8], vid_verification_statement: &[u8], output: &mut [u8]) -> Result<usize, ChipError>
+{
+    verify_or_return_error!(client_challenge.len() == K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE &&
+        attestation_challenge.len() == CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES &&
+        !vendor_fabric_binding_message.is_empty(), Err(chip_error_invalid_argument!()));
+
+    // Extract binding version from vendorFabricBindingMessage. Only V1 supported yet.
+    let fabric_binding_version = vendor_fabric_binding_message[0];
+    verify_or_return_error!(fabric_binding_version == FabricBindingVersion::K_VERSION1.0, Err(chip_error_invalid_argument!()));
+
+    let mut writer = buffer_writer::big_endian::BufferWriter::default_with_buf(output);
+
+    // vendor_id_verification_tbs := fabric_binding_version || client_challenge || attestation_challenge || fabric_index ||
+    // vendor_fabric_binding_message || <vid_verification_statement>
+    return writer.put_u8(fabric_binding_version)
+        .put(client_challenge)
+        .put(attestation_challenge)
+        .put_u8(fabric_index as u8)
+        .put(vendor_fabric_binding_message)
+        .put(vid_verification_statement).fit().map_err(|_| chip_error_buffer_too_small!());
+}
+
+
 pub enum CertificateChainValidationResult {
     KSuccess = 0,
 
@@ -1583,10 +1607,82 @@ mod test {
         use super::super::*;
         use super::*;
         use std::*;
+
         #[test]
         fn generate_binding_message_successfull() {
-            // break build
-            assert!(false);
+            let mut buf = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_binding_message_incorrect_version() {
+            let mut buf = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(!generate_vendor_fabric_binding_message(FabricBindingVersion(0xFF), &key, 1, 1, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_binding_message_buffer_too_small() {
+            let mut buf = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE - 1];
+            let key = P256PublicKey::default();
+            assert!(!generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_vvid_to_be_sign() {
+            let mut msg = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut msg).is_ok());
+
+            let mut buf = [0u8; K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE];
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+            let statement = [3u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+            assert!(generate_vendor_id_verification_to_be_signed(
+                    1, &challenge, &attestation, &msg, &statement, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_vvid_to_be_sign_incorrect_challenge() {
+            let mut msg = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut msg).is_ok());
+
+            let mut buf = [0u8; K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE];
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE - 1];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+            let statement = [3u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+            assert!(!generate_vendor_id_verification_to_be_signed(
+                    1, &challenge, &attestation, &msg, &statement, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_vvid_to_be_sign_incorrect_attestation() {
+            let mut msg = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut msg).is_ok());
+
+            let mut buf = [0u8; K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE];
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES - 1];
+            let statement = [3u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+            assert!(!generate_vendor_id_verification_to_be_signed(
+                    1, &challenge, &attestation, &msg, &statement, &mut buf).is_ok());
+        }
+
+        #[test]
+        fn generate_vvid_to_be_sign_buffer_too_small() {
+            let mut msg = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+            let key = P256PublicKey::default();
+            assert!(generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &key, 1, 1, &mut msg).is_ok());
+
+            let mut buf = [0u8; K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE - 1];
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+            let statement = [3u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+            assert!(!generate_vendor_id_verification_to_be_signed(
+                    1, &challenge, &attestation, &msg, &statement, &mut buf).is_ok());
         }
     }// end of test_vv
         

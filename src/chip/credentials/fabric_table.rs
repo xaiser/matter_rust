@@ -1220,6 +1220,9 @@ mod fabric_table {
             crypto_pal::{
                 ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
                 P256PublicKey, P256SerializedKeypair, K_MIN_CSR_BUFFER_SIZE,
+                K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE, generate_vendor_fabric_binding_message, FabricBindingVersion,
+                K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE, K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE, generate_vendor_id_verification_to_be_signed,
+                K_MAX_ECDSA_SIGNATURE_LENGTH,
             },
             OperationalKeystore,
             generate_compressed_fabric_id,
@@ -1490,8 +1493,17 @@ mod fabric_table {
     pub struct SignVidVerificationResponseData {
         pub fabric_index: FabricIndex,
         pub fabric_binding_version: u8,
-        //TODO; chech the type
-        pub signature: [u8; 1],
+        pub signature: [u8; K_MAX_ECDSA_SIGNATURE_LENGTH],
+    }
+
+    impl Default for SignVidVerificationResponseData {
+        fn default() -> Self {
+            Self {
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                fabric_binding_version: FabricBindingVersion::K_VERSION1.0,
+                signature: [0u8; K_MAX_ECDSA_SIGNATURE_LENGTH],
+            }
+        }
     }
 
     /*
@@ -3057,12 +3069,44 @@ mod fabric_table {
 
         pub fn sign_vid_verification_request(
             &self,
-            _fabric_index: FabricIndex,
-            _client_challenge: &[u8],
-            _attestation_challenge: &[u8],
+            fabric_index: FabricIndex,
+            client_challenge: &[u8],
+            attestation_challenge: &[u8],
             out_response: &mut SignVidVerificationResponseData,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            if let Some(fabric_info) = self.find_fabric_with_index(fabric_index) {
+                let root_public_key = fabric_info.fetch_root_pubkey()?;
+
+                // Step 1: Generate FabricBindingMessage for given fabric.
+                let mut fabric_binding_message_buffer = [0u8; K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE];
+                let fabric_binding_message_buffer_size = generate_vendor_fabric_binding_message(FabricBindingVersion::K_VERSION1, &root_public_key, fabric_info.get_fabric_id(),
+                    fabric_info.get_vendor_id().into(), &mut fabric_binding_message_buffer)?;
+                verify_or_return_error!(fabric_binding_message_buffer_size == K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE, Err(chip_error_internal!()));
+
+                // Step 2: Recover VIDVerificationStatement, if any.
+                let mut vid_verification_statement_buffer = CertBuffer::default();
+
+                self.fetch_vid_verification_statement(fabric_index, &mut vid_verification_statement_buffer)?;
+
+                // Step 3: Generate VidVerificationToBeSigned
+                let mut vid_verification_tbs_buffer = [0u8; K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE];
+
+                generate_vendor_id_verification_to_be_signed(fabric_index, client_challenge, attestation_challenge,
+                    &fabric_binding_message_buffer[..fabric_binding_message_buffer_size], vid_verification_statement_buffer.const_bytes(),
+                    &mut vid_verification_tbs_buffer)?;
+
+                // Step 4: Sign the statement with the operational key.
+                let mut signature = P256EcdsaSignature::default();
+                self.sign_with_op_keypair(fabric_index, &vid_verification_tbs_buffer, &mut signature)?;
+
+                out_response.fabric_index = fabric_index;
+                out_response.fabric_binding_version = fabric_binding_message_buffer[0];
+                out_response.signature.copy_from_slice(signature.const_bytes());
+
+                return chip_ok!();
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
         }
 
         pub fn set_vid_verification_statement_elements(
@@ -3970,7 +4014,7 @@ mod fabric_table {
                         commit_marker_context_tlv_max_size, fabric_indices_tag,
                         index_info_tlv_max_size, marker_fabric_index_tag, marker_is_addition_tag,
                         next_available_fabric_index_tag, Delegate, FabricTable, InitParams,
-                        StateFlags, AdvertiseIdentity
+                        StateFlags, AdvertiseIdentity, SignVidVerificationResponseData,
                     },
                 },
                 last_known_good_time::LastKnownGoodTime,
@@ -3990,6 +4034,8 @@ mod fabric_table {
                 operational_keystore::OperationalKeystore,
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
                 K_MIN_CSR_BUFFER_SIZE,
+                K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE,
+                CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES,
             },
             system::system_clock::Seconds32,
             CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
@@ -8080,6 +8126,48 @@ mod fabric_table {
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert_eq!(fabric_index, table.m_states[0].get_fabric_index());
+        }
+
+        #[test]
+        fn sign_vid_verification_request_successfully() {
+            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+            let is_addition = true;
+
+            pos.init(ptr::addr_of_mut!(pa));
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // specify index
+                assert!(table.set_fabric_index_for_next_addition(fabric_index).is_ok());
+
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                assert_eq!(1, table.fabric_count());
+                assert!(table.commit_pending_fabric_data().is_ok());
+            }
+
+            // challenge&attestation stubs
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+
+            let mut out = SignVidVerificationResponseData::default();
+
+            assert!(table.sign_vid_verification_request(fabric_index, &challenge, &attestation, &mut out).is_ok());
         }
     } // end of mod tests
 } // end of mod fabric_table
