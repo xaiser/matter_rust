@@ -763,7 +763,7 @@ impl P256KeypairBase for P256Keypair {
 
         serialized_keypair[0..len].copy_from_slice(&self.m_key_context.m_bytes[0..len]);
 
-        output.set_length(len);
+        output.set_length(len).map_err(|_| chip_error_buffer_too_small!())?;
 
         chip_ok!()
     }

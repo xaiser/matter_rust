@@ -1452,7 +1452,7 @@ mod test {
             fn on_init_writer<TlvWriterType: TlvWriter>(
                 &mut self,
                 _writer: *mut TlvWriterType,
-                mut buf: *mut *mut u8,
+                buf: *mut *mut u8,
                 buf_len: *mut usize,
             ) -> ChipErrorResult {
                 self.reset();
@@ -1536,55 +1536,55 @@ mod test {
                 chip_ok!()
             }
 
-            fn put_boolean(&mut self, tag: Tag, v: bool) -> ChipErrorResult {
+            fn put_boolean(&mut self, _tag: Tag, _v: bool) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_u8(&mut self, tag: Tag, v: u8) -> ChipErrorResult {
+            fn put_u8(&mut self, _tag: Tag, _v: u8) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_u16(&mut self, tag: Tag, v: u16) -> ChipErrorResult {
+            fn put_u16(&mut self, _tag: Tag, _v: u16) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_u32(&mut self, tag: Tag, v: u32) -> ChipErrorResult {
+            fn put_u32(&mut self, _tag: Tag, _v: u32) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
+            fn put_u64(&mut self, _tag: Tag, _v: u64) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_i8(&mut self, tag: Tag, v: i8) -> ChipErrorResult {
+            fn put_i8(&mut self, _tag: Tag, _v: i8) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_i16(&mut self, tag: Tag, v: i16) -> ChipErrorResult {
+            fn put_i16(&mut self, _tag: Tag, _v: i16) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_i32(&mut self, tag: Tag, v: i32) -> ChipErrorResult {
+            fn put_i32(&mut self, _tag: Tag, _v: i32) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
+            fn put_i64(&mut self, _tag: Tag, _v: i64) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_bytes(&mut self, tag: Tag, buf: &[u8]) -> ChipErrorResult {
+            fn put_bytes(&mut self, _tag: Tag, _buf: &[u8]) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_string(&mut self, tag: Tag, buf: &str) -> ChipErrorResult {
+            fn put_string(&mut self, _tag: Tag, _buf: &str) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_string_f(&mut self, tag: Tag, args: core::fmt::Arguments) -> ChipErrorResult {
+            fn put_string_f(&mut self, _tag: Tag, _args: core::fmt::Arguments) -> ChipErrorResult {
                 chip_ok!()
             }
 
-            fn put_null(&mut self, tag: Tag) -> ChipErrorResult {
+            fn put_null(&mut self, _tag: Tag) -> ChipErrorResult {
                 chip_ok!()
             }
         }
@@ -1622,14 +1622,12 @@ mod test {
                     .write_element_head(TlvElementType::UInt8, tlv_tags::context_tag(1), 2)
                     .is_ok()
             );
-            unsafe {
-                assert_eq!(
-                    TLVTagControl::ContextSpecific as u8 | TlvElementType::UInt8 as u8,
-                    backing.m_current[0]
-                );
-                assert_eq!(1, backing.m_current[1]);
-                assert_eq!(2, backing.m_current[2]);
-            }
+            assert_eq!(
+                TLVTagControl::ContextSpecific as u8 | TlvElementType::UInt8 as u8,
+                backing.m_current[0]
+            );
+            assert_eq!(1, backing.m_current[1]);
+            assert_eq!(2, backing.m_current[2]);
         }
 
         #[test]
@@ -1642,17 +1640,15 @@ mod test {
                     .write_element_head(TlvElementType::UInt8, tlv_tags::common_tag(0x1FFFF), 2)
                     .is_ok()
             );
-            unsafe {
-                assert_eq!(
-                    TLVTagControl::CommonProfile4Bytes as u8 | TlvElementType::UInt8 as u8,
-                    backing.m_back[0][0]
-                );
-                assert_eq!(0xFF, backing.m_back[0][1]);
-                assert_eq!(0xFF, backing.m_back[0][2]);
-                assert_eq!(0x01, backing.m_back[0][3]);
-                assert_eq!(0x00, backing.m_current[0]);
-                assert_eq!(2, backing.m_current[1]);
-            }
+            assert_eq!(
+                TLVTagControl::CommonProfile4Bytes as u8 | TlvElementType::UInt8 as u8,
+                backing.m_back[0][0]
+            );
+            assert_eq!(0xFF, backing.m_back[0][1]);
+            assert_eq!(0xFF, backing.m_back[0][2]);
+            assert_eq!(0x01, backing.m_back[0][3]);
+            assert_eq!(0x00, backing.m_current[0]);
+            assert_eq!(2, backing.m_current[1]);
         }
 
         #[test]

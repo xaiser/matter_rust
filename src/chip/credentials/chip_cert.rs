@@ -226,7 +226,7 @@ pub fn verify_cert_signature(
         Err(chip_error_invalid_argument!())
     );
     verify_or_return_error!(
-        cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(),
+        cert.m_sig_algo_oid == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(),
         Err(chip_error_unsupported_signature_type!())
     );
 
@@ -706,7 +706,7 @@ pub struct ChipCertificateData {
     pub m_cert_flags: CertFlags,
     pub m_key_usage_flags: KeyUsageFlags,
     pub m_key_purpose_flags: KeyPurposeFlags,
-    pub m_sig_algo_OID: u16,
+    pub m_sig_algo_oid: u16,
     pub m_signature: P256EcdsaSignature,
     pub m_tbs_hash: [u8; K_SHA256_HASH_LENGTH],
     pub m_path_len_constraint: u8,
@@ -726,7 +726,7 @@ impl ChipCertificateData {
             m_key_usage_flags: KeyUsageFlags::Knone,
             m_key_purpose_flags: KeyPurposeFlags::Knone,
             // for now, we just level it this way.
-            m_sig_algo_OID: Asn1Oid::KoidSigAlgoECDSAWithSHA256 as u16,
+            m_sig_algo_oid: Asn1Oid::KoidSigAlgoECDSAWithSHA256 as u16,
             m_signature: P256EcdsaSignature::const_default(),
             m_tbs_hash: [0u8; K_SHA256_HASH_LENGTH],
             m_path_len_constraint: 0,
@@ -744,7 +744,7 @@ impl ChipCertificateData {
         self.m_cert_flags.clear();
         self.m_key_usage_flags.clear();
         self.m_key_purpose_flags.clear();
-        self.m_sig_algo_OID = 0;
+        self.m_sig_algo_oid = 0;
         self.m_signature = P256EcdsaSignature::const_default();
         self.m_tbs_hash = [0u8; K_SHA256_HASH_LENGTH];
         self.m_path_len_constraint = 0;
@@ -761,7 +761,7 @@ impl ChipCertificateData {
         let is_cert_flags = self.m_cert_flags == other.m_cert_flags;
         let is_key_usage_flags = self.m_key_usage_flags == other.m_key_usage_flags;
         let is_key_purpose_flags = self.m_key_purpose_flags == other.m_key_purpose_flags;
-        let is_sig_algo_oid = self.m_sig_algo_OID == other.m_sig_algo_OID;
+        let is_sig_algo_oid = self.m_sig_algo_oid == other.m_sig_algo_oid;
         let is_signature = self.m_signature.const_bytes() == other.m_signature.const_bytes();
         let is_tbs_hash = self.m_tbs_hash == other.m_tbs_hash;
         let is_path_long_constraint = self.m_path_len_constraint == other.m_path_len_constraint;
@@ -1028,7 +1028,7 @@ pub(super) mod tests {
         #[test]
         fn add_too_much() {
             let mut dn = ChipDN::default();
-            for i in 0..CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES {
+            for _ in 0..CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES {
                 assert_eq!(
                     true,
                     dn.add_attribute(Asn1Oid::KoidAttributeTypeMatterNodeId.into(), 1)
@@ -1083,7 +1083,7 @@ pub(super) mod tests {
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
+                tlv_tags::context_tag(is_print_string | matter_id),
                 0x01u64,
             );
             // end container
@@ -1123,7 +1123,7 @@ pub(super) mod tests {
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
+                tlv_tags::context_tag(is_print_string | matter_id),
                 0x01u64,
             );
 
@@ -1179,10 +1179,7 @@ pub(super) mod tests {
                 tlv_types::TlvType::KtlvTypeList,
                 &mut outer_container,
             );
-            // set up a tag number from matter id
-            let matter_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as u8;
             // no print string
-            let is_print_string: u8 = 0x0;
             // put a matter id 0x1
             let _ = writer.put_u64(tlv_tags::anonymous_tag(), 0x01u64);
             // end container
@@ -1224,7 +1221,7 @@ pub(super) mod tests {
             let is_print_string: u8 = 0x0;
             // put a 0x1
             let _ = writer.put_u32(
-                tlv_tags::context_tag((is_print_string | matter_id)),
+                tlv_tags::context_tag(is_print_string | matter_id),
                 0x01u32,
             );
             // end container
@@ -1270,7 +1267,7 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a 0x1
-            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag(is_print_string | name), "123");
             // end container
             let _ = writer.end_container(outer_container);
 
@@ -1314,7 +1311,7 @@ pub(super) mod tests {
             // no print string
             let is_print_string: u8 = 0x0;
             // put a 0x1
-            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag(is_print_string | name), "123");
             // end container
             let _ = writer.end_container(outer_container);
 
@@ -1337,7 +1334,7 @@ pub(super) mod tests {
 
         #[test]
         fn zero_compare() {
-            let mut dn = ChipDN::default();
+            let dn = ChipDN::default();
             assert_eq!(false, dn.is_equal(&dn));
         }
 
@@ -1358,7 +1355,7 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag(is_print_string | name), "123");
             // end container
             let _ = writer.end_container(outer_container);
 
@@ -1391,7 +1388,7 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "456");
+            let _ = writer.put_string(tlv_tags::context_tag(is_print_string | name), "456");
             // end container
             let _ = writer.end_container(outer_container);
 
@@ -1430,7 +1427,7 @@ pub(super) mod tests {
             let name = crate::chip::asn1::Asn1Oid::KoidAttributeTypeCommonName as u8;
             // no print string
             let is_print_string: u8 = 0x0;
-            let _ = writer.put_string(tlv_tags::context_tag((is_print_string | name)), "123");
+            let _ = writer.put_string(tlv_tags::context_tag(is_print_string | name), "123");
             // end container
             let _ = writer.end_container(outer_container);
 
@@ -1449,7 +1446,7 @@ pub(super) mod tests {
                     .is_ok()
             );
 
-            let mut dn1 = ChipDN::default();
+            let dn1 = ChipDN::default();
 
             assert_eq!(false, dn.is_equal(&dn1));
         }

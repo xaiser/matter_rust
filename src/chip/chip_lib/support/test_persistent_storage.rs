@@ -121,7 +121,7 @@ impl TestPersistentStorage {
             return Err(chip_error_persisted_storage_failed!());
         }
 
-        if let Some(value) = self.m_storage.get(&key) {
+        if self.m_storage.get(&key).is_some() {
             self.m_storage.remove(&key);
             return chip_ok!();
         } else {
@@ -247,7 +247,6 @@ mod test {
     #[test]
     fn delete_key_value_not_existed() {
         let mut p = TestPersistentStorage::default();
-        let mut buffer: [u8; 10] = [0; 10];
         assert_eq!(true, p.sync_delete_key_value("k1").is_err());
     }
 

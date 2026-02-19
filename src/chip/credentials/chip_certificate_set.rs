@@ -185,7 +185,7 @@ mod chip_certificate_set {
 
             // Verify the cert was signed with ECDSA-SHA256. This is the only signature algorithm currently supported.
             verify_or_return_error!(
-                cert.m_sig_algo_OID == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(),
+                cert.m_sig_algo_oid == Asn1Oid::KoidSigAlgoECDSAWithSHA256.into(),
                 Err(chip_error_unsupported_signature_type!())
             );
 
@@ -598,7 +598,6 @@ mod chip_certificate_set {
             let mut root_keypair = P256Keypair::default();
             let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
             let root_key_id = make_subject_key_id(1, 2);
-            let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
             let (root_cert, root_buffer, root_dn) = {
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
@@ -628,12 +627,6 @@ mod chip_certificate_set {
 
             let noc_keypair = stub_keypair();
             let (noc_cert, noc_buffer) = {
-                /*
-                let key = stub_public_key();
-                let noc_buffer = make_chip_cert(1, 2, &key[..], None).unwrap();
-                */
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -717,8 +710,6 @@ mod chip_certificate_set {
 
             let noc_keypair = stub_keypair();
             let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -819,8 +810,6 @@ mod chip_certificate_set {
             assert!(noc_keypair.deserialize(&keypair_buffer).is_ok());
 
             let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -1140,8 +1129,6 @@ mod chip_certificate_set {
 
             let noc_keypair = stub_keypair();
             let noc = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -1367,7 +1354,7 @@ mod chip_certificate_set {
             let mut sets = ChipCertificateSet::new();
             let mut root_keypair = P256Keypair::default();
             let _ = root_keypair.initialize(ECPKeyTarget::Ecdh);
-            let root_dn = {
+            let _ = {
                 let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
                 assert!(sets

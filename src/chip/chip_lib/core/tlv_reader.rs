@@ -1014,7 +1014,7 @@ where
         }
 
         unsafe {
-            let mut buf_slice =
+            let buf_slice =
                 core::slice::from_raw_parts_mut(buf, self.m_elem_len_or_val as usize);
 
             self.read_data(buf_slice)?;
@@ -1230,31 +1230,10 @@ mod test {
 
         type TheTlvReader = TlvReaderBasic<DummyBackStore>;
 
-        const THE_BUF_LEN: usize = 32;
-        static mut BUFFER: [u8; THE_BUF_LEN] = [0; THE_BUF_LEN];
-
-        fn setup() -> TheTlvReader {
-            let mut reader = TheTlvReader::const_default();
-            unsafe {
-                BUFFER.fill(0);
-                reader.init(BUFFER.as_ptr(), THE_BUF_LEN);
-            }
-            return reader;
-        }
-
         fn setup_with_values(buf: &[u8]) -> TheTlvReader {
             let mut reader = TheTlvReader::const_default();
-            unsafe {
-                //BUFFER.fill(0);
-                reader.init(buf.as_ptr(), buf.len());
-            }
+            reader.init(buf.as_ptr(), buf.len());
             return reader;
-        }
-
-        #[test]
-        fn init() {
-            let reader = setup();
-            assert_eq!(1, 1);
         }
 
         #[test]

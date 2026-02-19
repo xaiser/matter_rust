@@ -153,12 +153,12 @@ mod test {
 
         #[test]
         fn init_dummy_state() {
-            let s = DummyState;
+            let _ = DummyState;
         }
 
         #[test]
         fn init_state_machine() {
-            let s = HierarchyStateMachine::<u8, 2> {
+            let _ = HierarchyStateMachine::<u8, 2> {
                 m_states: [&STATIC_STATE, &STATIC_STATE_1],
                 m_current_state: 0,
             };

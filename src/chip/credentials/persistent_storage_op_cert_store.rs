@@ -927,7 +927,7 @@ where
         self.m_pending_noc = None;
 
         if self.m_pending_rcac.is_none() {
-            self.m_pending_fabric_index == KUNDEFINED_FABRIC_INDEX;
+            self.m_pending_fabric_index = KUNDEFINED_FABRIC_INDEX;
         }
 
         self.m_state_flag.remove(StateFlags::KaddNewOpCertsCalled);

@@ -219,7 +219,7 @@ mod case_auth_tag {
 
         #[test]
         fn empty_are_valid() {
-            let mut values = CATValues::new();
+            let values = CATValues::new();
             assert!(values.are_valid());
         }
 

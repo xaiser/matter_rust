@@ -116,7 +116,7 @@ where
                         "Failed to init Last Known Good Time {}",
                         e.format()
                     );
-                });
+                })?;
         } else {
             self.m_last_known_good_chip_epoch_time = Some(stored_last_known_good_chip_epoch_time);
         }

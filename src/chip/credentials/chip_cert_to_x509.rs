@@ -70,7 +70,7 @@ pub fn decode_subject_public_key_info<'a, Reader: TlvReader<'a>, Writer: Asn1Wri
     );
 
     // TODO: use the public key algo oid
-    writer.put_object_id(cert_data.m_sig_algo_OID as Oid)?;
+    writer.put_object_id(cert_data.m_sig_algo_oid as Oid)?;
 
     cert_data.m_public_key.copy_from_slice(raw_bytes);
 
@@ -474,7 +474,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -543,7 +543,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -608,7 +608,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -681,7 +681,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -747,7 +747,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -822,7 +822,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -903,7 +903,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -981,7 +981,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 
@@ -1053,7 +1053,7 @@ mod tests {
         assert!(reader
             .expect_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())
             .is_ok());
-        let container_type = reader.enter_container();
+        let _ = reader.enter_container();
 
         let mut writer = NullAsn1Writer::default();
 

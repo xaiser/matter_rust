@@ -536,8 +536,8 @@ pub mod fabric_info {
             }
             // Load other storable metadata (label, vendorId, etc)
             {
-                const size: usize = metadata_tlv_max_size();
-                let mut buffer: [u8; size] = [0; size];
+                const SIZE: usize = metadata_tlv_max_size();
+                let mut buffer: [u8; SIZE] = [0; SIZE];
                 /*
                 unsafe {
                     storage.as_ref().unwrap().sync_get_key_value(DefaultStorageKeyAllocator::fabric_metadata(self.m_fabric_index).key_name_str(), &mut buffer[..])?;
@@ -687,14 +687,14 @@ pub mod fabric_info {
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
+                tlv_tags::context_tag(is_print_string | matter_id),
                 matter_id_value,
             );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
+                tlv_tags::context_tag(is_print_string | fabric_id),
                 fabric_id_value,
             );
             // end of list conatiner
@@ -715,14 +715,14 @@ pub mod fabric_info {
             let is_print_string: u8 = 0x0;
             // put a matter id 0x1
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | matter_id)),
+                tlv_tags::context_tag(is_print_string | matter_id),
                 matter_id_value,
             );
             // set up a tag number from fabric id
             let fabric_id = crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as u8;
             // put a fabric id 0x02
             let _ = writer.put_u64(
-                tlv_tags::context_tag((is_print_string | fabric_id)),
+                tlv_tags::context_tag(is_print_string | fabric_id),
                 fabric_id_value,
             );
             // end of list conatiner
@@ -937,7 +937,7 @@ pub mod fabric_info {
                 let msg =  &asn1_written[..asn1_writer.get_length_written()];
                 let mut hasher = Sha256::new();
                 hasher.update(&msg[..]);
-                let hash_result = hasher.finalize();
+                let _ = hasher.finalize();
                 //println!("the sig hash is {:?}", hash_result.as_slice());
                 assert!(sign_key.ecdsa_sign_msg(&asn1_written[..asn1_writer.get_length_written()], &mut sig).is_ok());
                 let _ = writer
@@ -962,7 +962,7 @@ pub mod fabric_info {
             let auth_id = make_subject_key_id(1, 2);
             let mut subject_dn = ChipDN::default();
             let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, rcac_id_value as u64);
-            let mut issuer_dn = ChipDN::default();
+            let issuer_dn = ChipDN::default();
             let keypair = stub_keypair();
 
             return make_chip_cert_with_ids(&subject_dn, &issuer_dn, public_key, &subject_id, &auth_id, Some(&keypair), CertType::Kroot);
@@ -1146,7 +1146,7 @@ pub mod fabric_info {
                         k.public_key().const_bytes()
                     );
                 },
-                Some(Keypair::External(keypair)) => {
+                Some(Keypair::External(_)) => {
                     assert!(false);
                 },
                 None => {
@@ -1167,7 +1167,6 @@ pub mod fabric_info {
 
             let output_cert_buffer = make_chip_cert_by_data(&cert_data);
             assert!(output_cert_buffer.is_ok());
-            let output_cert_buffer = output_cert_buffer.unwrap();
             assert!(decode_chip_cert(rcac.const_bytes(), &mut cert_data, Some(CertDecodeFlags::KgenerateTBSHash)).is_ok());
 
             assert_eq!(&hash1, &cert_data.m_tbs_hash);
@@ -1735,7 +1734,7 @@ mod fabric_table {
             // Time is unknown during incoming certificate validation for CASE and
             // current time is also unknown, the certificate validity policy will see
             // this condition and can act appropriately.
-            self.m_last_known_good_time.init(self.m_storage);
+            let _ = self.m_last_known_good_time.init(self.m_storage).inspect_err(|e| chip_log_progress!(FabricProvisioning, "Cannot init last known good time {}", e));
 
             const SIZE: usize = index_info_tlv_max_size();
             let mut buf: [u8; SIZE] = [0; SIZE];
@@ -1774,7 +1773,8 @@ mod fabric_table {
                     self.m_deleted_fabric_index_from_init = commit_marker.fabric_index;
 
                     // Can't do better on error. We just have to hope for the best.
-                    self.delete(commit_marker.fabric_index);
+                    let _ = self.delete(commit_marker.fabric_index).inspect_err(|e| chip_log_error!(FabricProvisioning, "Cannot delete fabric {:#x}: {}",
+                            commit_marker.fabric_index, e));
                 }
                 Err(e) => {
                     // Got an error, but somehow value is not missing altogether: inconsistent state but touch nothing.
@@ -1885,7 +1885,7 @@ mod fabric_table {
                 // If StoreFabricIndexInfo fails here, that's probably OK.  When we try to
                 // read things from storage later we will realize there is nothing for this
                 // index.
-                self.store_fabric_index_info();
+                let _ = self.store_fabric_index_info().inspect_err(|e| chip_log_progress!(FabricProvisioning, "Cannot store fabric index info {}", e));
 
                 if self.m_fabric_count == 0 {
                     chip_log_error!(
@@ -1935,7 +1935,7 @@ mod fabric_table {
 
             for (index, deleted) in to_be_deleted.into_iter().enumerate() {
                 if deleted {
-                    self.delete(index as u8);
+                    let _ = self.delete(index as u8).inspect_err(|e| chip_log_error!(FabricProvisioning, "Cannot delete fabric at {}: {}", index, e));
                 }
             }
         }
@@ -2044,9 +2044,9 @@ mod fabric_table {
                 return;
             }
             unsafe {
-                self.m_storage.as_mut().unwrap().sync_delete_key_value(
+                let _ = self.m_storage.as_mut().unwrap().sync_delete_key_value(
                     DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
-                );
+                ).inspect_err(|e| chip_log_error!(FabricProvisioning, "Cannot clear commit marker {}", e));
             }
         }
 
@@ -2079,7 +2079,7 @@ mod fabric_table {
                 let mut iter = self.m_delegate_list_root;
                 while iter.is_some() {
                     let i = iter.take().unwrap();
-                    if delegate == i {
+                    if core::ptr::eq(delegate, i) {
                         return chip_ok!();
                     }
                     iter = i.as_ref().unwrap().next();
@@ -2293,7 +2293,7 @@ mod fabric_table {
                     out_cert.all_bytes(),
                 ) {
                     Ok(size) => {
-                        out_cert.set_length(size)?;
+                        out_cert.set_length(size).map_err(|_| chip_error_buffer_too_small!())?;
                         return chip_ok!();
                     }
                     Err(e) => {
@@ -2304,7 +2304,7 @@ mod fabric_table {
                                 .unwrap()
                                 .has_certificate_for_fabric(fabric_index, CertChainElement::Knoc)
                             {
-                                out_cert.set_length(0);
+                                out_cert.set_length(0).map_err(|_| chip_error_buffer_too_small!())?;
                                 return chip_ok!();
                             }
                         }
@@ -2345,7 +2345,7 @@ mod fabric_table {
             unsafe {
                 if let Some(store) = self.m_op_cert_store.as_ref() {
                     let size = store.get_vid_verification_element(fabric_index, VidVerificationElement::KvidVerificationStatement, out_vid_verification_statement.all_bytes())?;
-                    out_vid_verification_statement.set_length(size);
+                    out_vid_verification_statement.set_length(size).map_err(|_| chip_error_buffer_too_small!())?;
                     return chip_ok!();
                 } else {
                     return Err(chip_error_incorrect_state!());
@@ -2361,7 +2361,7 @@ mod fabric_table {
             unsafe {
                 if let Some(store) = self.m_op_cert_store.as_ref() {
                     let size = store.get_vid_verification_element(fabric_index, VidVerificationElement::Kvvsc, out_vvsc.all_bytes())?;
-                    out_vvsc.set_length(size);
+                    out_vvsc.set_length(size).map_err(|_| chip_error_buffer_too_small!())?;
                     return chip_ok!();
                 } else {
                     return Err(chip_error_incorrect_state!());
@@ -2381,7 +2381,7 @@ mod fabric_table {
             return fabric_info.fetch_root_pubkey();
         }
 
-        pub fn fetch_Cats(&self, _fabric_index: FabricIndex) -> Result<CatValues, ChipError> {
+        pub fn fetch_cats(&self, _fabric_index: FabricIndex) -> Result<CatValues, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
@@ -2766,7 +2766,7 @@ mod fabric_table {
                 // Good Time is incorrect and this causes incoming certificates to
                 // appear invalid, the certificate validity policy will see this
                 // condition and can act appropriately.
-                self.m_last_known_good_time.commit_last_known_good_chip_epoch_time().inspect_err(|e| {
+                let _ = self.m_last_known_good_time.commit_last_known_good_chip_epoch_time().inspect_err(|e| {
                     chip_log_error!(FabricProvisioning, "Failed to commit Last Known Good Time {}", e);
                 });
 
@@ -2787,11 +2787,12 @@ mod fabric_table {
             if sticky_error.is_err() {
                 // Blow-away everything if we got past any storage, even on Update: system state is broken
                 // TODO: Develop a way to properly revert in the future, but this is very difficult
-                self.delete(fabric_index_begin_committed);
+                let _ = self.delete(fabric_index_begin_committed).inspect_err(|e|
+                    chip_log_error!(FabricProvisioning, "Cannot delete fabric {:#x}: {}", fabric_index_begin_committed, e));
 
                 self.revert_pending_fabric_data();
             } else {
-                self.notify_fabric_commited(fabric_index_begin_committed);
+                let _ = self.notify_fabric_commited(fabric_index_begin_committed);
             }
 
             self.clear_commit_marker();
@@ -2822,7 +2823,7 @@ mod fabric_table {
                 }
             }
 
-            self.m_last_known_good_time
+            let _ = self.m_last_known_good_time
                 .revert_pending_last_known_good_chip_epoch_time();
 
             self.m_state_flag.clear();
@@ -2854,7 +2855,8 @@ mod fabric_table {
             }
 
             if self.m_state_flag.contains(StateFlags::KisAddPending) {
-                self.delete(self.m_fabric_index_with_pending_state);
+                let _ = self.delete(self.m_fabric_index_with_pending_state).inspect_err(|e| 
+                    chip_log_error!(FabricProvisioning, "Cannot delete fabric {:#x}: {}", self.m_fabric_index_with_pending_state, e));
             }
 
             self.m_state_flag.remove(StateFlags::KisAddPending);
@@ -3288,7 +3290,7 @@ mod fabric_table {
             // determine what to do.  And if the validity policy considers this fatal
             // this will prevent CASE and cause the pending fabric and Last Known Good
             // Time to be reverted.
-            self.m_last_known_good_time.update_pending_last_known_good_chip_epoch_time(not_before_collector.m_latest_not_before.get()).
+            let _ = self.m_last_known_good_time.update_pending_last_known_good_chip_epoch_time(not_before_collector.m_latest_not_before.get()).
                 inspect_err(|e| {
                     chip_log_error!(FabricProvisioning, "Failed to update pending Last Known Good Time: {}", e);
             });
@@ -3370,7 +3372,7 @@ mod fabric_table {
             self.m_state_flag.insert(StateFlags::KisAddPending | StateFlags::KisPendingFabricDataPresent);
 
             // Notify that NOC was added (at least transiently)
-            self.notify_fabric_updated(fabric_index_to_use);
+            let _ = self.notify_fabric_updated(fabric_index_to_use);
 
             return Ok(fabric_index_to_use);
         }
@@ -3457,7 +3459,7 @@ mod fabric_table {
             self.m_state_flag.insert(StateFlags::KisUpdatePending | StateFlags::KisPendingFabricDataPresent);
 
             // Notify that NOC was added (at least transiently)
-            self.notify_fabric_updated(fabric_index);
+            let _ = self.notify_fabric_updated(fabric_index);
 
             chip_ok!()
         }
@@ -3567,9 +3569,9 @@ mod fabric_table {
             writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut outer_type)?;
 
             if let Some(index) = self.m_next_available_fabric_index {
-                writer.put_u8(next_available_fabric_index_tag(), index);
+                writer.put_u8(next_available_fabric_index_tag(), index)?;
             } else {
-                writer.put_null(next_available_fabric_index_tag());
+                writer.put_null(next_available_fabric_index_tag())?;
             }
 
             let mut inner_container_type = TlvType::KtlvTypeNotSpecified;
@@ -3580,7 +3582,7 @@ mod fabric_table {
             )?;
 
             for f in &*self {
-                writer.put_u8(anonymous_tag(), f.get_fabric_index());
+                writer.put_u8(anonymous_tag(), f.get_fabric_index())?;
             }
 
             writer.end_container(inner_container_type)?;
@@ -4095,7 +4097,7 @@ mod fabric_table {
         {
             fn fabric_will_be_removed(
                 &mut self,
-                fabric_table: &FabricTable<PSD, OK, OCS>,
+                _fabric_table: &FabricTable<PSD, OK, OCS>,
                 fabric_index: FabricIndex,
             ) {
                 self.will_be_removed = fabric_index;
@@ -4103,7 +4105,7 @@ mod fabric_table {
 
             fn on_fabric_removed(
                 &mut self,
-                fabric_table: &FabricTable<PSD, OK, OCS>,
+                _fabric_table: &FabricTable<PSD, OK, OCS>,
                 fabric_index: FabricIndex,
             ) {
                 self.on_removed = fabric_index;
@@ -4152,7 +4154,6 @@ mod fabric_table {
             ks: &mut OK,
             pa: *mut TestPersistentStorage,
         ) {
-            let offset: u8 = 50;
             // commit public key to storage
             let _ = ks.init(pa);
             let mut out_csr: [u8; 256] = [0; 256];
@@ -4168,7 +4169,7 @@ mod fabric_table {
             assert!(keypair.deserialize(&serialized_keypair).is_ok());
 
             // commit fabric info to storage
-            let mut info = get_stub_fabric_info_with_index(fabric_index);
+            let info = get_stub_fabric_info_with_index(fabric_index);
             unsafe {
                 assert_eq!(true, info.commit_to_storge(pa.as_mut().unwrap()).is_ok());
             }
@@ -4359,7 +4360,7 @@ mod fabric_table {
 
         #[test]
         fn find_no_fabric_with_index() {
-            let mut table = TestFabricTable::default();
+            let table = TestFabricTable::default();
             assert_eq!(
                 true,
                 table
@@ -5862,7 +5863,6 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let offset = 50;
 
             // commit public key to storage
             let _ = ks.init(ptr::addr_of_mut!(pa));
@@ -5909,7 +5909,7 @@ mod fabric_table {
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
-            let (root_cert, root_buffer, root_dn) = {
+            let (_, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
@@ -5937,7 +5937,7 @@ mod fabric_table {
 
             let mut icac_keypair = P256Keypair::default();
             let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
-            let (icac_cert, icac_buffer, icac_dn) = {
+            let (_, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
@@ -5960,9 +5960,7 @@ mod fabric_table {
             };
 
             let noc_keypair = stub_keypair();
-            let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
+            let (_, noc_buffer) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -6013,7 +6011,6 @@ mod fabric_table {
             );
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let offset = 50;
 
             // commit public key to storage
             let _ = ks.init(ptr::addr_of_mut!(pa));
@@ -6032,7 +6029,7 @@ mod fabric_table {
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
-            let (root_cert, root_buffer, root_dn) = {
+            let (_, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
@@ -6060,7 +6057,7 @@ mod fabric_table {
 
             let mut icac_keypair = P256Keypair::default();
             let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
-            let (icac_cert, icac_buffer, icac_dn) = {
+            let (_, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 let icac_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &root_dn, icac_keypair.public_key().const_bytes(),
@@ -6083,9 +6080,7 @@ mod fabric_table {
             };
 
             let noc_keypair = stub_keypair();
-            let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
+            let (_, noc_buffer) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -6186,7 +6181,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(
+            let table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
                 ptr::addr_of_mut!(ks),
                 ptr::addr_of_mut!(pos),
@@ -6266,7 +6261,7 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let mut table = create_table_with_param(
+            let table = create_table_with_param(
                 ptr::addr_of_mut!(pa),
                 ptr::addr_of_mut!(ks),
                 ptr::addr_of_mut!(pos),

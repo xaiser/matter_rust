@@ -120,7 +120,7 @@ fn export_stored_op_key<Delegate: PersistentStorageDelegate>(
         buf.bytes(),
     )?;
 
-    buf.set_length(size);
+    buf.set_length(size).map_err(|_| chip_error_buffer_too_small!())?;
 
     // Read-out the operational key TLV entry.
     let mut reader = TlvContiguousBufferReader::const_default();
@@ -315,7 +315,7 @@ where
         self.reset_pending_key();
 
         let mut pending_keypair = crypto::P256Keypair::default();
-        pending_keypair.initialize(crypto::ECPKeyTarget::Ecdh);
+        pending_keypair.initialize(crypto::ECPKeyTarget::Ecdh)?;
 
         match pending_keypair
             .new_certificate_signing_request(&mut out_certificate_siging_request[..])
