@@ -669,7 +669,7 @@ mod tests {
         let _ = store.new_op_keypair_for_fabric(2, &mut out_csr[..]);
         assert_eq!(false, store.m_is_pending_keypair_active);
         // create the noc public key
-        let mut noc_pubkey: P256PublicKey = P256PublicKey::default();
+        let noc_pubkey: P256PublicKey = P256PublicKey::default();
         assert_eq!(
             true,
             store

@@ -197,10 +197,6 @@ mod test {
     use super::*;
     use std::*;
 
-    fn setup() -> TestPersistentStorage {
-        TestPersistentStorage::default()
-    }
-
     #[test]
     fn set_key_value_not_existed() {
         let mut p = TestPersistentStorage::default();

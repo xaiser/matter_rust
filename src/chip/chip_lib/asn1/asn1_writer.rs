@@ -383,7 +383,7 @@ mod asn1_writer {
             let mut buf = [0xFFu8; 256];
             writer.init(&mut buf);
 
-            writer.put_string(0, "12");
+            let _ = writer.put_string(0, "12");
             assert_eq!(4, writer.get_length_written());
             assert_eq!(0x0, buf[0]);
             assert_eq!(0x2, buf[1]);

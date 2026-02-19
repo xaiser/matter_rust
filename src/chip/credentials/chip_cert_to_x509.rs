@@ -316,7 +316,7 @@ pub fn decode_ecdsa_signature<'a, Reader: TlvReader<'a>, Writer: Asn1Writer>(
     }
 
     cert_data.m_signature.bytes()[..signature_size].copy_from_slice(signature);
-    cert_data.m_signature.set_length(signature_size);
+    cert_data.m_signature.set_length(signature_size).map_err(|_| chip_error_no_memory!())?;
 
     chip_ok!()
 }

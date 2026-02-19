@@ -1956,16 +1956,6 @@ mod test {
             pub m_always_fail: bool,
         }
 
-        impl VecBackingStore {
-            pub fn reset(&mut self) {
-                for row in self.m_back.iter_mut() {
-                    row.clear();
-                }
-                self.m_back.clear();
-                self.m_current.fill(0);
-            }
-        }
-
         impl Default for VecBackingStore {
             fn default() -> Self {
                 Self {

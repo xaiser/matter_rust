@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 const KFABRIC_LABEL_MAX_LENGTH_IN_BYTES: usize = 32;
 pub type FabricLabelString = crate::chip::chip_lib::support::default_string::DefaultString<
     KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
@@ -6416,7 +6418,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            let mut rcac: [u8; 1] = [0];
+            let rcac: [u8; 1] = [0];
 
             assert_eq!(true, table.add_new_pending_trusted_root_cert(&rcac).is_ok());
         }
@@ -6435,7 +6437,7 @@ mod fabric_table {
                 ptr::addr_of_mut!(pos),
             );
 
-            let mut rcac: [u8; 1] = [0];
+            let rcac: [u8; 1] = [0];
 
             assert_eq!(true, table.add_new_pending_trusted_root_cert(&rcac).is_ok());
             assert_eq!(
@@ -6550,15 +6552,11 @@ mod fabric_table {
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
             let node_id: NodeId = 1;
             let fabric_id: FabricId = 2;
 
             // create a noc and a rcac
             let pub_key = FabricInfoTest::stub_public_key();
-            let rcac =
-                FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
-                    .unwrap();
             let noc =
                 FabricInfoTest::make_chip_cert(node_id as u64, fabric_id as u64, &pub_key[..], None)
                     .unwrap();
@@ -6703,10 +6701,9 @@ mod fabric_table {
 
         #[test]
         fn run_verify_credentials_successfully() {
-            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -6720,29 +6717,17 @@ mod fabric_table {
                     .is_ok()
             );
 
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
-            );
-
             let mut context = IgorePolicyValidate::default();
-            /*
-            context.m_effective_time = EffectiveTime::LastKnownGoodChipEpochTime(
-                Seconds32::from_secs(1),
-            );
-            */
 
             assert!(TestFabricTable::run_verify_credentials(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), &mut context).is_ok());
         }
 
         #[test]
         fn run_verify_credentials_mismatched_noc() {
-            let (rcac, rcac_buf, icac, icac_buf, _, _) = make_x509_cert_chain_3();
-            let (_, _, _, _, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, _) = make_x509_cert_chain_3();
+            let (_, _, _, _, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -6754,12 +6739,6 @@ mod fabric_table {
                 true,
                 pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
                     .is_ok()
-            );
-
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
             );
 
             let mut context = IgorePolicyValidate::default();
@@ -6776,7 +6755,7 @@ mod fabric_table {
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
-            let (root_cert, root_buffer, root_dn) = {
+            let (_, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
@@ -6805,7 +6784,7 @@ mod fabric_table {
 
             let mut icac_keypair = P256Keypair::default();
             let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
-            let (icac_cert, icac_buffer, icac_dn) = {
+            let (_, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 // incorrect fabric id
@@ -6830,9 +6809,7 @@ mod fabric_table {
             };
 
             let noc_keypair = stub_keypair();
-            let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
+            let (_, noc_buffer) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -6849,7 +6826,6 @@ mod fabric_table {
             };
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -6861,12 +6837,6 @@ mod fabric_table {
                 true,
                 pos.add_new_trusted_root_cert_for_fabric(fabric_index, root_buffer.const_bytes())
                     .is_ok()
-            );
-
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
             );
 
             let mut context = IgorePolicyValidate::default();
@@ -6883,7 +6853,7 @@ mod fabric_table {
             let root_key_id = make_subject_key_id(1, 2);
             let icac_key_id = make_subject_key_id(3, 4);
             let node_key_id = make_subject_key_id(5, 6);
-            let (root_cert, root_buffer, root_dn) = {
+            let (_, root_buffer, root_dn) = {
                 let mut subject_dn = ChipDN::default();
                 // incorrect fabric if
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 3 as u64);
@@ -6913,7 +6883,7 @@ mod fabric_table {
 
             let mut icac_keypair = P256Keypair::default();
             let _ = icac_keypair.initialize(ECPKeyTarget::Ecdh);
-            let (icac_cert, icac_buffer, icac_dn) = {
+            let (_, icac_buffer, icac_dn) = {
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterICACId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -6937,9 +6907,9 @@ mod fabric_table {
             };
 
             let noc_keypair = stub_keypair();
-            let (noc_cert, noc_buffer) = {
-                let subject_id = make_subject_key_id(1, 2);
-                let auth_id = make_subject_key_id(3, 4);
+            let (_, noc_buffer) = {
+                //let subject_id = make_subject_key_id(1, 2);
+                //let auth_id = make_subject_key_id(3, 4);
                 let mut subject_dn = ChipDN::default();
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterNodeId as Oid, 1 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
@@ -6956,7 +6926,6 @@ mod fabric_table {
             };
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -6970,12 +6939,6 @@ mod fabric_table {
                     .is_ok()
             );
 
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
-            );
-
             let mut context = IgorePolicyValidate::default();
 
             assert!(TestFabricTable::run_verify_credentials(noc_buffer.const_bytes(), Some(icac_buffer.const_bytes()), root_buffer.const_bytes(), &mut context).is_err());
@@ -6983,10 +6946,9 @@ mod fabric_table {
 
         #[test]
         fn validate_incoming_noc_successfully() {
-            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -6998,12 +6960,6 @@ mod fabric_table {
                 true,
                 pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
                     .is_ok()
-            );
-
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
             );
 
             let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
@@ -7013,11 +6969,10 @@ mod fabric_table {
 
         #[test]
         fn validate_incoming_noc_wrong_noc() {
-            let (rcac, rcac_buf, icac, icac_buf, _, _) = make_x509_cert_chain_3();
-            let (_, _, _, _, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, _) = make_x509_cert_chain_3();
+            let (_, _, _, _, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -7029,12 +6984,6 @@ mod fabric_table {
                 true,
                 pos.add_new_trusted_root_cert_for_fabric(fabric_index, rcac_buf.const_bytes())
                     .is_ok()
-            );
-
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
             );
 
             let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
@@ -7044,10 +6993,10 @@ mod fabric_table {
 
         #[test]
         fn validate_incoming_noc_mismatched_fabric_id() {
-            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
-            let mut ks = OK::default();
+            //let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
@@ -7061,12 +7010,6 @@ mod fabric_table {
                     .is_ok()
             );
 
-            let mut table = create_table_with_param(
-                ptr::addr_of_mut!(pa),
-                ptr::addr_of_mut!(ks),
-                ptr::addr_of_mut!(pos),
-            );
-
             let mut ignore = IgnoreCertificateValidityPeriodPolicy::default();
 
             assert!(TestFabricTable::validate_incoming_noc_chain(noc_buf.const_bytes(), Some(icac_buf.const_bytes()), rcac_buf.const_bytes(), Some(0), &mut ignore).is_err());
@@ -7074,7 +7017,7 @@ mod fabric_table {
 
         #[test]
         fn add_inner_with_external_keypair_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -7121,7 +7064,7 @@ mod fabric_table {
 
             let _ = ks.init(ptr::addr_of_mut!(pa));
 
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7149,7 +7092,7 @@ mod fabric_table {
 
         #[test]
         fn add_inner_with_external_keypair_without_certs() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, _, _, _, _, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -7179,8 +7122,8 @@ mod fabric_table {
 
         #[test]
         fn add_inner_with_external_keypair_mismatched_certs() {
-            let (rcac, rcac_buf, rcac_keypair, _, _, _, _, _, _) = make_x509_cert_chain_3_with_keypair();
-            let (_, _, _, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, _, _, _, _, _) = make_x509_cert_chain_3_with_keypair();
+            let (_, _, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -7216,7 +7159,7 @@ mod fabric_table {
 
         #[test]
         fn update_inner_with_external_keypair_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -7254,7 +7197,7 @@ mod fabric_table {
 
         #[test]
         fn add_inner_without_key() {
-            let (rcac, rcac_buf, icac, icac_buf, noc, noc_buf) = make_x509_cert_chain_3();
+            let (_, rcac_buf, _, icac_buf, _, noc_buf) = make_x509_cert_chain_3();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
@@ -7290,14 +7233,11 @@ mod fabric_table {
 
         #[test]
         fn add_new_pending_fabric_with_external_keypair_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7318,14 +7258,11 @@ mod fabric_table {
 
         #[test]
         fn add_new_pending_fabric_with_external_keypair_no_root() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, _, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7346,8 +7283,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
-
             let _ = ks.init(ptr::addr_of_mut!(pa));
 
             let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
@@ -7376,9 +7311,6 @@ mod fabric_table {
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7416,9 +7348,6 @@ mod fabric_table {
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
-
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
             let mut table = create_table_with_param(
@@ -7443,7 +7372,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7491,11 +7419,10 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = ks.init(ptr::addr_of_mut!(pa));
 
-            let (_, rcac_buf, rcac_keypair, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
+            let (_, rcac_buf, rcac_keypair, _, icac_buf, _, _, noc_buf, _) = make_x509_cert_chain_3_with_keypair_store(&mut ks, fabric_index);
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7537,14 +7464,13 @@ mod fabric_table {
 
         #[test]
         fn add_and_update_pending_fabric_with_external_keypair() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7573,7 +7499,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7621,7 +7546,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7663,14 +7587,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_with_external_keypair_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7691,14 +7612,13 @@ mod fabric_table {
 
         #[test]
         fn commit_update_pending_fabric_with_external_keypair_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7722,14 +7642,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_with_external_keypair_add_and_update_at_same_time() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7752,14 +7669,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_no_root() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7782,14 +7696,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_pending_fabric_not_inited() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7814,14 +7725,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_missing_root() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7844,14 +7752,13 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_missing_keypair() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7882,14 +7789,13 @@ mod fabric_table {
         #[test]
         #[should_panic]
         fn commit_update_pending_fabric_no_previous_fabric() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7915,14 +7821,13 @@ mod fabric_table {
         #[test]
         #[should_panic]
         fn commit_update_pending_fabric_corrupted_pending_fabric() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7947,14 +7852,13 @@ mod fabric_table {
 
         #[test]
         fn commit_update_pending_fabric_not_able_store_metadata() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -7984,7 +7888,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = ks.init(ptr::addr_of_mut!(pa));
 
@@ -8014,7 +7917,6 @@ mod fabric_table {
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = ks.init(ptr::addr_of_mut!(pa));
 
@@ -8040,14 +7942,13 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_not_able_commit_certs() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -8069,14 +7970,11 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_not_able_commit_fabric_info() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
-
-            let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -8098,14 +7996,13 @@ mod fabric_table {
 
         #[test]
         fn commit_pending_fabric_with_specified_index() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX + 10;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 
@@ -8130,14 +8027,13 @@ mod fabric_table {
 
         #[test]
         fn sign_vid_verification_request_successfully() {
-            let (rcac, rcac_buf, rcac_keypair, icac, icac_buf, icac_keypair, noc, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
 
             let mut pa = TestPersistentStorage::default();
             let mut ks = OK::default();
             let mut pos = OCS::default();
 
             let fabric_index = KMIN_VALID_FABRIC_INDEX;
-            let is_addition = true;
 
             let _ = pos.init(ptr::addr_of_mut!(pa));
 

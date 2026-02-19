@@ -229,6 +229,7 @@ where
         chip_ok!()
     }
 
+    #[allow(dead_code)]
     pub fn finish(&mut self) {
         if self.m_storage.is_null() {
             return;
@@ -1143,7 +1144,7 @@ mod tests {
             store.has_certificate_for_fabric(0, CertChainElement::Krcac)
         );
 
-        let mut cert = CertBuffer::default();
+        let cert = CertBuffer::default();
 
         assert_eq!(
             false,

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::chip::{
     asn1::{get_oid_enum, get_oid, Asn1Oid, Oid, OidCategory, Tag as Asn1Tag, Asn1UniversalTag, Asn1UniversalTime},
     chip_lib::{
