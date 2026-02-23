@@ -14,8 +14,8 @@ pub mod base {
 pub use base::*;
 
 mod chip_epoch {
-    pub(super) const K_BASE_YEAR: u16 = 2000;
-    pub(super) const K_MAX_YEAR: u16 = 2135;
+    //pub(super) const K_BASE_YEAR: u16 = 2000;
+    //pub(super) const K_MAX_YEAR: u16 = 2135;
     pub(super) const K_DAYS_SINCE_UNIX_EPOCH: u16 = 10957;
     pub(super) const K_SECONDS_SINCE_UNIX_EPOCH: u64 = K_DAYS_SINCE_UNIX_EPOCH as u64 * super::base::K_SECONDS_PER_DAY as u64;
 }
@@ -30,6 +30,7 @@ mod internal {
     pub(super) const K_EPOCH_OFFSET_DAYS: u32 = 719468;
 }
 
+#[allow(dead_code)]
 #[derive(PartialEq, Eq)]
 enum Month {
     Kjanuary   = 1,

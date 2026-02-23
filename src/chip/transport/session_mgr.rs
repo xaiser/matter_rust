@@ -76,5 +76,5 @@ impl EncryptedPacketBufferHandle {
 }
 
 pub struct SessionManager {
-    m_system_layer: *mut LayerImpl,
+    _m_system_layer: *mut LayerImpl,
 }

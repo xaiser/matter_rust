@@ -1,10 +1,9 @@
 use crate::chip::NodeId;
 
-pub struct CatValues(u8);
+//pub struct CatValues(u8);
 
 pub type CaseAuthTag = u32;
 
-const KtagVersionMask: NodeId = 0x0000_0000_0000_FFFF;
 const K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES - 2;
 const K_UNDEFINED_CAT: CaseAuthTag = 0;
 const K_TAG_IDENTIFIER_MASK: NodeId = 0x0000_0000_FFFF_0000;
@@ -12,7 +11,7 @@ const K_TAG_IDENTIFIER_SHIFT: u32 = 16;
 const K_TAG_VERSION_MASK: NodeId = 0x0000_0000_0000_FFFF;
 
 pub fn is_valid_case_auth_tag(a_cat: CaseAuthTag) -> bool {
-    (a_cat & (KtagVersionMask as CaseAuthTag)) > 0
+    (a_cat & (K_TAG_VERSION_MASK as CaseAuthTag)) > 0
 }
 
 pub const fn get_case_auth_tag_identifier(a_cat: CaseAuthTag) -> u16 {
@@ -50,6 +49,7 @@ mod case_auth_tag {
     };
 
     static K_SERIALIZED_LENGTH: usize = K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT * core::mem::size_of::<CaseAuthTag>();
+    #[allow(dead_code)]
     static K_UNDEFINED_CATS: CATValues = CATValues::new();
 
     pub type Serialized = [u8; K_SERIALIZED_LENGTH];

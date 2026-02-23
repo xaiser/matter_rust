@@ -32,16 +32,16 @@ pub trait OperationalKeystore {
 
     fn export_op_keypair_for_fabric(
         &mut self,
-        fabric_index: FabricIndex,
-        out_keypair: &mut crypto::P256SerializedKeypair,
+        _fabric_index: FabricIndex,
+        _out_keypair: &mut crypto::P256SerializedKeypair,
     ) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }
 
     fn migrate_op_keypair_for_fabric(
         &mut self,
-        fabric_index: FabricIndex,
-        operational_keystore: &mut Self,
+        _fabric_index: FabricIndex,
+        _operational_keystore: &mut Self,
     ) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }

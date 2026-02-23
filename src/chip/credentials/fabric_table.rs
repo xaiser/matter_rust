@@ -9,7 +9,7 @@ pub mod fabric_info {
     use crate::chip::{
         chip_lib::{
             core::{
-                case_auth_tag::CatValues,
+                case_auth_tag::CATValues,
                 chip_encoding,
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
                 data_model_types::{
@@ -1178,7 +1178,7 @@ mod fabric_table {
     use crate::chip::{
         chip_lib::{
             core::{
-                case_auth_tag::CatValues,
+                case_auth_tag::CATValues,
                 chip_config::CHIP_CONFIG_MAX_FABRICS,
                 chip_encoding,
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
@@ -1944,11 +1944,11 @@ mod fabric_table {
             &self,
             root_pub_key: &P256PublicKey,
             fabric_id: FabricId,
-        ) -> Option<&FabricInfo> {
+        ) -> Option<&FabricInfo<'_>> {
             return self.find_fabric_common(root_pub_key, fabric_id);
         }
 
-        pub fn find_fabric_with_index(&self, fabric_index: FabricIndex) -> Option<&FabricInfo> {
+        pub fn find_fabric_with_index(&self, fabric_index: FabricIndex) -> Option<&FabricInfo<'_>> {
             if fabric_index == KUNDEFINED_FABRIC_INDEX {
                 return None;
             }
@@ -1977,14 +1977,14 @@ mod fabric_table {
             root_pub_key: &P256PublicKey,
             fabric_id: FabricId,
             node_id: NodeId,
-        ) -> Option<&FabricInfo> {
+        ) -> Option<&FabricInfo<'_>> {
             return self.find_fabric_common_with_id(root_pub_key, fabric_id, Some(node_id));
         }
 
         pub fn find_fabric_with_compressed_id(
             &self,
             compressed_fabric_id: CompressedFabricId,
-        ) -> Option<&FabricInfo> {
+        ) -> Option<&FabricInfo<'_>> {
             if self.has_pending_fabric_update()
                 && (self.m_pending_fabric.get_compressed_fabric_id() == compressed_fabric_id)
             {
@@ -2381,7 +2381,7 @@ mod fabric_table {
             return fabric_info.fetch_root_pubkey();
         }
 
-        pub fn fetch_cats(&self, _fabric_index: FabricIndex) -> Result<CatValues, ChipError> {
+        pub fn fetch_cats(&self, _fabric_index: FabricIndex) -> Result<CATValues, ChipError> {
             Err(chip_error_not_implemented!())
         }
 
@@ -3199,16 +3199,27 @@ mod fabric_table {
             fabric_index: FabricIndex,
             is_addition: bool,
             existing_op_key: Option<&'a P256Keypair>,
-            is_existingg_op_key_externally_owned: bool,
+            is_existing_op_key_externally_owned: bool,
             vendor_id: u16,
             advertise_identity: AdvertiseIdentity,
         ) -> ChipErrorResult {
             let mut new_fabric_info = fabric_info::InitParams::const_default();
             let fabric_entry: &mut FabricInfo;
-            let mut fabric_id_to_validate: Option<FabricId> = None;
+            let fabric_id_to_validate: Option<FabricId>;
 
             let mut not_before_collector = NotBeforeCollector::new();
             let mut noc_public_key = P256PublicKey::default();
+
+            if is_addition {
+                fabric_id_to_validate = None;
+            } else {
+                if let Some(fabric_info) = self.find_fabric_with_index(fabric_index) {
+                    fabric_id_to_validate = Some(fabric_info.get_fabric_id());
+                } else {
+                    return Err(chip_error_internal!());
+                }
+            }
+
             {
                 let mut noc_buf = CertBuffer::default();
                 let mut icac_buf = CertBuffer::default();
@@ -3243,7 +3254,7 @@ mod fabric_table {
                 let existing_fabric = self.find_fabric_with_index(fabric_index).ok_or(chip_error_internal!())?;
                 new_fabric_info.m_vendor_id = existing_fabric.get_vendor_id();
                 new_fabric_info.m_fabric_index = fabric_index;
-                fabric_id_to_validate = Some(existing_fabric.get_fabric_id());
+                //fabric_id_to_validate = Some(existing_fabric.get_fabric_id());
                 fabric_entry = &mut self.m_pending_fabric;
             }
 
@@ -3254,7 +3265,7 @@ mod fabric_table {
 
                 verify_or_return_error!(existing_op_key_ref.public_key().matches(&noc_public_key), Err(chip_error_invalid_public_key!()));
                 new_fabric_info.m_operation_key = Some(existing_op_key_ref);
-                new_fabric_info.m_has_externally_owned_operation_key = true;
+                new_fabric_info.m_has_externally_owned_operation_key = is_existing_op_key_externally_owned;
             } else if !self.m_operational_keystore.is_null() {
                 unsafe {
                     // If a keystore exists, we activate the operational key now, which also validates if it was previously installed
@@ -3322,7 +3333,7 @@ mod fabric_table {
             verify_or_return_error!(!self.m_state_flag.intersects(StateFlags::KisUpdatePending), Err(chip_error_incorrect_state!()));
 
             self.ensure_next_available_fabric_index_updated();
-            let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
+            let fabric_index_to_use;
 
             if let Some(index) = self.m_next_available_fabric_index {
                 fabric_index_to_use = index;
@@ -3469,7 +3480,7 @@ mod fabric_table {
             root_pub_key: &P256PublicKey,
             fabric_id: FabricId,
             node_id: Option<NodeId>,
-        ) -> Option<&FabricInfo> {
+        ) -> Option<&FabricInfo<'_>> {
             // Try to match pending fabric first if available
             if self.has_pending_fabric_update() {
                 let candidate_pub_key = self.m_pending_fabric.fetch_root_pubkey();
@@ -3517,7 +3528,7 @@ mod fabric_table {
             &self,
             root_pub_key: &P256PublicKey,
             fabric_id: FabricId,
-        ) -> Option<&FabricInfo> {
+        ) -> Option<&FabricInfo<'_>> {
             return self.find_fabric_common_with_id(root_pub_key, fabric_id, None);
         }
 
@@ -3647,13 +3658,12 @@ mod fabric_table {
             // To do so we have to extract the FabricID from the NOC and the root public key from the RCAC.
             // We assume the RCAC is currently readable from OperationalCertificateStore, whether pending
             // or persisted.
-            let mut fabric_id = 0;
+            let fabric_id;
             {
-                let mut unused: NodeId = 0;
-                (unused, fabric_id) = extract_node_id_fabric_id_from_op_cert_byte(noc)?;
+                (_, fabric_id) = extract_node_id_fabric_id_from_op_cert_byte(noc)?;
             }
 
-            let mut candidate_root_key = P256PublicKey::default();
+            let candidate_root_key;
             {
                 let mut temp_rcac = CertBuffer::default();
                 self.fetch_root_cert(pending_fabric_index, &mut temp_rcac)?;
@@ -3675,7 +3685,7 @@ mod fabric_table {
             Ok(None)
         }
 
-        fn get_shadow_pending_fabric_entry(&self) -> Option<&FabricInfo> {
+        fn get_shadow_pending_fabric_entry(&self) -> Option<&FabricInfo<'_>> {
             if self.has_pending_fabric_update() {
                 Some(&self.m_pending_fabric)
             } else {
@@ -3809,7 +3819,7 @@ mod fabric_table {
                         &raw_tlv[..size as usize],
                     );
                 },
-                Err(e) => {
+                Err(_) => {
                     return Err(chip_error_buffer_too_small!());
                 }
             }
@@ -3821,7 +3831,7 @@ mod fabric_table {
 
             let mut out_commit_marker = CommitMarker::default();
 
-            let mut tlv_read_size = 0usize;
+            let tlv_read_size;
             unsafe {
                 tlv_read_size = self.m_storage.as_mut().unwrap().sync_get_key_value(
                     DefaultStorageKeyAllocator::fabric_table_commit_marker_key().key_name_str(),
@@ -3833,7 +3843,7 @@ mod fabric_table {
             reader.init(tlv_buf.as_ptr(), tlv_read_size);
 
             reader.next_type_tag(TlvType::KtlvTypeStructure, anonymous_tag())?;
-            let container_type = reader.enter_container()?;
+            let _container_type = reader.enter_container()?;
 
             reader.next_tag(marker_fabric_index_tag())?;
             out_commit_marker.fabric_index = FabricIndex::from(reader.get_u8()?);
@@ -3983,7 +3993,7 @@ mod fabric_table {
             asn1::Oid,
             chip_lib::{
                 core::{
-                    case_auth_tag::CatValues,
+                    case_auth_tag::CATValues,
                     chip_config::CHIP_CONFIG_MAX_FABRICS,
                     chip_encoding,
                     chip_persistent_storage_delegate::PersistentStorageDelegate,
@@ -7396,7 +7406,7 @@ mod fabric_table {
             let pub_key_2 = rcac_keypair.public_key();
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_node_id = 0x01;
-            init_pas.m_fabric_id = 0x01;
+            init_pas.m_fabric_id = 0x02;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
             let _ = table.m_states[0].init(&init_pas);
@@ -7447,7 +7457,7 @@ mod fabric_table {
             let pub_key_2 = rcac_keypair.public_key();
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_node_id = 0x01;
-            init_pas.m_fabric_id = 0x01;
+            init_pas.m_fabric_id = 0x02;
             init_pas.m_root_publick_key = P256PublicKey::default_with_raw_value(pub_key_2.const_bytes());
 
             let _ = table.m_states[0].init(&init_pas);

@@ -430,8 +430,8 @@ impl ChipDN {
         &mut self,
         reader: &mut Reader,
     ) -> ChipErrorResult {
-        const KoidAttributeIsPrintableStringFlag: u32 = 0x00000080;
-        const KoidAttributeTypeMask: u32 = 0x0000007F;
+        const KOID_ATTRIBUTE_IS_PRINTABLE_STRING_FLAG: u32 = 0x00000080;
+        const KOID_ATTRIBUTE_TYPE_MASK: u32 = 0x0000007F;
 
         verify_or_return_error!(
             reader.get_type() == TlvType::KtlvTypeList,
@@ -448,11 +448,11 @@ impl ChipDN {
 
             let attr_oid = get_oid(
                 OidCategory::KoidCategoryAttributeType,
-                (tlv_tag_num & KoidAttributeTypeMask) as u8,
+                (tlv_tag_num & KOID_ATTRIBUTE_TYPE_MASK) as u8,
             );
 
-            let attr_is_printable_string = (tlv_tag_num & KoidAttributeIsPrintableStringFlag)
-                == KoidAttributeIsPrintableStringFlag;
+            let attr_is_printable_string = (tlv_tag_num & KOID_ATTRIBUTE_IS_PRINTABLE_STRING_FLAG)
+                == KOID_ATTRIBUTE_IS_PRINTABLE_STRING_FLAG;
 
             if is_chip_64bit_dn_attr(attr_oid) {
                 // For 64-bit CHIP-defined DN attributes.

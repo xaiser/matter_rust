@@ -116,33 +116,18 @@ mod chip_certificate_set {
 
     impl ChipCertificateSet {
         pub const fn new() -> Self {
-            /*
-            use core::mem::MaybeUninit;
-            let mut certs: [MaybeUninit<ChipCertificateData>; K_MAX_ARRAY_SIZE] = [ const { MaybeUninit::uninit() }; K_MAX_ARRAY_SIZE];
-            let mut index: usize = 0;
-
-            while index < K_MAX_ARRAY_SIZE {
-                certs[index].write(ChipCertificateData::const_default());
-                index += 1;
-            }
-
-            unsafe {
-                Self {
-                    m_certs_internal_storage: core::mem::transmute::<_, [ChipCertificateData; K_MAX_ARRAY_SIZE]>(certs),
-                    m_cert_count: 0,
-                }
-            }
-            */
             Self {
                 m_certs_internal_storage: [const { None }; K_MAX_ARRAY_SIZE],
                 m_cert_count: 0,
             }
         }
 
+        #[allow(dead_code)]
         fn release(&mut self) {
             self.clear();
         }
 
+        #[allow(dead_code)]
         fn clear(&mut self) {
             for cert in self.m_certs_internal_storage.iter_mut() {
                 //cert.clear();

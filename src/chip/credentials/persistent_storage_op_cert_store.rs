@@ -33,8 +33,6 @@ use crate::verify_or_return_value;
 use bitflags::{bitflags, Flags};
 use core::ptr;
 
-const DUMMY_CERT_SIZE: usize = K_MAX_CHIP_CERT_LENGTH;
-
 bitflags! {
     #[derive(Copy,Clone)]
     struct StateFlags: u8 {
@@ -90,7 +88,7 @@ fn save_vid_verification_element_to_storage<PS: PersistentStorageDelegate>(
     element: VidVerificationElement,
     element_data: &[u8],
 ) -> ChipErrorResult {
-    let mut storage_key = StorageKeyName::default();
+    let storage_key;
     match element {
         VidVerificationElement::KvidVerificationStatement => {
             storage_key =
@@ -220,6 +218,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn init(&mut self, storage: *mut PS) -> ChipErrorResult {
         // make sure we haven't init yet.
         verify_or_return_error!(self.m_storage.is_null(), Err(chip_error_incorrect_state!()));

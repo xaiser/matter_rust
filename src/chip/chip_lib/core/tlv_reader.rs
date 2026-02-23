@@ -401,6 +401,8 @@ where
         }
     }
 
+    /*
+     // TODO: Check if this is used before DELETING it!
     fn read_tag_raw(
         &mut self,
         tag_control: TLVTagControl,
@@ -485,6 +487,7 @@ where
             }
         }
     }
+*/
 
     fn read_tag(
         &mut self,

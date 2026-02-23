@@ -88,30 +88,35 @@ pub trait OperationalCertificateStore {
     }
 }
 
-pub struct OpCertStoreTransaction<'a, OCS>
-where
-    OCS: OperationalCertificateStore,
-{
-    m_store: &'a mut OCS,
-}
+#[allow(dead_code)]
+mod transcation {
+    use super::*;
 
-impl<'a, OCS> OpCertStoreTransaction<'a, OCS>
-where
-    OCS: OperationalCertificateStore,
-{
-    pub fn default_with(store: &'a mut OCS) -> Self {
-        Self { m_store: store }
+    pub struct OpCertStoreTransaction<'a, OCS>
+    where
+        OCS: OperationalCertificateStore,
+    {
+        m_store: &'a mut OCS,
     }
-    pub fn as_mut_ref(&mut self) -> &mut OCS {
-        return self.m_store;
-    }
-}
 
-impl<'a, OCS> Drop for OpCertStoreTransaction<'a, OCS>
-where
-    OCS: OperationalCertificateStore,
-{
-    fn drop(&mut self) {
-        self.m_store.revert_pending_op_certs();
+    impl<'a, OCS> OpCertStoreTransaction<'a, OCS>
+    where
+        OCS: OperationalCertificateStore,
+    {
+        pub fn default_with(store: &'a mut OCS) -> Self {
+            Self { m_store: store }
+        }
+        pub fn as_mut_ref(&mut self) -> &mut OCS {
+            return self.m_store;
+        }
+    }
+
+    impl<'a, OCS> Drop for OpCertStoreTransaction<'a, OCS>
+    where
+        OCS: OperationalCertificateStore,
+    {
+        fn drop(&mut self) {
+            self.m_store.revert_pending_op_certs();
+        }
     }
 }

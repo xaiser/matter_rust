@@ -2,12 +2,12 @@ use crate::chip::chip_lib::{
     core::{
         chip_persistent_storage_delegate::PersistentStorageDelegate,
         data_model_types::{is_valid_fabric_index, FabricIndex, KUNDEFINED_FABRIC_INDEX},
-        tlv_reader::{TlvContiguousBufferReader, TlvReader, TlvReaderBasic},
+        tlv_reader::{TlvContiguousBufferReader, TlvReader},
         tlv_tags,
         tlv_types::TlvType,
-        tlv_writer::{TlvContiguousBufferWriter, TlvWriter, TlvWriterBasic},
+        tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
     },
-    support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+    support::default_storage_key_allocator::{DefaultStorageKeyAllocator},
 };
 
 use crate::chip::crypto::{
@@ -16,7 +16,6 @@ use crate::chip::crypto::{
 };
 
 use crate::chip_core_error;
-use crate::chip_error_not_implemented;
 use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
@@ -478,9 +477,8 @@ where
                     DefaultStorageKeyAllocator::fabric_op_key(fabric_index).key_name_str(),
                 )
                 .map_err(|e| {
-                    let not_found = chip_error_persisted_storage_value_not_found!();
                     match e {
-                        not_found => {
+                        v if v == chip_error_persisted_storage_value_not_found!() => {
                             chip_error_invalid_fabric_index!()
                         }
                         _ => e,
@@ -546,7 +544,7 @@ where
         ptr::null_mut()
     }
 
-    fn release_ephemeral_keypair(keypair: *mut crypto::P256Keypair) {
+    fn release_ephemeral_keypair(_keypair: *mut crypto::P256Keypair) {
         // TODO: we don't need this until we have the allocate_ephemeral_keypair_for_case
         // implementation.
     }

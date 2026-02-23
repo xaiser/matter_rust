@@ -4,10 +4,10 @@ use crate::{
     asn1_error_underrun,
 };
 
-mod FieldLength {
+mod field_length {
     pub const K_UNKNOWN_LENGTH: i32 = -1;
     pub const K_LENGTH_FIELD_RESERVE_SIZE: u8 = 1;
-    pub const K_UNKNOWN_LENGTH_MARKER: u8 = 0xFF;
+    //pub const K_UNKNOWN_LENGTH_MARKER: u8 = 0xFF;
 }
 
 pub trait Asn1Writer {
@@ -152,8 +152,8 @@ mod asn1_writer {
 
         fn bytes_for_length(len: i32) -> u8 {
             match len {
-                v if v == FieldLength::K_UNKNOWN_LENGTH => {
-                    FieldLength::K_LENGTH_FIELD_RESERVE_SIZE
+                v if v == field_length::K_UNKNOWN_LENGTH => {
+                    field_length::K_LENGTH_FIELD_RESERVE_SIZE
                 },
                 v if v < 128 => {
                     1
@@ -199,21 +199,21 @@ mod asn1_writer {
         fn encode_head(&mut self, cls: Class, tag: Tag, is_constructed: bool, len: i32) -> ChipErrorResult {
             verify_or_return_error!(tag < 0x1Fu8, Err(asn1_error_unsupported_encoding!()));
 
-            verify_or_return_error!(len >= 0 || len == FieldLength::K_UNKNOWN_LENGTH, Err(asn1_error_unsupported_encoding!()));
+            verify_or_return_error!(len >= 0 || len == field_length::K_UNKNOWN_LENGTH, Err(asn1_error_unsupported_encoding!()));
 
             let bytes_for_len = TestAsn1Writer::bytes_for_length(len);
 
             // Make sure there's enough space to encode the entire value.
             // Note that the calculated total length doesn't overflow because `len` is a signed value (int32_t).
             // Note that if `len` is not kUnknownLength then it is non-negative (`len` >= 0).
-            let total_len: u32 = 1u32 + (bytes_for_len as u32) + { if len != FieldLength::K_UNKNOWN_LENGTH { len as u32 } else { 0u32 } };
+            let total_len: u32 = 1u32 + (bytes_for_len as u32) + { if len != field_length::K_UNKNOWN_LENGTH { len as u32 } else { 0u32 } };
 
             if let Some(m_buf) = self.m_buf.as_mut() {
                 verify_or_return_error!(self.m_write_point + (total_len as usize) <= m_buf.len(), Err(asn1_error_overflow!()));
 
                 m_buf[self.m_write_point] = cls | { if is_constructed { 0x20u8 } else { 0u8} } | tag;
                 self.m_write_point += 1;
-                if len != FieldLength::K_UNKNOWN_LENGTH {
+                if len != field_length::K_UNKNOWN_LENGTH {
                     TestAsn1Writer::encode_length(&mut m_buf[self.m_write_point..], bytes_for_len, len);
                 } else {
                     // TODO: we do not support unknow lenght yet.
