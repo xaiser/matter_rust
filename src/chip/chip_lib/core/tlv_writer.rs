@@ -27,10 +27,12 @@ use crate::verify_or_die;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
+/*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
+*/
 
 use core::{fmt, ptr};
 
@@ -295,7 +297,7 @@ where
     }
 
     fn put_u64(&mut self, tag: Tag, v: u64) -> ChipErrorResult {
-        let mut elem_type: TlvElementType;
+        let elem_type;
 
         if v <= u8::MAX as u64 {
             elem_type = TlvElementType::UInt8;
@@ -323,7 +325,7 @@ where
     }
 
     fn put_i64(&mut self, tag: Tag, v: i64) -> ChipErrorResult {
-        let mut elem_type: TlvElementType;
+        let elem_type;
 
         if v <= i8::MAX as i64 && v >= i8::MIN as i64 {
             elem_type = TlvElementType::Int8;
@@ -576,7 +578,7 @@ where
         chip_ok!()
     }
 
-    pub fn copy_element_tag(&mut self, tag: Tag) -> ChipErrorResult {
+    pub fn copy_element_tag(&mut self, _tag: Tag) -> ChipErrorResult {
         // TODO: wait for reader implement
         chip_ok!()
     }
@@ -792,7 +794,7 @@ where
             return Err(chip_error_invalid_argument!());
         }
 
-        let mut len_field_size: TLVFieldSize;
+        let len_field_size;
 
         let data_len = data.len();
 

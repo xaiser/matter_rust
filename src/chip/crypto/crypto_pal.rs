@@ -5,7 +5,7 @@ use crate::chip::chip_lib::core::chip_config::{
     CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,
 };
 use crate::chip::chip_lib::support::{
-    buffer_writer::{self, BufferWriter, EndianBufferWriter},
+    buffer_writer::{self, BufferWriter},
     buffer_reader as encoding,
 };
 use crate::chip::CryptoRng;
@@ -22,16 +22,15 @@ use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
 
-use crate::chip_internal_log;
-use crate::chip_internal_log_impl;
-use crate::chip_log_detail;
+//use crate::chip_internal_log;
+//use crate::chip_internal_log_impl;
+//use crate::chip_log_detail;
 use core::{
-    str::FromStr,
+    //str::FromStr,
     mem::size_of,
 };
 
 use hkdf::Hkdf;
-use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;

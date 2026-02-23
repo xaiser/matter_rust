@@ -14,7 +14,7 @@ impl<'a, E: Copy + 'a, const N: usize> HierarchyStateMachine<'a, E, N> {
 
         let mut next_event = Some(event);
         while next_event.is_some() {
-            let mut next_state;
+            let next_state;
             (next_event, next_state) =
                 self.m_states[self.m_current_state].handle(next_event.take().unwrap());
 

@@ -6,7 +6,6 @@ use crate::chip::chip_lib::{
     support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
 };
 use crate::chip::credentials::{
-    self,
     chip_cert::{CertBuffer, K_MAX_CHIP_CERT_LENGTH},
     operational_certificate_store::{CertChainElement, VidVerificationElement},
     OperationalCertificateStore,
@@ -23,7 +22,6 @@ use crate::chip_error_internal;
 use crate::chip_error_invalid_argument;
 use crate::chip_error_invalid_fabric_index;
 use crate::chip_error_not_found;
-use crate::chip_error_not_implemented;
 use crate::chip_error_persisted_storage_value_not_found;
 use crate::chip_ok;
 
@@ -59,8 +57,6 @@ fn get_storage_key_for_cert(
             return Some(DefaultStorageKeyAllocator::fabric_rcac(fabric_index));
         }
     }
-
-    None
 }
 
 fn storage_has_certificate<PS: PersistentStorageDelegate>(

@@ -1,12 +1,12 @@
 use crate::chip::{
-    asn1::{Oid, Asn1UniversalTime, Asn1UniversalTimeString, Asn1TagClasses, Class},
+    asn1::{Oid, Asn1TagClasses, Class},
     chip_lib::{
         core::{
             tlv_reader::{TlvContiguousBufferReader, TlvReader},
-            tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag, Tag},
+            tlv_tags::{anonymous_tag, context_tag, is_context_tag, tag_num_from_tag},
             tlv_types::TlvType,
         },
-        support::time_utils,
+        //support::time_utils,
         asn1::asn1_writer::{Asn1Writer, NullAsn1Writer, TestAsn1Writer},
     },
     credentials::chip_cert::{
@@ -23,7 +23,7 @@ use crate::chip::{
 use crate::chip_core_error;
 use crate::chip_ok;
 use crate::chip_sdk_error;
-use crate::ChipError;
+//use crate::ChipError;
 use crate::ChipErrorResult;
 
 use crate::chip_error_end_of_tlv;
@@ -32,15 +32,15 @@ use crate::chip_error_no_memory;
 use crate::chip_error_not_implemented;
 use crate::chip_error_unsupported_cert_format;
 
+/*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
+*/
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
-
-use bitflags::Flags;
 
 pub fn decode_chip_cert(
     cert: &[u8],
@@ -382,7 +382,7 @@ pub fn decode_chip_cert_with_reader<'a, Reader: TlvReader<'a>>(
         writer.init(&mut buf);
         decode_chip_cert_with_reader_writer(reader, &mut writer, cert_data)?;
         if let Some(written_buf) = writer.const_raw_bytes() {
-            let msg = &written_buf[..writer.get_length_written()];
+            //let msg = &written_buf[..writer.get_length_written()];
             hash_sha256(&written_buf[..writer.get_length_written()], &mut cert_data.m_tbs_hash[..])?;
         } else {
             // should not happen since the writer must have a buffer

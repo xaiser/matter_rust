@@ -1,7 +1,4 @@
 use crate::{
-    chip:: {
-        chip_lib::support::default_string::DefaultString,
-    },
     ChipErrorResult,
     chip_ok,
     chip_core_error,
@@ -10,11 +7,12 @@ use crate::{
     chip_error_invalid_argument,
 };
 
+/*
 use core::{
-    fmt::Write,
     mem::size_of,
 };
-use bitflags::{bitflags, Flags};
+*/
+use bitflags::bitflags;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

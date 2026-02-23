@@ -7,45 +7,45 @@ use crate::ChipErrorResult;
 pub trait TlvBackingStore {
     fn on_init_writer<TlvWriterType: TlvWriter>(
         &mut self,
-        writer: *mut TlvWriterType,
-        buf: *mut *mut u8,
-        buf_len: *mut usize,
+        _writer: *mut TlvWriterType,
+        _buf: *mut *mut u8,
+        _buf_len: *mut usize,
     ) -> ChipErrorResult {
         chip_ok!()
     }
 
     fn on_init_reader<'a, TlvReaderType: TlvReader<'a>>(
         &mut self,
-        reader: *mut TlvReaderType,
-        buf: *mut *const u8,
-        buf_len: *mut usize,
+        _reader: *mut TlvReaderType,
+        _buf: *mut *const u8,
+        _buf_len: *mut usize,
     ) -> ChipErrorResult {
         chip_ok!()
     }
 
     fn finalize_buffer<TlvWriterType: TlvWriter>(
         &mut self,
-        writer: *mut TlvWriterType,
-        buf: *mut u8,
-        buf_len: usize,
+        _writer: *mut TlvWriterType,
+        _buf: *mut u8,
+        _buf_len: usize,
     ) -> ChipErrorResult {
         chip_ok!()
     }
 
     fn get_next_buffer<'a, TlvReaderType: TlvReader<'a>>(
         &mut self,
-        reader: *mut TlvReaderType,
-        buf: *mut *const u8,
-        buf_len: *mut usize,
+        _reader: *mut TlvReaderType,
+        _buf: *mut *const u8,
+        _buf_len: *mut usize,
     ) -> ChipErrorResult {
         chip_ok!()
     }
 
     fn get_new_buffer<TlvWriterType: TlvWriter>(
         &mut self,
-        writer: *mut TlvWriterType,
-        buf: *mut *mut u8,
-        buf_len: &mut usize,
+        _writer: *mut TlvWriterType,
+        _buf: *mut *mut u8,
+        _buf_len: &mut usize,
     ) -> ChipErrorResult {
         chip_ok!()
     }

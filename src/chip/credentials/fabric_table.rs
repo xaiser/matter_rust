@@ -9,45 +9,37 @@ pub mod fabric_info {
     use crate::chip::{
         chip_lib::{
             core::{
-                case_auth_tag::CATValues,
                 chip_encoding,
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
                 data_model_types::{
-                    is_valid_fabric_index, FabricIndex, KMAX_VALID_FABRIC_INDEX,
-                    KMIN_VALID_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID,
+                    FabricIndex,
+                    KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID,
                     KUNDEFINED_FABRIC_INDEX,
                 },
                 node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
                 tlv_reader::{TlvContiguousBufferReader, TlvReader},
-                tlv_tags::{self, anonymous_tag, context_tag},
+                tlv_tags::{self, anonymous_tag},
                 tlv_types::TlvType,
                 tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
             },
             support::{
                 default_storage_key_allocator::DefaultStorageKeyAllocator,
-                default_string::DefaultString,
             },
         },
         credentials::{
-            self,
-            certificate_validity_policy::IgnoreCertificateValidityPeriodPolicy,
             chip_cert::{
                 extract_node_id_fabric_id_from_op_cert_byte,
-                extract_public_key_from_chip_cert_byte, CertBuffer, K_MAX_CHIP_CERT_LENGTH,
-                ChipCertificateData, ChipCertExtensionTag,
+                extract_public_key_from_chip_cert_byte, 
             },
-            last_known_good_time::LastKnownGoodTime,
-            operational_certificate_store::{CertChainElement, OperationalCertificateStore},
+            //operational_certificate_store::{CertChainElement, OperationalCertificateStore},
         },
         crypto::{
-            self,
             crypto_pal::{
                 ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
                 P256PublicKey, P256SerializedKeypair,
             },
             generate_compressed_fabric_id,
         },
-        system::system_clock::Seconds32,
         CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
     };
     use crate::chip_core_error;
@@ -63,16 +55,18 @@ pub mod fabric_info {
     use crate::ChipError;
     use crate::ChipErrorResult;
 
+    /*
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
     use crate::chip_log_error;
     use crate::chip_log_progress;
-
-    use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
     use core::{
         ptr,
         str::{self, FromStr},
     };
+    */
+
+    use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES};
     #[cfg(test)]
     use mockall::*;
     //#[cfg(test)]
@@ -613,7 +607,7 @@ pub mod fabric_info {
                 chip_cert::{
                     tag_not_after, tag_not_before, tests::make_subject_key_id, ChipCertTag, KeyPurposeFlags, decode_chip_cert, CertDecodeFlags,
                     CertFlags, ChipCertBasicConstraintTag, chip_epoch_to_asn1_time, CertificateKeyId, ChipDN,
-                    internal::K_MAX_CHIP_CERT_DECODE_BUF_LENGTH, CertType, KeyUsageFlags
+                    internal::K_MAX_CHIP_CERT_DECODE_BUF_LENGTH, CertType, KeyUsageFlags, CertBuffer, ChipCertExtensionTag, ChipCertificateData
                 },
                 persistent_storage_op_cert_store::PersistentStorageOpCertStore,
             },
@@ -624,6 +618,7 @@ pub mod fabric_info {
                 ECPKeyTarget, ECPKeypair, P256Keypair, P256KeypairBase, K_P256_PUBLIC_KEY_LENGTH,
                 *,
             },
+            system::system_clock::Seconds32,
         };
         use core::ptr;
         use sha2::{Digest, Sha256};
@@ -1180,14 +1175,13 @@ mod fabric_table {
             core::{
                 case_auth_tag::CATValues,
                 chip_config::CHIP_CONFIG_MAX_FABRICS,
-                chip_encoding,
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
                 data_model_types::{
                     is_valid_fabric_index, FabricIndex, KMAX_VALID_FABRIC_INDEX,
-                    KMIN_VALID_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID, KUNDEFINED_FABRIC_ID,
+                    KMIN_VALID_FABRIC_INDEX, 
                     KUNDEFINED_FABRIC_INDEX,
                 },
-                node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
+                //node_id::{is_operational_node_id, KUNDEFINED_NODE_ID},
                 tlv_reader::{TlvContiguousBufferReader, TlvReader},
                 tlv_tags::{self, anonymous_tag, context_tag, Tag},
                 tlv_types::TlvType,
@@ -1195,13 +1189,12 @@ mod fabric_table {
             },
             support::{
                 default_storage_key_allocator::DefaultStorageKeyAllocator,
-                default_string::DefaultString,
             },
         },
         credentials::{
             self,
             certificate_validity_policy::{
-                CertificateValidityPolicy, IgnoreCertificateValidityPeriodPolicy,
+                CertificateValidityPolicy,
                 CertificateValidityResult,
             },
             chip_cert::{
@@ -1214,22 +1207,21 @@ mod fabric_table {
             },
             chip_certificate_set::{ChipCertificateSet, ValidationContext},
             last_known_good_time::LastKnownGoodTime,
-            operational_certificate_store::{CertChainElement, OperationalCertificateStore, VidVerificationElement},
+            operational_certificate_store::{CertChainElement, VidVerificationElement},
         },
         crypto::{
             self,
             crypto_pal::{
-                ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
-                P256PublicKey, P256SerializedKeypair, K_MIN_CSR_BUFFER_SIZE,
+                ECPKey, ECPKeypair, P256EcdsaSignature, P256Keypair,
+                P256PublicKey, K_MIN_CSR_BUFFER_SIZE,
                 K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE, generate_vendor_fabric_binding_message, FabricBindingVersion,
-                K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE, K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE, generate_vendor_id_verification_to_be_signed,
+                K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE, generate_vendor_id_verification_to_be_signed,
                 K_MAX_ECDSA_SIGNATURE_LENGTH,
             },
-            OperationalKeystore,
             generate_compressed_fabric_id,
         },
         system::system_clock::Seconds32,
-        CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
+        CompressedFabricId, FabricId, NodeId, VendorId,
     };
     use crate::chip_core_error;
     use crate::chip_error_buffer_too_small;
@@ -1269,8 +1261,8 @@ mod fabric_table {
     use bitflags::{bitflags, Flags};
     //use super::{FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES, fabric_info::{self, FabricInfo, FabricInfo::const_default}};
     use super::{
-        fabric_info::{self, Keypair as FabricInfoOpKeypair},
-        FabricLabelString, KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
+        fabric_info,
+        KFABRIC_LABEL_MAX_LENGTH_IN_BYTES,
     };
     use core::{
         ptr,
@@ -1280,7 +1272,7 @@ mod fabric_table {
 
     #[cfg(test)]
     use mockall::*;
-    use mockall_double::double;
+    //use mockall_double::double;
 
     //#[double]
     use super::fabric_info::FabricInfo;
@@ -1326,7 +1318,7 @@ mod fabric_table {
     }
 
     const fn commit_marker_context_tlv_max_size() -> usize {
-        use core::mem;
+        //use core::mem;
 
         tlv_estimate_struct_overhead!(
             size_of::<FabricIndex>(),
@@ -1337,7 +1329,7 @@ mod fabric_table {
     }
 
     const fn index_info_tlv_max_size() -> usize {
-        use core::mem;
+        //use core::mem;
         // We have a single next-available index and an array of anonymous-tagged
         // fabric indices.
         //
@@ -2438,7 +2430,7 @@ mod fabric_table {
             );
 
             self.ensure_next_available_fabric_index_updated();
-            let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
+            let fabric_index_to_use;
 
             if let Some(index) = fabric_index {
                 verify_or_return_error!(
@@ -2469,7 +2461,7 @@ mod fabric_table {
                 self.set_pending_data_fabric_index(fabric_index_to_use),
                 Err(chip_error_incorrect_state!())
             );
-            let mut csr_size: usize = 0;
+            let csr_size: usize;
             unsafe {
                 csr_size = self
                     .m_operational_keystore
@@ -2545,7 +2537,7 @@ mod fabric_table {
             );
 
             self.ensure_next_available_fabric_index_updated();
-            let mut fabric_index_to_use = KUNDEFINED_FABRIC_INDEX;
+            let fabric_index_to_use;
 
             if let Some(index) = self.m_next_available_fabric_index {
                 fabric_index_to_use = index;
@@ -2927,7 +2919,7 @@ mod fabric_table {
 
             // find_valid_cert() checks the certificate set constructed by loading noc, icac and rcac.
             // It confirms that the certs link correctly (noc -> icac -> rcac), and have been correctly signed.
-            let result_cert = certificates.find_valid_cert(noc_subject_dn, noc_subject_key_id, context, 0)?;
+            let _ = certificates.find_valid_cert(noc_subject_dn, noc_subject_key_id, context, 0)?;
 
             let (out_node_id, out_fabric_id) = extract_node_id_fabric_id_from_op_cert(last_cert)?;
 
@@ -3208,7 +3200,7 @@ mod fabric_table {
             let fabric_id_to_validate: Option<FabricId>;
 
             let mut not_before_collector = NotBeforeCollector::new();
-            let mut noc_public_key = P256PublicKey::default();
+            let noc_public_key;
 
             if is_addition {
                 fabric_id_to_validate = None;

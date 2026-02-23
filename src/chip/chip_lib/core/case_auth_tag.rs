@@ -31,16 +31,16 @@ pub fn get_case_auth_tag_version(a_cat: CaseAuthTag) -> u16 {
 mod case_auth_tag {
     use super::*;
     use crate::{
-        ChipError,
+        //ChipError,
         ChipErrorResult,
         chip_core_error,
         chip_error_no_memory,
-        chip_error_internal,
-        chip_no_error,
+        //chip_error_internal,
+        //chip_no_error,
         chip_ok,
         chip_sdk_error,
-        verify_or_die,
-        verify_or_return_error,
+        //verify_or_die,
+        //verify_or_return_error,
         verify_or_return_value,
         chip::chip_lib::core::{
             node_id::{is_case_auth_tag, NodeId},

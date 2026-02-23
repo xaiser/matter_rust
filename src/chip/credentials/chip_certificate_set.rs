@@ -5,7 +5,7 @@ mod chip_certificate_set {
         asn1::Asn1Oid,
         chip_lib::{
             core::tlv_reader::{TlvContiguousBufferReader, TlvReader},
-            asn1::asn1_writer::{Asn1Writer, NullAsn1Writer},
+            //asn1::asn1_writer::{Asn1Writer, NullAsn1Writer},
         },
         credentials::{
             certificate_validity_policy::{
@@ -17,7 +17,7 @@ mod chip_certificate_set {
                 KeyUsageFlags, K_NULL_CERT_TIME,
             },
         },
-        crypto::{ECPKey, P256EcdsaSignature, P256PublicKey, K_SHA256_HASH_LENGTH},
+        //crypto::{ECPKey, P256EcdsaSignature, P256PublicKey, K_SHA256_HASH_LENGTH},
         system::system_clock::Seconds32,
     };
 
@@ -38,7 +38,7 @@ mod chip_certificate_set {
 
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
-    use crate::chip_log_detail;
+    //use crate::chip_log_detail;
     use crate::chip_log_error;
     use core::str::FromStr;
 
@@ -148,14 +148,13 @@ mod chip_certificate_set {
 
             reader.init(chip_cert.as_ptr(), chip_cert.len());
 
-            return self.load_cert_reader(&mut reader, decode_flags, chip_cert);
+            return self.load_cert_reader(&mut reader, decode_flags);
         }
 
         pub fn load_cert_reader<'a, Reader: TlvReader<'a>>(
             &mut self,
             reader: &mut Reader,
             decode_flags: CertDecodeFlags,
-            chip_cert: &[u8],
         ) -> ChipErrorResult {
             let mut cert = ChipCertificateData::default();
             decode_chip_cert_with_reader(reader, &mut cert, Some(decode_flags))?;
@@ -543,7 +542,7 @@ mod chip_certificate_set {
                 fabric_table::fabric_info::tests::{make_ca_cert, make_chip_cert, stub_public_key, make_chip_cert_by_data, stub_keypair, make_chip_cert_with_ids, make_chip_cert_with_ids_and_times},
             },
             crypto::{
-                ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase,
+                ECPKeyTarget, ECPKeypair, P256EcdsaSignature, P256Keypair, P256KeypairBase, ECPKey,
                 K_P256_PUBLIC_KEY_LENGTH, OperationalKeystore, self, P256SerializedKeypair,
             },
         };

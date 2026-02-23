@@ -1,7 +1,7 @@
 pub mod certificate_validity_policy {
     use crate::{
-        chip::credentials::chip_cert::ChipCertificateData, chip_core_error, chip_ok,
-        chip_sdk_error, ChipError, ChipErrorResult,
+        chip::credentials::chip_cert::ChipCertificateData, chip_ok,
+        ChipErrorResult,
     };
     #[derive(PartialEq, Eq)]
     pub enum CertificateValidityResult {

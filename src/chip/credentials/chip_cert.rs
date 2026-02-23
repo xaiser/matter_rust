@@ -8,7 +8,7 @@ use crate::chip::{
             chip_config::CHIP_CONFIG_CERT_MAX_RDN_ATTRIBUTES,
             data_model_types::is_valid_fabric_id,
             node_id::is_operational_node_id,
-            tlv_reader::{TlvContiguousBufferReader, TlvReader},
+            tlv_reader::TlvReader,
             tlv_writer::TlvWriter,
             tlv_tags::{context_tag, is_context_tag, tag_num_from_tag, Tag},
             tlv_types::TlvType,
@@ -38,7 +38,7 @@ use crate::chip_error_invalid_argument;
 use crate::chip_error_invalid_tlv_tag;
 use crate::chip_error_no_memory;
 use crate::chip_error_not_found;
-use crate::chip_error_not_implemented;
+//use crate::chip_error_not_implemented;
 use crate::chip_error_unsupported_signature_type;
 use crate::chip_error_wrong_cert_dn;
 use crate::chip_error_wrong_node_id;
@@ -48,10 +48,12 @@ use crate::chip_error_unsupported_cert_format;
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert;
 pub use crate::chip::credentials::chip_cert_to_x509::decode_chip_cert_with_reader;
 
+/*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
+*/
 
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
@@ -230,7 +232,7 @@ pub fn verify_cert_signature(
         Err(chip_error_unsupported_signature_type!())
     );
 
-    let mut signer_public_key = P256PublicKey::default_with_raw_value(&signer.m_public_key[..]);
+    let signer_public_key = P256PublicKey::default_with_raw_value(&signer.m_public_key[..]);
     let mut signature = P256EcdsaSignature::default();
 
     let sig_length = cert.m_signature.length();

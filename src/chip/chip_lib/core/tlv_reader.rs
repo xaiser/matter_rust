@@ -1,4 +1,3 @@
-use super::chip_encoding::little_endian;
 use super::tlv_backing_store::TlvBackingStore;
 use super::tlv_common;
 use super::tlv_tags::{self, TLVTagControl, TLVTagControlMS, Tag, TlvCommonProfiles};
@@ -24,7 +23,7 @@ use crate::chip_error_unexpected_tlv_element;
 use crate::chip_error_unknown_implicit_tlv_tag;
 use crate::chip_error_wrong_tlv_type;
 
-use crate::verify_or_die;
+//use crate::verify_or_die;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
 
@@ -33,7 +32,7 @@ use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
 
-use core::{fmt, ptr};
+use core::ptr;
 
 #[cfg(test)]
 use mockall::*;
@@ -1170,7 +1169,7 @@ where
         );
 
         if tlv_types::tlv_elem_type_is_container(elem_type) {
-            let mut outer_container_type = self.enter_container()?;
+            let outer_container_type = self.enter_container()?;
             return self.exit_container(outer_container_type);
         }
 

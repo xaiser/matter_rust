@@ -1,4 +1,4 @@
-use crate::chip_sdk_error;
+//use crate::chip_sdk_error;
 
 #[macro_export]
 macro_rules! chip_asn1_error {

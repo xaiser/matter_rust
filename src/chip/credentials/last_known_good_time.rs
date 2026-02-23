@@ -7,7 +7,7 @@ use crate::chip::{
             tlv_types::TlvType,
             tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
         },
-        support::default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
+        support::default_storage_key_allocator::DefaultStorageKeyAllocator,
     },
     system::system_clock::Seconds32,
 };

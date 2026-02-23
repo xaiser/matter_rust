@@ -1,8 +1,8 @@
 use crate::{
     chip_core_error,
     chip_error_internal,
-    chip_no_error,
-    chip_ok,
+    //chip_no_error,
+    //chip_ok,
     chip_sdk_error,
     chip::{
         chip_lib::{

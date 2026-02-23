@@ -1,5 +1,5 @@
 use crate::{
-    chip::asn1::{Tag, Class, Oid, Asn1UniversalTime, Asn1UniversalTimeString, Asn1UniversalTag, Asn1TagClasses},
+    chip::asn1::{Tag, Class, Oid, Asn1UniversalTime},
     ChipErrorResult,
     asn1_error_underrun,
 };
@@ -66,7 +66,7 @@ mod asn1_writer {
         asn1_error_invalid_state,
         verify_or_return_error,
         verify_or_return_value,
-        chip::asn1::{Oid, Tag, Class, Asn1TagClasses, Asn1UniversalTag},
+        chip::asn1::{Tag, Class, Asn1TagClasses, Asn1UniversalTag},
         ChipErrorResult,
         chip_ok,
     };
@@ -77,7 +77,7 @@ mod asn1_writer {
     pub struct NullAsn1Writer;
 
     impl Asn1Writer for NullAsn1Writer {
-        fn encode_head(&mut self, cls: Class, tag: Tag, is_constructed: bool, len: i32) -> ChipErrorResult {
+        fn encode_head(&mut self, _cls: Class, _tag: Tag, _is_constructed: bool, _len: i32) -> ChipErrorResult {
             chip_ok!()
         }
         fn get_length_written(&self) -> usize { 0 }
@@ -85,7 +85,7 @@ mod asn1_writer {
             chip_ok!()
         }
 
-        fn put_string(&mut self, tag: Tag, value: &str) -> ChipErrorResult {
+        fn put_string(&mut self, _tag: Tag, _value: &str) -> ChipErrorResult {
             chip_ok!()
         }
 
@@ -93,7 +93,7 @@ mod asn1_writer {
             chip_ok!()
         }
 
-        fn put_bit_string(&mut self, unused_bit_count: u8, encoded_bits: &[u8]) -> ChipErrorResult {
+        fn put_bit_string(&mut self, _unused_bit_count: u8, _encoded_bits: &[u8]) -> ChipErrorResult {
             chip_ok!()
         }
 
@@ -117,11 +117,11 @@ mod asn1_writer {
             None
         }
 
-        fn put_boolean(&mut self, val: bool) -> ChipErrorResult {
+        fn put_boolean(&mut self, _val: bool) -> ChipErrorResult {
             chip_ok!()
         }
 
-        fn put_integer(&mut self, val: u64) -> ChipErrorResult {
+        fn put_integer(&mut self, _val: u64) -> ChipErrorResult {
             chip_ok!()
         }
     }
@@ -253,7 +253,7 @@ mod asn1_writer {
         }
 
         fn put_bit_string_with_value(&mut self, mut value: u32) -> ChipErrorResult {
-            let mut len: u8 = 0;
+            let len: u8;
 
             if value == 0 {
                 len = 1;
