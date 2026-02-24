@@ -2904,8 +2904,6 @@ mod fabric_table {
             ),
             ChipError,
         > {
-            //const K_MAX_NUM_CERTS_IN_OP_CERTS: u8 = 3;
-
             let mut certificates = ChipCertificateSet::default();
             certificates.load_cert(rcac, CertDecodeFlags::KisTrustAnchor)?;
             let mut is_icac_present = false;
@@ -2972,8 +2970,7 @@ mod fabric_table {
             }
 
             let noc_pub_key = P256PublicKey::default_with_raw_value(
-                &certificates.get_cert_sets()[2].as_ref().ok_or(chip_error_internal!())?.m_public_key);
-
+                &certificates.get_last_cert().ok_or(chip_error_internal!())?.m_public_key);
 
             return Ok((out_compressed_fabric_id, out_fabric_id, out_node_id, noc_pub_key, root_pub_key));
         }
@@ -4120,6 +4117,7 @@ mod fabric_table {
                 K_MIN_CSR_BUFFER_SIZE,
                 K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE,
                 CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES,
+                K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE,
             },
             system::system_clock::Seconds32,
             CompressedFabricId, FabricId, NodeId, ScopedNodeId, VendorId,
@@ -8195,7 +8193,7 @@ mod fabric_table {
 
             // vvsc && vvs
             let vvsc = [1u8];
-            let vvs = [2u8];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
 
             assert!(table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
         }
