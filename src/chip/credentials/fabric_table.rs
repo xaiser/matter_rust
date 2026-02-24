@@ -322,6 +322,10 @@ pub mod fabric_info {
             return Ok(self.m_root_publick_key.clone());
         }
 
+        pub fn set_vendor_id(&mut self, vid: VendorId) {
+            self.m_vendor_id = vid;
+        }
+
         pub fn get_vendor_id(&self) -> VendorId {
             self.m_vendor_id
         }
@@ -1216,7 +1220,7 @@ mod fabric_table {
                 P256PublicKey, K_MIN_CSR_BUFFER_SIZE,
                 K_VENDOR_FABRIC_BINDING_MESSAGE_V1_SIZE, generate_vendor_fabric_binding_message, FabricBindingVersion,
                 K_VENDOR_ID_VERIFICATION_TBS_V1_MAX_SIZE, generate_vendor_id_verification_to_be_signed,
-                K_MAX_ECDSA_SIGNATURE_LENGTH,
+                K_MAX_ECDSA_SIGNATURE_LENGTH, K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE,
             },
             generate_compressed_fabric_id,
         },
@@ -3106,13 +3110,87 @@ mod fabric_table {
         }
 
         pub fn set_vid_verification_statement_elements(
-            &self,
-            _fabric_index: FabricIndex,
-            _vendor_id: Option<u16>,
-            _vid_verification_statement: Option<&[u8]>,
-            _vvsc: Option<&[u8]>,
+            &mut self,
+            fabric_index: FabricIndex,
+            vendor_id: Option<u16>,
+            vid_verification_statement: Option<&[u8]>,
+            vvsc: Option<&[u8]>,
         ) -> Result<bool, ChipError> {
-            Err(chip_error_not_implemented!())
+            verify_or_return_error!(is_valid_fabric_index(fabric_index), Err(chip_error_invalid_argument!()));
+
+            // PendingNew fabric means AddNOC had been called. ShadowPending fabric is the overlay version
+            // that is used when UpdateNOC had been called. This is to detect either condition of not
+            // fully committed fabric.
+            let is_target_fabric_pending: bool;
+            let target_vendor_id;
+            if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                is_target_fabric_pending = 
+                    self.get_pending_new_fabric_index() == fabric_index || 
+                    self.get_shadow_pending_fabric_entry().is_some_and(|info| info.get_fabric_index() == fabric_index);
+                target_vendor_id = info.get_vendor_id();
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
+
+            let mut fabric_table_was_changed = false;
+
+            if let Some(vvsc_buf) = vvsc {
+                unsafe {
+                    if let Some(store) = self.m_op_cert_store.as_mut() {
+                        if store.has_certificate_for_fabric(fabric_index, CertChainElement::Kicac) {
+                            chip_log_error!(FabricProvisioning,
+                                "Received set_vid_verification_statement storage request with VVSC when ICAC already present. ICAC mut be removed first."
+                            );
+                            return Err(chip_error_incorrect_state!());
+                        }
+
+                        store.update_vid_verification_signer_cert_for_fabric(fabric_index, vvsc_buf)?;
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                }
+            }
+
+            if let Some(vid_verification_statement_buf) = vid_verification_statement {
+                unsafe {
+                    if let Some(store) = self.m_op_cert_store.as_mut() {
+                        let was_vvs_equal;
+                        {
+                            let mut vid_verification_statement_buffer = [0u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+                            let size = store.get_vid_verification_element(fabric_index, VidVerificationElement::KvidVerificationStatement, &mut vid_verification_statement_buffer)?;
+                            was_vvs_equal = vid_verification_statement_buf == &vid_verification_statement_buffer[..size];
+                        }
+
+                        if !was_vvs_equal {
+                            store.update_vid_verification_statement_for_fabric(fabric_index, vid_verification_statement_buf)?;
+                            fabric_table_was_changed = true;
+                        }
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                }
+            }
+
+            if let Some(vid) = vendor_id {
+                if (target_vendor_id as u16) != vid {
+                    if let Some(info) = self.get_mutable_fabric_by_index(fabric_index) {
+                        info.set_vendor_id(VendorId::from(vid));
+                    } else {
+                        return Err(chip_error_invalid_argument!());
+                    }
+
+                    if !is_target_fabric_pending {
+                        if let Some(info) = self.find_fabric_with_index(fabric_index) {
+                            self.store_fabric_metadata(info)?;
+                            fabric_table_was_changed = true;
+                        } else {
+                            return Err(chip_error_invalid_argument!());
+                        }
+                    }
+                }
+            }
+
+            Ok(fabric_table_was_changed)
         }
 
         fn get_mutable_fabric_by_index(
@@ -6457,7 +6535,7 @@ mod fabric_table {
             let fabric_id: FabricId = 2;
 
             // create a noc and a rcac
-            let (rcac_cert, rcac, _, noc) = make_x509_cert_chain_2();
+            let (rcac_cert, rcac, _, _, noc, _) = make_x509_cert_chain_2();
             // only update rcac to storage
             assert_eq!(
                 true,
@@ -8042,9 +8120,6 @@ mod fabric_table {
 
             // first, commit a valid fabric to table
             {
-                // specify index
-                assert!(table.set_fabric_index_for_next_addition(fabric_index).is_ok());
-
                 // insert root first
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
@@ -8061,6 +8136,68 @@ mod fabric_table {
             let mut out = SignVidVerificationResponseData::default();
 
             assert!(table.sign_vid_verification_request(fabric_index, &challenge, &attestation, &mut out).is_ok());
+        }
+
+        #[test]
+        fn sign_vid_verification_request_no_fabric() {
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+
+            let table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // challenge&attestation stubs
+            let challenge = [1u8; K_VENDOR_ID_VERIFICATION_CLIENT_CHALLENGE_SIZE];
+            let attestation = [2u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+
+            let mut out = SignVidVerificationResponseData::default();
+
+            assert!(!table.sign_vid_verification_request(fabric_index, &challenge, &attestation, &mut out).is_ok());
+        }
+
+        #[test]
+        fn set_vid_verification_statement_successfully() {
+            let (_, rcac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_2();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                assert_eq!(1, table.fabric_count());
+                assert!(table.commit_pending_fabric_data().is_ok());
+            }
+
+            // vvsc && vvs
+            let vvsc = [1u8];
+            let vvs = [2u8];
+
+            assert!(table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
         }
     } // end of mod tests
 } // end of mod fabric_table

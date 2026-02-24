@@ -576,7 +576,7 @@ mod chip_certificate_set {
 
         type CheckResultValidate<'a> = ValidationContext<'a, CheckResultPolicy>;
 
-        pub fn make_x509_cert_chain_2() -> (ChipCertificateData, CertBuffer, ChipCertificateData, CertBuffer) {
+        pub fn make_x509_cert_chain_2() -> (ChipCertificateData, CertBuffer, P256Keypair, ChipCertificateData, CertBuffer, P256Keypair) {
             let expected_not_before: u32 = 1;
             let expected_not_after: u32 = 100;
             let mut root_keypair = P256Keypair::default();
@@ -586,6 +586,7 @@ mod chip_certificate_set {
             let (root_cert, root_buffer, root_dn) = {
                 //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 let mut subject_dn = ChipDN::default();
+                let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterFabricId as Oid, 2 as u64);
                 let _ = subject_dn.add_attribute(crate::chip::asn1::Asn1Oid::KoidAttributeTypeMatterRCACId as Oid, 1 as u64);
                 let empty_dn = ChipDN::default();
                 let mut random_keypair = P256Keypair::default();
@@ -628,7 +629,7 @@ mod chip_certificate_set {
                 (noc, noc_buffer)
             };
 
-            (root_cert, root_buffer, noc_cert, noc_buffer)
+            (root_cert, root_buffer, root_keypair, noc_cert, noc_buffer, noc_keypair)
         } // end of make_chip_cert_chain_2
           
         pub fn make_x509_cert_chain_3_with_keypair() -> 
@@ -649,7 +650,6 @@ mod chip_certificate_set {
                 let _ = random_keypair.initialize(ECPKeyTarget::Ecdh);
                 let root_buffer = make_chip_cert_with_ids_and_times(&subject_dn, &empty_dn, root_keypair.public_key().const_bytes(),
                     &root_key_id, &root_key_id, expected_not_before, expected_not_after, Some(&random_keypair), CertType::Kroot).unwrap();
-                //let root_buffer = make_ca_cert(1, root_keypair.public_key().const_bytes()).unwrap();
                 // load as trust anchor
                 let mut root = ChipCertificateData::default();
                 assert!(
@@ -1802,7 +1802,7 @@ mod chip_certificate_set {
 
         #[test]
         fn test_make_chain_2() {
-            let (root, _, noc, _) = make_x509_cert_chain_2();
+            let (root, _, _, noc, _, _) = make_x509_cert_chain_2();
             let root_buffer = make_chip_cert_by_data(&root).unwrap();
             let noc_buffer = make_chip_cert_by_data(&noc).unwrap();
             let mut sets = ChipCertificateSet::new();
