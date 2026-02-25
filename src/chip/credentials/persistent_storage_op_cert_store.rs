@@ -437,7 +437,14 @@ where
                     return self.m_pending_noc.is_some();
                 }
                 CertChainElement::Kicac => {
-                    return self.m_pending_icac.is_some();
+                    if self.m_pending_icac.is_some() {
+                        return true;
+                    }
+                    // If we have a pending NOC and no pending ICAC, don't delegate to storage, return not found here
+                    // since in the pending state, there truly is nothing.
+                    if self.m_pending_noc.is_some() {
+                        return false;
+                    }
                 }
                 CertChainElement::Krcac => {
                     return self.m_pending_rcac.is_some();
@@ -565,10 +572,10 @@ where
         let mut icac_buf = CertBuffer::default();
         if icac.len() > 0 {
             icac_buf.init(icac)?;
+            self.m_pending_icac = Some(icac_buf);
         }
 
         self.m_pending_noc = Some(noc_buf);
-        self.m_pending_icac = Some(icac_buf);
 
         self.m_state_flag.insert(StateFlags::KaddNewOpCertsCalled);
 
@@ -640,10 +647,10 @@ where
         let mut icac_buf = CertBuffer::default();
         if icac.len() > 0 {
             icac_buf.init(icac)?;
+            self.m_pending_icac = Some(icac_buf);
         }
 
         self.m_pending_noc = Some(noc_buf);
-        self.m_pending_icac = Some(icac_buf);
 
         self.m_pending_fabric_index = fabric_index;
 

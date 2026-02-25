@@ -8197,5 +8197,177 @@ mod fabric_table {
 
             assert!(table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
         }
+
+        #[test]
+        fn set_vid_verification_statement_no_fabric() {
+            //let (_, rcac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_2();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // vvsc && vvs
+            let vvsc = [1u8];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+
+            assert!(!table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
+        }
+
+        #[test]
+        fn set_vid_verification_statement_with_pending_fabric_successfully() {
+            let (_, rcac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_2();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+            }
+
+            // vvsc && vvs
+            let vvsc = [1u8];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+
+            assert!(table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
+        }
+
+        #[test]
+        fn set_vid_verification_statement_with_icac() {
+            let (_, rcac_buf, _, _, icac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_3_with_keypair();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                assert_eq!(1, table.fabric_count());
+                assert!(table.commit_pending_fabric_data().is_ok());
+            }
+
+            // vvsc && vvs
+            let vvsc = [1u8];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+
+            assert!(!table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
+        }
+
+        #[test]
+        fn set_vid_verification_statement_invalid_vvsc() {
+            let (_, rcac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_2();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                assert_eq!(1, table.fabric_count());
+                assert!(table.commit_pending_fabric_data().is_ok());
+            }
+
+            // vvsc && vvs
+            let vvsc = [1u8; K_MAX_CHIP_CERT_LENGTH + 1];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE];
+
+            assert!(!table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
+        }
+
+        #[test]
+        fn set_vid_verification_statement_invalid_vvs() {
+            let (_, rcac_buf, _, _, noc_buf, noc_keypair) = make_x509_cert_chain_2();
+
+            let mut pa = TestPersistentStorage::default();
+            let mut ks = OK::default();
+            let mut pos = OCS::default();
+
+            let fabric_index = KMIN_VALID_FABRIC_INDEX;
+
+            let _ = pos.init(ptr::addr_of_mut!(pa));
+            let vendor_id = 3u16;
+
+            let mut table = create_table_with_param(
+                ptr::addr_of_mut!(pa),
+                ptr::addr_of_mut!(ks),
+                ptr::addr_of_mut!(pos),
+            );
+
+            // first, commit a valid fabric to table
+            {
+                // insert root first
+                assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
+
+                assert!(
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                assert_eq!(1, table.fabric_count());
+                assert!(table.commit_pending_fabric_data().is_ok());
+            }
+
+            // vvsc && vvs
+            let vvsc = [1u8; K_MAX_CHIP_CERT_LENGTH];
+            let vvs = [2u8; K_VENDOR_ID_VERIFICATION_STATEMENT_V1_SIZE - 1];
+
+            assert!(!table.set_vid_verification_statement_elements(fabric_index, Some(vendor_id), Some(&vvs), Some(&vvsc)).is_ok_and(|changed| changed));
+        }
     } // end of mod tests
 } // end of mod fabric_table
