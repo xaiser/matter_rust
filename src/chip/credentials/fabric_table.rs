@@ -2574,45 +2574,46 @@ mod fabric_table {
 
         pub fn add_new_pending_fabric_with_operational_keystore(
             &mut self,
-            _noc: &[u8],
-            _icac: &[u8],
-            _vendor_id: u16,
-            _advertise_identity: Option<AdvertiseIdentity>,
+            noc: &[u8],
+            icac: &[u8],
+            vendor_id: u16,
+            advertise_identity: AdvertiseIdentity,
         ) -> Result<FabricIndex, ChipError> {
-            Err(chip_error_not_implemented!())
+            return self.add_new_pending_fabric_common(noc, icac, vendor_id, None, false, advertise_identity);
         }
 
         pub fn add_new_pending_fabric_with_provided_op_key(
             &mut self,
-            _noc: &[u8],
-            _icac: &[u8],
-            _vendor_id: u16,
-            _existeding_op_key: &P256Keypair,
-            _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: Option<AdvertiseIdentity>,
+            noc: &[u8],
+            icac: &[u8],
+            vendor_id: u16,
+            existeding_op_key: Option<&'a P256Keypair>,
+            is_existing_op_key_externally_owned: bool,
+            advertise_identity: AdvertiseIdentity,
         ) -> Result<FabricIndex, ChipError> {
-            Err(chip_error_not_implemented!())
+            return self.add_new_pending_fabric_common(noc, icac, vendor_id, existeding_op_key, is_existing_op_key_externally_owned, advertise_identity);
         }
 
         pub fn update_pending_fabric_with_operational_keystore(
             &mut self,
-            _fabric_index: FabricIndex,
-            _noc: &[u8],
-            _icac: &[u8],
-            _advertise_identity: Option<AdvertiseIdentity>,
+            fabric_index: FabricIndex,
+            noc: &[u8],
+            icac: &[u8],
+            advertise_identity: AdvertiseIdentity,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            return self.update_pending_fabric_common(fabric_index, noc, icac, None, false, advertise_identity);
         }
 
         pub fn update_pending_fabric_with_provided_op_key(
             &mut self,
-            _noc: &[u8],
-            _icac: &[u8],
-            _existeding_op_key: &P256Keypair,
-            _is_existing_op_key_externally_owned: bool,
-            _advertise_identity: Option<AdvertiseIdentity>,
+            fabric_index: FabricIndex,
+            noc: &[u8],
+            icac: &[u8],
+            existeding_op_key: Option<&'a P256Keypair>,
+            is_existing_op_key_externally_owned: bool,
+            advertise_identity: AdvertiseIdentity,
         ) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+            return self.update_pending_fabric_common(fabric_index, noc, icac, existeding_op_key, is_existing_op_key_externally_owned, advertise_identity);
         }
 
         pub fn commit_pending_fabric_data(&mut self) -> ChipErrorResult {
