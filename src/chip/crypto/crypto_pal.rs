@@ -785,13 +785,24 @@ pub struct SymmetricKeyHandle<const CONTEXT_SIZE: usize> {
     m_context: OpaqueContext<CONTEXT_SIZE>,
 }
 
+pub trait FromOpaqueContext<const CONTEXT_SIZE: usize> {
+    fn from_opaque_context(context: &OpaqueContext<CONTEXT_SIZE>) -> &Self;
+    fn from_opaque_context_mut(context: &mut OpaqueContext<CONTEXT_SIZE>) -> &mut Self;
+}
+
 impl<const CONTEXT_SIZE: usize> SymmetricKeyHandle<CONTEXT_SIZE> {
-    pub fn as_ref<T>(&self) -> &T {
-        unsafe { &*(self.m_context.m_opaque.as_ptr() as *const T) }
+    pub fn as_ref<T>(&self) -> &T
+        where
+            T: FromOpaqueContext<CONTEXT_SIZE>
+    {
+        T::from_opaque_context(&self.m_context)
     }
 
-    pub fn as_mut<T>(&mut self) -> &mut T {
-        unsafe { &mut *(self.m_context.m_opaque.as_mut_ptr() as *mut T) }
+    pub fn as_mut<T>(&mut self) -> &mut T
+        where
+            T: FromOpaqueContext<CONTEXT_SIZE>
+    {
+        T::from_opaque_context_mut(&mut self.m_context)
     }
 }
 
@@ -802,7 +813,7 @@ impl<const CONTEXT_SIZE: usize> Drop for SymmetricKeyHandle<CONTEXT_SIZE> {
 }
 
 #[repr(align(8))]
-struct OpaqueContext<const CONTEXT_SIZE: usize> {
+pub struct OpaqueContext<const CONTEXT_SIZE: usize> {
     pub m_opaque: [u8; CONTEXT_SIZE],
 }
 
@@ -815,6 +826,16 @@ impl<const CONTEXT_SIZE: usize> Default for OpaqueContext<CONTEXT_SIZE> {
 }
 
 pub type Symmetric128BitsKeyByteArray = [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+
+impl<const CONTEXT_SIZE: usize> FromOpaqueContext<CONTEXT_SIZE> for Symmetric128BitsKeyByteArray {
+    fn from_opaque_context(context: &OpaqueContext<CONTEXT_SIZE>) -> &Self {
+        unsafe { &*(context.m_opaque.as_ptr() as *const Self) }
+    }
+
+    fn from_opaque_context_mut(context: &mut OpaqueContext<CONTEXT_SIZE>) -> &mut Self {
+        unsafe { &mut *(context.m_opaque.as_mut_ptr() as *mut Self) }
+    }
+}
 
 pub type Symmetric128BitsKeyHandle = SymmetricKeyHandle<CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES>;
 
