@@ -1397,7 +1397,7 @@ pub fn derive_group_operational_credentials(
     chip_ok!()
 }
 
-struct HKDFSha;
+pub struct HKDFSha;
 
 impl HKDFSha {
     /*

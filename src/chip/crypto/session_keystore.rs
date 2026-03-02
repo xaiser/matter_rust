@@ -20,6 +20,13 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+pub struct SessionKeys{
+    pub i2r_key: Aes128KeyHandle,
+    pub r2i_key: Aes128KeyHandle,
+    pub attestation_challenge: AttestationChallenge,
+}
+
 pub trait SessionKeystore {
     /*
      * @brief Import raw key material and return a key handle for a key that be used to do AES 128 encryption.
@@ -94,9 +101,9 @@ pub trait SessionKeystore {
      *
      * Output is (i2rKey, r2iKey, attestation_challenge)
      */
-    fn derive_session_keys_aes128(&mut self, secret: &[u8], salt: &[u8], info: &[u8]) -> Result<(Aes128KeyHandle, Aes128KeyHandle, AttestationChallenge), ChipError>;
+    fn derive_session_keys_aes128(&mut self, secret: &[u8], salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError>;
 
-    fn derive_session_keys_hkdf(&mut self, secret: &HkdfKeyHandle, salt: &[u8], info: &[u8]) -> Result<(Aes128KeyHandle, Aes128KeyHandle, AttestationChallenge), ChipError>;
+    fn derive_session_keys_hkdf(&mut self, secret: &HkdfKeyHandle, salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError>;
 
     /*
      * @brief Persistently store an ICD key.
