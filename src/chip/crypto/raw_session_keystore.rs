@@ -1,9 +1,7 @@
 use crate::{
     ChipError,
-    ChipErrorResult,
     chip_core_error,
     chip_no_error,
-    chip_ok,
     chip_sdk_error,
     verify_or_return_error,
     verify_or_return_value,
@@ -17,7 +15,7 @@ use crate::{
         crypto::{
             session_keystore::{SessionKeystore, SessionKeys},
             Symmetric128BitsKeyByteArray, Aes128KeyHandle, Hmac128KeyHandle, HkdfKeyHandle, Symmetric128BitsKeyHandle,
-            P256EcdhDeriveSecret, AttestationChallenge, FromOpaqueContext, OpaqueContext, HKDFSha,
+            P256EcdhDeriveSecret, AttestationChallenge, FromOpaqueContext, OpaqueContext, HKDFSha, clear_secret_data,
         },
     },
 };
@@ -80,12 +78,15 @@ impl SessionKeystore for RawKeySessionKeystore {
         Ok(key)
     }
 
-    fn destroy_key_128bits(&mut self, _key: &mut Symmetric128BitsKeyHandle) -> ChipErrorResult {
-        Err(chip_error_internal!())
+    fn destroy_key_128bits(&mut self, key: &mut Symmetric128BitsKeyHandle) {
+        clear_secret_data(key.as_mut::<Symmetric128BitsKeyByteArray>());
     }
 
-    fn destroy_key_hkdf(&mut self, _key: &mut HkdfKeyHandle) -> ChipErrorResult {
-        Err(chip_error_internal!())
+    fn destroy_key_hkdf(&mut self, key: &mut HkdfKeyHandle) {
+        let raw_key = key.as_mut::<RawHkdfKeyHandle>();
+
+        clear_secret_data(&mut raw_key.data);
+        raw_key.size = 0;
     }
 
     fn drive_key(&mut self, secret: &P256EcdhDeriveSecret, salt: &[u8], info: &[u8]) -> Result<Aes128KeyHandle, ChipError> {
@@ -117,8 +118,8 @@ impl SessionKeystore for RawKeySessionKeystore {
         }
     }
 
-    fn derive_session_keys_hkdf(&mut self, _secret: &HkdfKeyHandle, _salt: &[u8], _info: &[u8]) -> Result<SessionKeys, ChipError> {
-        Err(chip_error_internal!())
+    fn derive_session_keys_hkdf(&mut self, secret: &HkdfKeyHandle, salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError> {
+        return self.derive_session_keys_aes128(secret.as_ref::<RawHkdfKeyHandle>().as_ref().ok_or(chip_error_internal!())?, salt, info);
     }
 
     fn persist_icd_key(&mut self) -> Result<Symmetric128BitsKeyHandle, ChipError> {

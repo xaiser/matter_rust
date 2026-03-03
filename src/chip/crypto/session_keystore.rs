@@ -11,7 +11,6 @@
  */
 use crate::{
     ChipError,
-    ChipErrorResult,
     chip::{
         crypto::{
             Symmetric128BitsKeyByteArray, Aes128KeyHandle, Hmac128KeyHandle, HkdfKeyHandle, Symmetric128BitsKeyHandle,
@@ -71,8 +70,8 @@ pub trait SessionKeystore {
      * As a result of calling this method, the handle is put in the uninitialized state.
      */
 
-    fn destroy_key_128bits(&mut self, key: &mut Symmetric128BitsKeyHandle) -> ChipErrorResult;
-    fn destroy_key_hkdf(&mut self, key: &mut HkdfKeyHandle) -> ChipErrorResult;
+    fn destroy_key_128bits(&mut self, key: &mut Symmetric128BitsKeyHandle);
+    fn destroy_key_hkdf(&mut self, key: &mut HkdfKeyHandle);
 
     /****************************
      * SessionKeyDerivation APIs

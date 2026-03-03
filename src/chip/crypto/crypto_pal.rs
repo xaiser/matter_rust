@@ -225,7 +225,9 @@ pub enum ECPKeyTarget {
     Ecdsa = 1,
 }
 
-pub fn clear_secret_data(buf: &mut [u8]) {}
+pub fn clear_secret_data(buf: &mut [u8]) {
+    buf.fill(0);
+}
 
 pub fn clear_secret_data_with_raw(buf: *mut u8, len: usize) {
     unsafe {
