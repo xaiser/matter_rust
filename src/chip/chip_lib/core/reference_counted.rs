@@ -39,6 +39,23 @@ where
     fn get_reference_count(&self) -> Self::CounterType;
 }
 
+mod v1 {
+    use core::ptr::{self, NonNull};
+    use core::marker::PhantomData;
+    use core::cell::Cell;
+    #[repr(C, align(2))]
+    struct RcInner<T: ?Sized> {
+        strong: Cell<usize>,
+        weak: Cell<usize>,
+        value: T,
+    }
+
+    pub struct Rc<T: ?Sized> {
+        ptr: NonNull<RcInner<T>>,
+        _phantom: PhantomData<Cell<RcInner<T>>>,
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
