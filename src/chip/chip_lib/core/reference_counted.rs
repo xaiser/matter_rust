@@ -40,19 +40,51 @@ where
 }
 
 mod v1 {
+    /* a version copied from std::alloc::rc with a Deleter */
     use core::ptr::{self, NonNull};
     use core::marker::PhantomData;
     use core::cell::Cell;
+
+    pub struct Weak<T> {
+        ptr: NonNull<RcInner<T>>,
+    }
+
     #[repr(C, align(2))]
-    struct RcInner<T: ?Sized> {
+    struct RcInner<T> {
         strong: Cell<usize>,
         weak: Cell<usize>,
         value: T,
     }
 
-    pub struct Rc<T: ?Sized> {
+    pub struct Rc<T> {
         ptr: NonNull<RcInner<T>>,
         _phantom: PhantomData<Cell<RcInner<T>>>,
+    }
+
+    impl<T> Rc<T> {
+        #[inline]
+        unsafe fn from_inner(ptr: NonNull<RcInner<T>>) -> Self {
+            Self { ptr, _phantom: PhantomData }
+        }
+
+        #[inline]
+        unsafe fn from_ptr(ptr: * mut RcInner<T>) -> Self {
+            Self { ptr: NonNull::new_unchecked(ptr), _phantom: PhantomData }
+        }
+
+        #[inline(never)]
+        unsafe fn drop_slow(&mut self) {
+            let _weak = Weak {ptr: self.ptr};
+
+            unsafe {
+                ptr::drop_in_place(&mut (*self.ptr.as_ptr()).value);
+            }
+        }
+
+        pub fn new(value: T) -> Rc<T> {
+            unsafe {
+            }
+        }
     }
 }
 
