@@ -41,12 +41,82 @@ where
 
 mod v1 {
     /* a version copied from std::alloc::rc with a Deleter */
+    use crate::chip::{
+        chip_lib::support::pool::{KInline, ObjectPool},
+    };
     use core::ptr::{self, NonNull};
     use core::marker::PhantomData;
     use core::cell::Cell;
+    use core::num::NonZeroUsize;
+
+    pub trait Deleter<T> {
+        fn release(obj: &mut RcInner<T>);
+    }
+
+    trait RcInnerPtr {
+        fn weak_ref(&self) -> &Cell<usize>;
+        fn strong_ref(&self) -> &Cell<usize>;
+
+        #[inline]
+        fn strong(&self) -> usize {
+            self.strong_ref().get()
+        }
+
+        #[inline]
+        fn inc_strong(&self) {
+            let strong = self.strong();
+
+            let strong = strong.wrapping_add(1);
+            self.strong_ref().set(strong);
+
+            // TODO: maybe only run this in debug build
+            if strong == 0 {
+                panic!("rc inc strong wrong");
+            }
+        }
+
+        #[inline]
+        fn dec_strong(&self) {
+            self.strong_ref().set(self.strong() - 1)
+        }
+
+        #[inline]
+        fn weak(&self) -> usize {
+            self.weak_ref().get()
+        }
+
+        #[inline]
+        fn inc_weak(&self) {
+            let weak = self.weak();
+
+            let weak = weak.wrapping_add(1);
+            self.weak_ref().set(weak);
+
+            //TODO: maybe only run this in debug build
+            if weak == 0 {
+                panic!("rc inc weak wrong");
+            }
+        }
+
+        #[inline]
+        fn dec_weak(&self) {
+            self.weak_ref().set(self.weak() - 1)
+        }
+
+    }
 
     pub struct Weak<T> {
         ptr: NonNull<RcInner<T>>,
+    }
+
+    impl<T> Weak<T> {
+        pub const fn new() -> Weak<T> {
+            Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX) }
+        }
+    }
+
+    pub(crate) fn is_dangling<T>(ptr: *const T) -> bool {
+        (ptr.cast::<()>()).addr() == usize::MAX
     }
 
     #[repr(C, align(2))]
@@ -56,34 +126,67 @@ mod v1 {
         value: T,
     }
 
-    pub struct Rc<T> {
-        ptr: NonNull<RcInner<T>>,
-        _phantom: PhantomData<Cell<RcInner<T>>>,
+    impl<T> RcInnerPtr for RcInner<T> {
+        #[inline(always)]
+        fn weak_ref(&self) -> &Cell<usize> {
+            &self.weak
+        }
+        #[inline(always)]
+        fn strong_ref(&self) -> &Cell<usize> {
+            &self.strong
+        }
     }
 
-    impl<T> Rc<T> {
+    pub struct Rc<T, D: Deleter<T>> {
+        ptr: NonNull<RcInner<T>>,
+        _phantom: PhantomData<Cell<RcInner<T>>>,
+        _phantomD: PhantomData<D>,
+    }
+
+    impl<T, D: Deleter<T>> Rc<T, D> {
         #[inline]
         unsafe fn from_inner(ptr: NonNull<RcInner<T>>) -> Self {
-            Self { ptr, _phantom: PhantomData }
+            Self { ptr, _phantom: PhantomData, _phantomD: PhantomData }
         }
 
         #[inline]
         unsafe fn from_ptr(ptr: * mut RcInner<T>) -> Self {
-            Self { ptr: NonNull::new_unchecked(ptr), _phantom: PhantomData }
+            Self { ptr: NonNull::new_unchecked(ptr), _phantom: PhantomData, _phantomD: PhantomData }
+        }
+
+        #[inline(always)]
+        fn inner(&self) -> &RcInner<T> {
+            unsafe { self.ptr.as_ref() }
         }
 
         #[inline(never)]
         unsafe fn drop_slow(&mut self) {
-            let _weak = Weak {ptr: self.ptr};
+            <D as Deleter<T>>::release(self.ptr.as_mut())
+        }
 
+        pub fn new_from_object_pool<M, A: ObjectPool<RcInner<T>, M>>(value: T, alloac: &mut A) -> Rc<T, D> {
+            let obj = alloac.create_object(RcInner {strong: Cell::new(1), weak: Cell::new(1), value});
             unsafe {
-                ptr::drop_in_place(&mut (*self.ptr.as_ptr()).value);
+                Self::from_ptr(obj)
             }
         }
 
-        pub fn new(value: T) -> Rc<T> {
-            unsafe {
+        pub fn try_new_from_object_pool<M, A: ObjectPool<RcInner<T>, M>>(value: T, alloac: &mut A) -> Result<Rc<T, D>, ()> {
+            let obj = alloac.create_object(RcInner {strong: Cell::new(1), weak: Cell::new(1), value});
+
+            if obj.is_null() {
+                return Err(());
             }
+
+            unsafe {
+                Ok(Self::from_ptr(obj))
+            }
+        }
+
+        pub fn as_ptr(this: &Self) -> * const T {
+            let ptr: * mut RcInner<T> = NonNull::as_ptr(this.ptr);
+
+            unsafe { &raw mut (*ptr).value }
         }
     }
 }
