@@ -48,6 +48,7 @@ mod v1 {
     use core::marker::PhantomData;
     use core::cell::Cell;
     use core::num::NonZeroUsize;
+    use core::ops::Deref;
 
     pub trait Deleter<T> {
         fn release(obj: &mut RcInner<T>);
@@ -119,6 +120,22 @@ mod v1 {
         (ptr.cast::<()>()).addr() == usize::MAX
     }
 
+    struct WeakInner<'a> {
+        weak: &'a Cell<usize>,
+        strong: &'a Cell<usize>,
+    }
+
+    impl<'a> RcInnerPtr for WeakInner<'a> {
+        #[inline(always)]
+        fn weak_ref(&self) -> &Cell<usize> {
+            self.weak
+        }
+        #[inline(always)]
+        fn strong_ref(&self) -> &Cell<usize> {
+            self.strong
+        }
+    }
+
     #[repr(C, align(2))]
     struct RcInner<T> {
         strong: Cell<usize>,
@@ -187,6 +204,71 @@ mod v1 {
             let ptr: * mut RcInner<T> = NonNull::as_ptr(this.ptr);
 
             unsafe { &raw mut (*ptr).value }
+        }
+
+        pub fn downgrade(this: &Self) -> Weak<T> {
+            this.inner().inc_weak();
+
+            Weak{ ptr: this.ptr }
+        }
+
+        pub fn weak_count(this: &Self) -> usize {
+            this.inner().weak() - 1
+        }
+
+        pub fn strong_count(this: &Self) -> usize {
+            this.inner().strong()
+        }
+
+        #[inline]
+        pub fn is_unique(this: &Self) -> bool {
+            Rc::weak_count(this) == 0 && Rc::strong_count(this) == 1
+        }
+
+        #[inline]
+        pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+            if Rc::is_unique(this) { unsafe { Some(Rc::get_mut_unchecked(this)) } } else { None }
+        }
+
+        #[inline]
+        pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
+            unsafe { &mut (*this.ptr.as_ptr()).value }
+        }
+
+        #[inline]
+        pub fn ptr_eq(this: &Self, other: &Self) -> bool {
+            ptr::addr_eq(this.ptr.as_ptr(), other.ptr.as_ptr())
+        }
+    }
+
+    impl<T, D: Deleter<T>> Deref for Rc<T, D> {
+        type Target = T;
+
+        #[inline(always)]
+        fn deref(&self) -> &T {
+            &self.inner().value
+        }
+    }
+
+    impl<T, D: Deleter<T>> Drop for Rc<T, D> {
+        #[inline]
+        fn drop(&mut self) {
+            unsafe {
+                self.inner().dec_strong();
+                if self.inner().strong() == 0 {
+                    self.drop_slow();
+                }
+            }
+        }
+    }
+
+    impl<T, D: Deleter<T>> Clone for Rc<T, D> {
+        #[inline]
+        fn clone(&self) -> Self {
+            unsafe {
+                self.inner().inc_strong();
+                Self::from_inner(self.ptr)
+            }
         }
     }
 }
