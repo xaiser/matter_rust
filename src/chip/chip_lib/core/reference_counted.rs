@@ -106,15 +106,94 @@ mod v1 {
 
     }
 
-    pub struct Weak<T> {
+    pub struct Weak<T, D: Deleter<T>> {
         ptr: NonNull<RcInner<T>>,
+        _phantomD: PhantomData<D>,
     }
 
-    impl<T> Weak<T> {
-        pub const fn new() -> Weak<T> {
-            Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX) }
+    impl<T, D: Deleter<T>> Weak<T, D> {
+        pub const fn new() -> Weak<T, D> {
+            Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX), _phantomD: PhantomData }
+        }
+
+        pub fn as_ptr(&self) -> * const T {
+            let ptr: * mut RcInner<T> = NonNull::as_ptr(self.ptr);
+
+            if is_dangling(ptr) {
+                ptr as * const T
+            } else {
+                unsafe { &raw mut (*ptr).value }
+            }
+        }
+
+        pub fn upgrade(&self) -> Option<Rc<T, D>> {
+            let inner = self.inner()?;
+
+            if inner.strong() == 0 {
+                None
+            } else {
+                unsafe {
+                    inner.inc_strong();
+                    Some(Rc::from_inner(self.ptr))
+                }
+            }
+        }
+
+        pub fn strong_count(&self) -> usize {
+            if let Some(inner) = self.inner() { inner.strong() } else { 0 }
+        }
+
+        pub fn weak_count(&self) -> usize {
+            if let Some(inner) = self.inner() { inner.weak() } else { 0 }
+        }
+
+        pub fn ptr_eq(&self, other: &Self) -> bool {
+            ptr::addr_eq(self.ptr.as_ptr(), other.ptr.as_ptr())
+        }
+
+        #[inline]
+        fn inner(&self) -> Option<WeakInner<'_>> {
+            if is_dangling(self.ptr.as_ptr()) {
+                None
+            } else {
+                Some( unsafe {
+                    let ptr = self.ptr.as_ptr();
+                    WeakInner { strong: &(*ptr).strong, weak: &(*ptr).weak }
+                })
+            }
         }
     }
+
+    impl<T, D: Deleter<T>> Drop for Weak<T, D> {
+        fn drop(&mut self) {
+            let inner = if let Some(inner) = self.inner() { inner } else { return };
+
+            inner.dec_weak();
+
+            if inner.weak() == 0 {
+                unsafe {
+                    <D as Deleter<T>>::release(self.ptr.as_mut());
+                }
+            }
+        }
+    }
+
+    impl<T, D: Deleter<T>> Clone for Weak<T, D> {
+        fn clone(&self) -> Self {
+            if let Some(inner) = self.inner() {
+                inner.inc_weak()
+            }
+
+            Weak { ptr: self.ptr, _phantomD: PhantomData }
+        }
+    }
+
+    impl<T, D: Deleter<T>> Default for Weak<T, D> {
+        fn default() -> Self {
+            Weak::new()
+        }
+    }
+
 
     pub(crate) fn is_dangling<T>(ptr: *const T) -> bool {
         (ptr.cast::<()>()).addr() == usize::MAX
@@ -178,7 +257,11 @@ mod v1 {
 
         #[inline(never)]
         unsafe fn drop_slow(&mut self) {
-            <D as Deleter<T>>::release(self.ptr.as_mut())
+            let _weak = Weak { ptr: self.ptr, _phantomD: PhantomData::<D> };
+
+            unsafe {
+                ptr::drop_in_place(&mut (*self.ptr.as_ptr()).value);
+            }
         }
 
         pub fn new_from_object_pool<M, A: ObjectPool<RcInner<T>, M>>(value: T, alloac: &mut A) -> Rc<T, D> {
@@ -206,10 +289,10 @@ mod v1 {
             unsafe { &raw mut (*ptr).value }
         }
 
-        pub fn downgrade(this: &Self) -> Weak<T> {
+        pub fn downgrade(this: &Self) -> Weak<T, D> {
             this.inner().inc_weak();
 
-            Weak{ ptr: this.ptr }
+            Weak{ ptr: this.ptr, _phantomD: PhantomData }
         }
 
         pub fn weak_count(this: &Self) -> usize {
@@ -271,6 +354,58 @@ mod v1 {
             }
         }
     }
+
+    impl<T, D: Deleter<T>> AsRef<T> for Rc<T, D> {
+        fn as_ref(&self) -> &T {
+            &**self
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::create_object_pool;
+        use crate::chip::chip_lib::support::pool::{ObjectPool, KInline, BitMapObjectPool};
+        use super::*;
+
+        struct StubDeleter {
+        }
+
+        struct StubElement {
+            pub pool: * mut TestPool,
+            pub value: u8,
+        }
+
+        impl StubElement {
+            pub fn new(value: u8, pool: * mut TestPool) -> Self {
+                Self {
+                    pool,
+                    value
+                }
+            }
+        }
+
+        impl Deleter<StubElement> for StubDeleter { 
+            fn release(obj: &mut RcInner<StubElement>) { 
+                unsafe {
+                    if let Some(pool) = obj.get_mut_unchecked().pool.as_mut() {
+                        pool.release_object(obj);
+                    }
+                }
+            }
+        }
+
+        const POOL_SIZE: usize = 1;
+
+        type TestRcInner = RcInner<StubElement>;
+        type TestRc = Rc<StubElement, StubDeleter>;
+        type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
+
+        #[test]
+        fn new_rc_successfully() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            assert!(TestRc::try_new_from_object_pool::<KInline, TestPool>(StubElement::new(0, ptr::addr_of_mut!(pool)), &mut pool).is_ok());
+        }
+    } // end of mod tests
 }
 
 #[cfg(test)]
