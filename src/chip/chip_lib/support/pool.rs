@@ -3,6 +3,7 @@ use super::internal::pool::Statistics;
 use super::internal::pool::K_BIT1;
 use super::internal::pool::K_BIT_CHUNK_SIZE;
 use super::iterators::Loop;
+use crate::chip::chip_lib::core::reference_counted::rc::{Allocator, RcInner};
 use crate::verify_or_die;
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -163,6 +164,30 @@ where
             }
         }
         ptr::null_mut()
+    }
+}
+
+impl<ElementType, const N: usize> Allocator<ElementType>
+    for BitMapObjectPool<RcInner<ElementType>, N>
+where
+    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+{
+    fn allocate(&mut self, init_value: RcInner<ElementType>) -> Result<* mut RcInner<ElementType>, ()> {
+        let obj = self.allocate(init_value);
+        if obj.is_null() {
+            return Err(());
+        }
+
+        Ok(obj)
+    }
+
+    fn deallocate(&mut self, obj: &mut RcInner<ElementType>) {
+        let element = ptr::from_mut(obj);
+        unsafe {
+            ptr::drop_in_place(element);
+        }
+
+        self.deallocate(element);
     }
 }
 

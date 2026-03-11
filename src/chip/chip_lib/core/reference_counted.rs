@@ -39,7 +39,7 @@ where
     fn get_reference_count(&self) -> Self::CounterType;
 }
 
-mod v1 {
+pub mod rc {
     /* a version copied from std::alloc::rc with a Deleter */
     use crate::chip::{
         chip_lib::support::pool::{KInline, ObjectPool},
@@ -50,8 +50,16 @@ mod v1 {
     use core::num::NonZeroUsize;
     use core::ops::Deref;
 
+    /*
     pub trait Deleter<T> {
         fn release(obj: &mut RcInner<T>);
+    }
+    */
+
+    pub trait Allocator<T> {
+        fn allocate(&mut self, init_value: RcInner<T>) -> Result<* mut RcInner<T>, ()>;
+
+        fn deallocate(&mut self, obj: &mut RcInner<T>);
     }
 
     trait RcInnerPtr {
@@ -106,14 +114,14 @@ mod v1 {
 
     }
 
-    pub struct Weak<T, D: Deleter<T>> {
+    pub struct Weak<T, A: Allocator<T>> {
         ptr: NonNull<RcInner<T>>,
-        _phantomD: PhantomData<D>,
+        alloc: * mut A,
     }
 
-    impl<T, D: Deleter<T>> Weak<T, D> {
-        pub const fn new() -> Weak<T, D> {
-            Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX), _phantomD: PhantomData }
+    impl<T, A: Allocator<T>> Weak<T, A> {
+        pub const fn new() -> Weak<T, A> {
+            Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX), alloc: ptr::null_mut() }
         }
 
         pub fn as_ptr(&self) -> * const T {
@@ -126,7 +134,7 @@ mod v1 {
             }
         }
 
-        pub fn upgrade(&self) -> Option<Rc<T, D>> {
+        pub fn upgrade(&self) -> Option<Rc<T, A>> {
             let inner = self.inner()?;
 
             if inner.strong() == 0 {
@@ -134,7 +142,7 @@ mod v1 {
             } else {
                 unsafe {
                     inner.inc_strong();
-                    Some(Rc::from_inner(self.ptr))
+                    Some(Rc::from_inner_in(self.ptr, self.alloc))
                 }
             }
         }
@@ -164,7 +172,7 @@ mod v1 {
         }
     }
 
-    impl<T, D: Deleter<T>> Drop for Weak<T, D> {
+    impl<T, A: Allocator<T>> Drop for Weak<T, A> {
         fn drop(&mut self) {
             let inner = if let Some(inner) = self.inner() { inner } else { return };
 
@@ -172,23 +180,25 @@ mod v1 {
 
             if inner.weak() == 0 {
                 unsafe {
-                    <D as Deleter<T>>::release(self.ptr.as_mut());
+                    if let Some(a) = self.alloc.as_mut() {
+                        a.deallocate(self.ptr.as_mut());
+                    }
                 }
             }
         }
     }
 
-    impl<T, D: Deleter<T>> Clone for Weak<T, D> {
+    impl<T, A: Allocator<T>> Clone for Weak<T, A> {
         fn clone(&self) -> Self {
             if let Some(inner) = self.inner() {
                 inner.inc_weak()
             }
 
-            Weak { ptr: self.ptr, _phantomD: PhantomData }
+            Weak { ptr: self.ptr, alloc: self.alloc }
         }
     }
 
-    impl<T, D: Deleter<T>> Default for Weak<T, D> {
+    impl<T, A: Allocator<T>> Default for Weak<T, A> {
         fn default() -> Self {
             Weak::new()
         }
@@ -216,7 +226,7 @@ mod v1 {
     }
 
     #[repr(C, align(2))]
-    struct RcInner<T> {
+    pub struct RcInner<T> {
         strong: Cell<usize>,
         weak: Cell<usize>,
         value: T,
@@ -233,21 +243,21 @@ mod v1 {
         }
     }
 
-    pub struct Rc<T, D: Deleter<T>> {
+    pub struct Rc<T, A: Allocator<T>> {
         ptr: NonNull<RcInner<T>>,
+        alloc: * mut A,
         _phantom: PhantomData<Cell<RcInner<T>>>,
-        _phantomD: PhantomData<D>,
     }
 
-    impl<T, D: Deleter<T>> Rc<T, D> {
+    impl<T, A: Allocator<T>> Rc<T, A> {
         #[inline]
-        unsafe fn from_inner(ptr: NonNull<RcInner<T>>) -> Self {
-            Self { ptr, _phantom: PhantomData, _phantomD: PhantomData }
+        unsafe fn from_inner_in(ptr: NonNull<RcInner<T>>, alloc: * mut A) -> Self {
+            Self { ptr, alloc, _phantom: PhantomData}
         }
 
         #[inline]
-        unsafe fn from_ptr(ptr: * mut RcInner<T>) -> Self {
-            Self { ptr: NonNull::new_unchecked(ptr), _phantom: PhantomData, _phantomD: PhantomData }
+        unsafe fn from_ptr_in(ptr: * mut RcInner<T>, alloc: * mut A) -> Self {
+            Self { ptr: NonNull::new_unchecked(ptr), alloc, _phantom: PhantomData }
         }
 
         #[inline(always)]
@@ -257,30 +267,27 @@ mod v1 {
 
         #[inline(never)]
         unsafe fn drop_slow(&mut self) {
-            let _weak = Weak { ptr: self.ptr, _phantomD: PhantomData::<D> };
+            let _weak = Weak { ptr: self.ptr, alloc: self.alloc };
 
             unsafe {
                 ptr::drop_in_place(&mut (*self.ptr.as_ptr()).value);
             }
         }
 
-        pub fn new_from_object_pool<M, A: ObjectPool<RcInner<T>, M>>(value: T, alloac: &mut A) -> Rc<T, D> {
-            let obj = alloac.create_object(RcInner {strong: Cell::new(1), weak: Cell::new(1), value});
-            unsafe {
-                Self::from_ptr(obj)
-            }
+        /*
+        pub fn new_in(value: T, alloc: * mut A) -> Rc<T, A> {
+           // currently, we dont' have a reliable way to handle the error
         }
+        */
 
-        pub fn try_new_from_object_pool<M, A: ObjectPool<RcInner<T>, M>>(value: T, alloac: &mut A) -> Result<Rc<T, D>, ()> {
-            let obj = alloac.create_object(RcInner {strong: Cell::new(1), weak: Cell::new(1), value});
-
-            if obj.is_null() {
-                return Err(());
-            }
-
+        pub fn try_new_in(value: T, alloc: * mut A) -> Result<Rc<T, A>, ()> {
             unsafe {
-                Ok(Self::from_ptr(obj))
+                if let Some(a) = alloc.as_mut() {
+                    let obj = a.allocate(RcInner { strong: Cell::new(1), weak: Cell::new(1), value })?;
+                        return Ok(Self::from_ptr_in(obj, alloc));
+                }
             }
+            Err(())
         }
 
         pub fn as_ptr(this: &Self) -> * const T {
@@ -289,10 +296,10 @@ mod v1 {
             unsafe { &raw mut (*ptr).value }
         }
 
-        pub fn downgrade(this: &Self) -> Weak<T, D> {
+        pub fn downgrade(this: &Self) -> Weak<T, A> {
             this.inner().inc_weak();
 
-            Weak{ ptr: this.ptr, _phantomD: PhantomData }
+            Weak{ ptr: this.ptr, alloc: this.alloc }
         }
 
         pub fn weak_count(this: &Self) -> usize {
@@ -324,7 +331,7 @@ mod v1 {
         }
     }
 
-    impl<T, D: Deleter<T>> Deref for Rc<T, D> {
+    impl<T, A: Allocator<T>> Deref for Rc<T, A> {
         type Target = T;
 
         #[inline(always)]
@@ -333,7 +340,7 @@ mod v1 {
         }
     }
 
-    impl<T, D: Deleter<T>> Drop for Rc<T, D> {
+    impl<T, A: Allocator<T>> Drop for Rc<T, A> {
         #[inline]
         fn drop(&mut self) {
             unsafe {
@@ -345,17 +352,17 @@ mod v1 {
         }
     }
 
-    impl<T, D: Deleter<T>> Clone for Rc<T, D> {
+    impl<T, A: Allocator<T>> Clone for Rc<T, A> {
         #[inline]
         fn clone(&self) -> Self {
             unsafe {
                 self.inner().inc_strong();
-                Self::from_inner(self.ptr)
+                Self::from_inner_in(self.ptr, self.alloc)
             }
         }
     }
 
-    impl<T, D: Deleter<T>> AsRef<T> for Rc<T, D> {
+    impl<T, A: Allocator<T>> AsRef<T> for Rc<T, A> {
         fn as_ref(&self) -> &T {
             &**self
         }
@@ -371,25 +378,13 @@ mod v1 {
         }
 
         struct StubElement {
-            pub pool: * mut TestPool,
             pub value: u8,
         }
 
         impl StubElement {
-            pub fn new(value: u8, pool: * mut TestPool) -> Self {
+            pub fn new(value: u8) -> Self {
                 Self {
-                    pool,
                     value
-                }
-            }
-        }
-
-        impl Deleter<StubElement> for StubDeleter { 
-            fn release(obj: &mut RcInner<StubElement>) { 
-                unsafe {
-                    if let Some(pool) = obj.get_mut_unchecked().pool.as_mut() {
-                        pool.release_object(obj);
-                    }
                 }
             }
         }
@@ -397,13 +392,13 @@ mod v1 {
         const POOL_SIZE: usize = 1;
 
         type TestRcInner = RcInner<StubElement>;
-        type TestRc = Rc<StubElement, StubDeleter>;
         type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
+        type TestRc = Rc<StubElement, TestPool>;
 
         #[test]
         fn new_rc_successfully() {
             let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
-            assert!(TestRc::try_new_from_object_pool::<KInline, TestPool>(StubElement::new(0, ptr::addr_of_mut!(pool)), &mut pool).is_ok());
+            assert!(TestRc::try_new_in(StubElement::new(0), &mut pool).is_ok());
         }
     } // end of mod tests
 }
