@@ -50,12 +50,6 @@ pub mod rc {
     use core::num::NonZeroUsize;
     use core::ops::Deref;
 
-    /*
-    pub trait Deleter<T> {
-        fn release(obj: &mut RcInner<T>);
-    }
-    */
-
     pub trait Allocator<T> {
         fn allocate(&mut self, init_value: RcInner<T>) -> Result<* mut RcInner<T>, ()>;
 
@@ -371,7 +365,10 @@ pub mod rc {
     #[cfg(test)]
     mod tests {
         use crate::create_object_pool;
-        use crate::chip::chip_lib::support::pool::{ObjectPool, KInline, BitMapObjectPool};
+        use crate::chip::chip_lib::support::{
+            internal::pool::Statistics,
+            pool::{ObjectPool, KInline, BitMapObjectPool},
+        };
         use super::*;
 
         struct StubDeleter {
@@ -394,11 +391,137 @@ pub mod rc {
         type TestRcInner = RcInner<StubElement>;
         type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
         type TestRc = Rc<StubElement, TestPool>;
+        type TestWeak = Weak<StubElement, TestPool>;
 
         #[test]
         fn new_rc_successfully() {
             let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
-            assert!(TestRc::try_new_in(StubElement::new(0), &mut pool).is_ok());
+            let e = TestRc::try_new_in(StubElement::new(0), &mut pool);
+
+            assert!(e.is_ok());
+            let e = e.unwrap();
+
+            assert_eq!(1, TestRc::strong_count(&e));
+            assert_eq!(0, TestRc::weak_count(&e));
+            assert!(TestRc::is_unique(&e));
+        }
+
+        #[test]
+        fn rc_as_ptr() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+            unsafe {
+                assert_eq!((*TestRc::as_ptr(&e)).value, 1);
+            }
+        }
+
+        #[test]
+        fn get_mut() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let mut e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+            unsafe {
+                if let Some(the_e) = TestRc::get_mut(&mut e) {
+                    assert_eq!(1, the_e.value);
+                } else {
+                    assert!(false);
+                }
+            }
+        }
+
+        #[test]
+        fn rc_clone() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e1 = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+            let e2 = e1.clone();
+
+            assert!(TestRc::ptr_eq(&e1, &e2));
+            assert_eq!(2, TestRc::strong_count(&e1));
+            assert_eq!(2, TestRc::strong_count(&e2));
+            assert_eq!(0, TestRc::weak_count(&e1));
+            assert_eq!(0, TestRc::weak_count(&e2));
+        }
+
+        #[test]
+        fn get_weak_scuccessfully() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+
+            let we = TestRc::downgrade(&e);
+
+            assert_eq!(1, TestRc::weak_count(&e));
+            assert_eq!(1, TestRc::strong_count(&e));
+            assert_eq!(2, TestWeak::weak_count(&we));
+            assert_eq!(1, TestWeak::strong_count(&we));
+        }
+
+        #[test]
+        fn weak_clone() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+
+            let we1 = TestRc::downgrade(&e);
+            let we2 = we1.clone();
+
+            assert!(we1.ptr_eq(&we2));
+
+            assert_eq!(2, TestRc::weak_count(&e));
+            assert_eq!(1, TestRc::strong_count(&e));
+            assert_eq!(3, TestWeak::weak_count(&we1));
+            assert_eq!(1, TestWeak::strong_count(&we1));
+            assert_eq!(3, TestWeak::weak_count(&we2));
+            assert_eq!(1, TestWeak::strong_count(&we2));
+        }
+
+        #[test]
+        fn weak_upgrade_successfully() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+
+            let we = TestRc::downgrade(&e);
+
+            if let Some(e2) = we.upgrade() {
+                assert!(TestRc::ptr_eq(&e, &e2));
+                assert_eq!(2, TestRc::strong_count(&e));
+                assert_eq!(1, TestRc::weak_count(&e));
+            } else {
+                assert!(false);
+            }
+        }
+
+        #[test]
+        fn weak_existed_after_rc_drop() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+
+            let we = TestRc::downgrade(&e);
+
+            drop(e);
+
+            assert_eq!(0, TestWeak::strong_count(&we));
+            assert_eq!(1, TestWeak::weak_count(&we));
+            assert!(we.upgrade().is_none());
+        }
+
+        #[test]
+        fn drop_both_rc_weak_successfully() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            assert_eq!(0, pool.allocated());
+
+            let e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+            assert_eq!(1, pool.allocated());
+
+            let we = TestRc::downgrade(&e);
+
+            drop(e);
+
+            assert_eq!(0, TestWeak::strong_count(&we));
+            assert_eq!(1, TestWeak::weak_count(&we));
+            assert!(we.upgrade().is_none());
+            assert_eq!(1, pool.allocated());
+
+            drop(we);
+
+            assert_eq!(0, pool.allocated());
         }
     } // end of mod tests
 }
