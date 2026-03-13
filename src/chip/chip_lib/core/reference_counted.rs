@@ -6,7 +6,6 @@ pub trait RCDeleteDeletor<SubType> {
 
 pub trait ReferenceCountered<SubType, Deletor>
 where
-    //Deletor: FnOnce(* mut SubType) -> () + FnMut(* mut SubType) -> (),
     Deletor: RCDeleteDeletor<SubType>,
 {
     type CounterType;
@@ -41,9 +40,6 @@ where
 
 pub mod rc {
     /* a version copied from std::alloc::rc with a Deleter */
-    use crate::chip::{
-        chip_lib::support::pool::{KInline, ObjectPool},
-    };
     use core::ptr::{self, NonNull};
     use core::marker::PhantomData;
     use core::cell::Cell;

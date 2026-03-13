@@ -3,7 +3,7 @@
 #![allow(incomplete_features)]
 #![cfg_attr(test, allow(unused_imports))]
 #![cfg_attr(not(test), no_std)]
-#![feature(nonnull_provenance)]
+//#![feature(nonnull_provenance)]
 
 #[cfg(all(not(test), feature = "panic_handler"))]
 use core::panic::PanicInfo;

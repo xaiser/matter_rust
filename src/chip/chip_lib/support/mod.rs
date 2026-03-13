@@ -13,6 +13,7 @@ pub mod object_life_cycle;
 pub mod pool;
 pub mod bytes_to_hex;
 pub mod time_utils;
+pub mod intrusive_list;
 
 #[cfg(test)]
 pub mod test_persistent_storage;
