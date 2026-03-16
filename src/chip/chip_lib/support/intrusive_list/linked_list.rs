@@ -5,7 +5,7 @@ use core::{
     fmt,
 };
 use super::{
-    pointer_ops::PointerOps,
+    pointer_ops::{self, PointerOps},
     adapter::Adapter,
     link_ops::{self, DefaultLinkOps},
 };
@@ -167,13 +167,10 @@ where
         unsafe {
             let value = self.list.adapter.get_value(self.current?);
 
-            Some(self.list.adapter.pointer_ops().from_raw(value))
-
-                not in this way
+            Some(pointer_ops::clone_pointer_from_raw(self.list.adapter.pointer_ops(), value))
         }
     }
 
-    /*
     /// Moves the cursor to the next element of the `LinkedList`.
     ///
     /// If the cursor is pointer to the null object then this will move it to
@@ -182,6 +179,11 @@ where
     /// null object.
     #[inline]
     pub fn move_next(&mut self) {
+        if let Some(cursor) = self.current {
+            self.current = unsafe { self.list.adapter.link_ops().next(cursor) };
+        } else {
+            self.current = self.list.head;
+        }
     }
 
     /// Moves the cursor to the previous element of the `LinkedList`.
@@ -191,6 +193,11 @@ where
     /// element of the `LinkedList` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
+        if let Some(cursor) = self.current {
+            self.current = unsafe { self.list.adapter.link_ops().prev(cursor) };
+        } else {
+            self.current = self.list.tail;
+        }
     }
 
     /// Returns a cursor pointing to the next element of the `LinkedList`.
@@ -200,6 +207,9 @@ where
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
     pub fn peek_next(&self) -> Cursor<'_, A> {
+        let mut next = self.clone();
+        next.move_next();
+        next
     }
 
     /// Returns a cursor pointing to the previous element of the `LinkedList`.
@@ -209,6 +219,226 @@ where
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
     pub fn peek_prev(&self) -> Cursor<'_, A> {
+        let mut prev = self.clone();
+        prev.move_prev();
+        prev
+    }
+}
+
+/// A cursor which provides mutable access to a `LinkedList`.
+pub struct CursorMut<'a, A: Adapter>
+where
+    A::LinkOps: LinkedListOps,
+{
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    list: &'a mut LinkedList<A>,
+}
+
+impl<'a, A: Adapter> CursorMut<'a, A>
+where
+    A::LinkOps: LinkedListOps,
+{
+    /// Checks if the cursor is currently pointing to the null object.
+    #[inline]
+    pub fn is_null(&self) -> bool {
+        self.current.is_none()
+    }
+
+    /// Returns a reference to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns None if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.list.adapter.get_value(self.current?) })
+    }
+
+    /// Returns a read-only cursor pointing to the current element.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+    /// `CursorMut` is frozen for the lifetime of the `Cursor`.
+    #[inline]
+    pub fn as_cursor(&self) -> Cursor<'_, A> {
+        Cursor {
+            current: self.current,
+            list: self.list,
+        }
+    }
+
+    /// Moves the cursor to the next element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first element of the `LinkedList`. If it is pointing to the
+    /// last element of the `LinkedList` then this will move it to the
+    /// null object.
+    #[inline]
+    pub fn move_next(&mut self) {
+        if let Some(cursor) = self.current {
+            self.current = unsafe { self.list.adapter.link_ops().next(cursor) };
+        } else {
+            self.current = self.list.head;
+        }
+    }
+
+    /// Moves the cursor to the previous element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the last element of the `LinkedList`. If it is pointing to the first
+    /// element of the `LinkedList` then this will move it to the null object.
+    #[inline]
+    pub fn move_prev(&mut self) {
+        if let Some(cursor) = self.current {
+            self.current = unsafe { self.list.adapter.link_ops().prev(cursor) };
+        } else {
+            self.current = self.list.tail;
+        }
+    }
+
+    ///Returns a cursor pointing to the next element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `LinkedList`. If it is pointing to the last
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<'_, A> {
+        let mut next = self.as_cursor();
+        next.move_next();
+        next
+    }
+
+    /// Returns a cursor pointing to the previous element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last element of the `LinkedList`. If it is pointing to the first
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
+        let mut prev = self.as_cursor();
+        prev.move_prev();
+        prev
+    }
+
+    /// Removes the current element from the `LinkedList`.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// moved to point to the next element in the `LinkedList`.
+    ///
+    /// If the cursor is currently pointing to the null object then no element
+    /// is removed and `None` is returned.
+    #[inline]
+    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        if let Some(cursor) = self.current {
+            unsafe {
+                if let Some(prev) = self.list.adapter.link_ops().prev(cursor) {
+                    self.list.adapter.link_ops().set_next(prev, self.list.adapter.link_ops().next(cursor));
+                } else {
+                    self.list.head = self.list.adapter.link_ops().next(cursor);
+                }
+                self.list.adapter.link_ops().set_next(cursor, None);
+            }
+        } else {
+            None
+        }
+    }
+
+    /*
+    /// Removes the current element from the `LinkedList` and inserts another
+    /// object in its place.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// modified to point to the newly added element.
+    ///
+    /// If the cursor is currently pointing to the null object then an error is
+    /// returned containing the given `val` parameter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn replace_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {}
+
+    /// Inserts a new element into the `LinkedList` after the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the front of the `LinkedList`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+    }
+
+    /// Inserts a new element into the `LinkedList` before the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the end of the `LinkedList`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_before(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+    }
+
+    /// Inserts the elements from the given `LinkedList` after the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new elements are
+    /// inserted at the start of the `LinkedList`.
+    #[inline]
+    pub fn splice_after(&mut self, mut list: LinkedList<A>) {
+    }
+
+    /// Moves all element from the given `LinkedList` before the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new elements are
+    /// inserted at the end of the `LinkedList`.
+    #[inline]
+    pub fn splice_before(&mut self, mut list: LinkedList<A>) {
+    }
+
+    /// Splits the list into two after the current element. This will return a
+    /// new list consisting of everything after the cursor, with the original
+    /// list retaining everything before.
+    ///
+    /// If the cursor is pointing at the null object then the entire contents
+    /// of the `LinkedList` are moved.
+    #[inline]
+    pub fn split_after(&mut self) -> LinkedList<A>
+    where
+        A: Clone,
+    {
+    }
+
+    /// Splits the list into two before the current element. This will return a
+    /// new list consisting of everything before the cursor, with the original
+    /// list retaining everything after.
+    ///
+    /// If the cursor is pointing at the null object then the entire contents
+    /// of the `LinkedList` are moved.
+    #[inline]
+    pub fn split_before(&mut self) -> LinkedList<A>
+    where
+        A: Clone,
+    {
+    }
+
+    /// Consumes `CursorMut` and returns a reference to the object that
+    /// the cursor is currently pointing to. Unlike [get](Self::get),
+    /// the returned reference's lifetime is tied to `LinkedList`'s lifetime.
+    ///
+    /// This returns None if the cursor is currently pointing to the null object.
+    #[inline]
+    pub fn into_ref(self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
     }
     */
 }
@@ -217,7 +447,7 @@ pub struct LinkedList<A: Adapter>
 where
     A::LinkOps: LinkedListOps
 {
-    head: Option<NonNull<<A::LinkOps as link_ops::LinkOps>::LinkPtr>>,
-    tail: Option<NonNull<<A::LinkOps as link_ops::LinkOps>::LinkPtr>>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
 }
