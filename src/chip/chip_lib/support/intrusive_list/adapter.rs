@@ -13,7 +13,7 @@ pub unsafe trait Adapter {
 
     fn link_ops(&self) -> &Self::LinkOps;
 
-    fn links_ops_mut(&mut self) -> &mut Self::LinkOps;
+    fn link_ops_mut(&mut self) -> &mut Self::LinkOps;
 
     fn pointer_ops(&self) -> &Self::PointerOps;
 }

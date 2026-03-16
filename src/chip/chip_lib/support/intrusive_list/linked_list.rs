@@ -112,6 +112,50 @@ impl fmt::Debug for Link {
     }
 }
 
+
+#[inline]
+unsafe fn link_between<T: LinkedListOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    if let Some(p) = prev {
+        link_ops.set_next(p, ptr);
+    }
+    if let Some(n) = next {
+        link_ops.set_prev(n, ptr);
+    }
+}
+
+#[inline]
+unsafe fn link_after<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, prev: T::LinkPtr) {
+    link_between(link_ops, ptr, Some(prev), link_ops.next(prev));
+}
+
+#[inline]
+unsafe fn link_before<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, next: T::LinkPtr) {
+    link_between(link_ops, ptr, link_ops.prev(next), Some(next));
+}
+
+#[inline]
+unsafe fn replace_with<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, new: T::LinkPtr) {
+}
+
+#[inline]
+unsafe fn remove<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr) {
+}
+
+#[inline]
+unsafe fn splice<T: LinkedListOps>(
+    link_ops: &mut T,
+    start: T::LinkPtr,
+    end: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+}
+
 /// A cursor which provides read-only access to a `LinkedList`.
 pub struct Cursor<'a, A: Adapter> 
 where
@@ -329,17 +373,29 @@ where
     /// is removed and `None` is returned.
     #[inline]
     pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
-        if let Some(cursor) = self.current {
-            unsafe {
-                if let Some(prev) = self.list.adapter.link_ops().prev(cursor) {
-                    self.list.adapter.link_ops().set_next(prev, self.list.adapter.link_ops().next(cursor));
-                } else {
-                    self.list.head = self.list.adapter.link_ops().next(cursor);
-                }
-                self.list.adapter.link_ops().set_next(cursor, None);
+        let cursor = self.current?;
+        self.move_next();
+
+        unsafe {
+            if let Some(prev) = self.list.adapter.link_ops().prev(cursor) {
+                let next = self.list.adapter.link_ops().next(cursor);
+                self.list.adapter.link_ops_mut().set_next(prev, next);
+            } else {
+                self.list.head = self.list.adapter.link_ops().next(cursor);
             }
-        } else {
-            None
+
+            if let Some(next) = self.list.adapter.link_ops().next(cursor) {
+                let prev = self.list.adapter.link_ops().prev(cursor);
+                self.list.adapter.link_ops_mut().set_prev(next, prev);
+            } else {
+                self.list.tail = self.list.adapter.link_ops().prev(cursor);
+            }
+
+            self.list.adapter.link_ops_mut().set_next(cursor, None);
+            self.list.adapter.link_ops_mut().set_prev(cursor, None);
+
+            let raw_pointer = self.list.adapter.get_value(cursor);
+            Some(self.list.adapter.pointer_ops().from_raw(raw_pointer))
         }
     }
 
