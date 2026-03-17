@@ -121,11 +121,14 @@ unsafe fn link_between<T: LinkedListOps>(
     next: Option<T::LinkPtr>,
 ) {
     if let Some(p) = prev {
-        link_ops.set_next(p, ptr);
+        link_ops.set_next(p, Some(ptr));
     }
     if let Some(n) = next {
-        link_ops.set_prev(n, ptr);
+        link_ops.set_prev(n, Some(ptr));
     }
+
+    link_ops.set_next(ptr, next);
+    link_ops.set_prev(ptr, prev);
 }
 
 #[inline]
@@ -140,10 +143,24 @@ unsafe fn link_before<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, next:
 
 #[inline]
 unsafe fn replace_with<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, new: T::LinkPtr) {
+    link_between(link_ops, new, link_ops.prev(ptr), link_ops.next(ptr));
+
+    link_ops.release_link(ptr);
 }
 
 #[inline]
 unsafe fn remove<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr) {
+    let prev = link_ops.prev(ptr);
+    let next = link_ops.next(ptr);
+
+    if let Some(p) = prev {
+        link_ops.set_next(p, next);
+    }
+    if let Some(n) = next {
+        link_ops.set_prev(n, prev);
+    }
+
+    link_ops.release_link(ptr);
 }
 
 #[inline]
@@ -154,6 +171,14 @@ unsafe fn splice<T: LinkedListOps>(
     prev: Option<T::LinkPtr>,
     next: Option<T::LinkPtr>,
 ) {
+    link_ops.set_prev(start, prev);
+    link_ops.set_next(end, next);
+    if let Some(prev) = prev {
+        link_ops.set_next(prev, Some(start));
+    }
+    if let Some(next) = next {
+        link_ops.set_prev(next, Some(end));
+    }
 }
 
 /// A cursor which provides read-only access to a `LinkedList`.
@@ -374,32 +399,26 @@ where
     #[inline]
     pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         let cursor = self.current?;
-        self.move_next();
 
         unsafe {
-            if let Some(prev) = self.list.adapter.link_ops().prev(cursor) {
-                let next = self.list.adapter.link_ops().next(cursor);
-                self.list.adapter.link_ops_mut().set_next(prev, next);
-            } else {
+            if self.list.adapter.link_ops().prev(cursor).is_none() {
                 self.list.head = self.list.adapter.link_ops().next(cursor);
             }
 
-            if let Some(next) = self.list.adapter.link_ops().next(cursor) {
-                let prev = self.list.adapter.link_ops().prev(cursor);
-                self.list.adapter.link_ops_mut().set_prev(next, prev);
-            } else {
+            if self.list.adapter.link_ops().next(cursor).is_none() {
                 self.list.tail = self.list.adapter.link_ops().prev(cursor);
             }
 
-            self.list.adapter.link_ops_mut().set_next(cursor, None);
-            self.list.adapter.link_ops_mut().set_prev(cursor, None);
-
+            let next = self.list.adapter.link_ops().next(cursor);
             let raw_pointer = self.list.adapter.get_value(cursor);
+
+            remove(self.list.adapter.link_ops_mut(), cursor);
+
+            self.current = next;
             Some(self.list.adapter.pointer_ops().from_raw(raw_pointer))
         }
     }
 
-    /*
     /// Removes the current element from the `LinkedList` and inserts another
     /// object in its place.
     ///
@@ -409,17 +428,35 @@ where
     /// If the cursor is currently pointing to the null object then an error is
     /// returned containing the given `val` parameter.
     ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
+    /// Return err if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
     pub fn replace_with(
         &mut self,
         val: <A::PointerOps as PointerOps>::Pointer,
     ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
-    {}
+    {
+        if let Some(cursor) = self.current {
+            let new = self.list.node_from_value(val).ok_or(val)?;
 
+            if self.current == self.list.head {
+                self.list.head = Some(new);
+            }
+            if self.current == self.list.tail {
+                self.list.tail = Some(new);
+            }
+            unsafe {
+                let raw_pointer = self.list.adapter.get_value(cursor);
+                replace_with(self.list.adapter.link_ops_mut(), cursor, new);
+                self.current = Some(new);
+                Ok(self.list.adapter.pointer_ops().from_raw(raw_pointer))
+            }
+        } else {
+            Err(val)
+        }
+    }
+
+    /*
     /// Inserts a new element into the `LinkedList` after the current one.
     ///
     /// If the cursor is pointing at the null object then the new element is
@@ -506,4 +543,32 @@ where
     head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
+}
+
+impl<A: Adapter> LinkedList<A>
+where
+    A::LinkOps: LinkedListOps,
+{
+    #[inline]
+    fn node_from_value(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr> {
+        use link_ops::LinkOps;
+
+        unsafe {
+            let raw = self.adapter.pointer_ops().into_raw(val);
+            let link = self.adapter.get_link(raw);
+
+            if !self.adapter.link_ops_mut().acquire_link(link) {
+                // convert the node back into a pointer
+                self.adapter.pointer_ops().from_raw(raw);
+
+                //panic!("attempted to insert an object that is already linked");
+                return None;
+            }
+
+            Some(link)
+        }
+    }
 }
