@@ -17,3 +17,22 @@ pub unsafe trait Adapter {
 
     fn pointer_ops(&self) -> &Self::PointerOps;
 }
+
+#[macro_export]
+macro_rules! container_of {
+    ($ptr:expr, $container:path, $($fields:expr)+) => {
+        #[allow(clippy::cast_ptr_alignment)]
+        {
+            ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $($fields)+))
+                as *const $container
+        }
+    };
+}
+
+/// A simple implement which the link must be the first element of the struct and the name must be
+/// "link"
+mod default {
+    pub struct DefaultAdapter {
+        link_ops: <Link as 
+    }
+}

@@ -18,6 +18,7 @@ hkdf = { version = "0.12.4", default-features = false }
 #mockall_derive = "0.13.1"
 #mockall_double = "0.3.1"
 static_cell = "2.1.1"
+memoffset = "0.9.1"
 
 [dev-dependencies]
 mockall = "0.13"
