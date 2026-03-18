@@ -3,6 +3,8 @@
 #![allow(incomplete_features)]
 #![cfg_attr(test, allow(unused_imports))]
 #![cfg_attr(not(test), no_std)]
+// for Rc implementation
+#![feature(layout_for_ptr)]
 //#![feature(nonnull_provenance)]
 
 #[cfg(all(not(test), feature = "panic_handler"))]

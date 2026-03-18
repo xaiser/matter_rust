@@ -39,12 +39,13 @@ where
 }
 
 pub mod rc {
-    /* a version copied from std::alloc::rc with a Deleter */
+    /* a version copied from std::alloc::rc but disable ?Sized to make it simple */
     use core::ptr::{self, NonNull};
     use core::marker::PhantomData;
     use core::cell::Cell;
     use core::num::NonZeroUsize;
     use core::ops::Deref;
+    use super::super::layout;
 
     pub trait Allocator<T> {
         fn allocate(&mut self, init_value: RcInner<T>) -> Result<* mut RcInner<T>, ()>;
@@ -159,6 +160,26 @@ pub mod rc {
                     WeakInner { strong: &(*ptr).strong, weak: &(*ptr).weak }
                 })
             }
+        }
+
+        pub fn into_raw_with_allocator(this: Self) -> (*const T, * mut A) {
+            let this = core::mem::ManuallyDrop::new(this);
+            let alloc = this.alloc;
+            let ptr = Self::as_ptr(&this);
+
+            (ptr, alloc)
+        }
+
+        pub unsafe fn from_raw_in(ptr: * const T, alloc: * mut A) -> Self {
+            let ptr = if is_dangling(ptr) {
+                ptr as * mut RcInner<T>
+            } else {
+                let offset = unsafe { data_offset(ptr) };
+
+                unsafe { ptr.byte_sub(offset) as * mut RcInner<T> }
+            };
+
+            Weak { ptr: unsafe { NonNull::new_unchecked(ptr) }, alloc }
         }
     }
 
@@ -319,6 +340,22 @@ pub mod rc {
         pub fn ptr_eq(this: &Self, other: &Self) -> bool {
             ptr::addr_eq(this.ptr.as_ptr(), other.ptr.as_ptr())
         }
+
+        pub fn into_raw_with_allocator(this: Self) -> (* const T, * mut A) {
+            let this = core::mem::ManuallyDrop::new(this);
+            let alloc = this.alloc;
+            let ptr = Self::as_ptr(&this);
+
+            (ptr, alloc)
+        }
+
+        pub fn from_raw_in(ptr: * const T, alloc: * mut A) -> Self {
+            let offset = unsafe { data_offset(ptr) };
+
+            let rc_ptr = unsafe { ptr.byte_sub(offset) as * mut RcInner<T> };
+
+            unsafe { Self::from_ptr_in(rc_ptr, alloc) }
+        }
     }
 
     impl<T, A: Allocator<T>> Deref for Rc<T, A> {
@@ -358,6 +395,18 @@ pub mod rc {
         }
     }
 
+    unsafe fn data_offset<T>(ptr: * const T) -> usize {
+        unsafe {
+            data_offset_align(core::mem::align_of_val_raw(ptr))
+        }
+    }
+
+    #[inline]
+    fn data_offset_align(align: usize) -> usize {
+        let size = core::mem::size_of::<RcInner<()>>();
+        size + layout::padding_needed_for(size, align)
+    }
+
     #[cfg(test)]
     mod tests {
         use crate::create_object_pool;
@@ -388,6 +437,45 @@ pub mod rc {
         type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
         type TestRc = Rc<StubElement, TestPool>;
         type TestWeak = Weak<StubElement, TestPool>;
+
+        #[test]
+        fn data_offset_of_u8() {
+            let value: u8 = 0x1u8;
+
+            unsafe {
+                assert_eq!(core::mem::size_of::<RcInner<()>>(), data_offset(core::ptr::addr_of!(value)));
+            }
+        }
+
+        #[test]
+        fn data_offset_of_u16() {
+            let value = 0x1u16;
+
+            unsafe {
+                assert_eq!(core::mem::size_of::<RcInner<()>>(), data_offset(core::ptr::addr_of!(value)));
+            }
+        }
+
+        #[test]
+        fn data_offset_of_u32() {
+            let value = 0x1u32;
+
+            unsafe {
+                assert_eq!(core::mem::size_of::<RcInner<()>>(), data_offset(core::ptr::addr_of!(value)));
+            }
+        }
+
+        #[test]
+        fn data_offset_of_align_32() {
+            #[repr(align(32))]
+            struct test(u32);
+
+            let value = test(0);
+
+            unsafe {
+                assert_eq!(core::mem::size_of::<RcInner<()>>() + 16, data_offset(core::ptr::addr_of!(value)));
+            }
+        }
 
         #[test]
         fn new_rc_successfully() {
