@@ -28,15 +28,21 @@ macro_rules! container_of {
         }
     };
 }
-
-/// A simple implement which the link must be the first element of the struct and the name must be
-/// "link". Also, the pointer must be Rc.
-mod linked_list_default {
-    use super::super::{
-        linked_list::Link,
-        link_ops::DefaultLinkOps,
-    };
-    pub struct DefaultAdapter {
-        link_ops: <Link as DefaultLinkOps>::Ops,
+mod linked_list {
+    mod rc {
+        /// A simple implement which the link must be the first element of the struct and the name must be
+        /// "link". Also, the pointer must be Rc.
+        use super::super::super::{
+            linked_list::Link,
+            link_ops::DefaultLinkOps,
+            pointer_ops::PointerOps,
+        };
+        pub struct DefaultAdapter<PointerOpsType>
+            where
+                PointerOpsType: PointerOps,
+        {
+            link_ops: <Link as DefaultLinkOps>::Ops,
+            pointer_ops: PointerOpsType,
+        }
     }
 }

@@ -607,6 +607,27 @@ pub mod rc {
 
             assert_eq!(0, pool.allocated());
         }
+
+        #[test]
+        fn rc_into_from_raw() {
+            let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+            let rc = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
+
+            assert_eq!(1, TestRc::strong_count(&rc));
+            assert_eq!(0, TestRc::weak_count(&rc));
+            assert!(TestRc::is_unique(&rc));
+
+            let (raw, alloc) = TestRc::into_raw_with_allocator(rc);
+
+            assert!(!raw.is_null());
+            assert!(!alloc.is_null());
+
+            let rc = TestRc::from_raw_in(raw, alloc);
+
+            assert_eq!(1, TestRc::strong_count(&rc));
+            assert_eq!(0, TestRc::weak_count(&rc));
+            assert!(TestRc::is_unique(&rc));
+        }
     } // end of mod tests
 }
 
