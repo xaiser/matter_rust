@@ -632,9 +632,11 @@ mod tests {
         let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
         writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
 
+        /*
         let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
         key[0] = 1;
         key[key.len() - 1] = 2;
+        */
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
@@ -698,9 +700,11 @@ mod tests {
         let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
         writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
 
+        /*
         let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
         key[0] = 1;
         key[key.len() - 1] = 2;
+        */
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
@@ -763,9 +767,11 @@ mod tests {
         let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
         writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
 
+        /*
         let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
         key[0] = 1;
         key[key.len() - 1] = 2;
+        */
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
@@ -839,9 +845,11 @@ mod tests {
         let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
         writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
 
+        /*
         let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
         key[0] = 1;
         key[key.len() - 1] = 2;
+        */
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct
@@ -922,9 +930,11 @@ mod tests {
         let mut writer: TlvContiguousBufferWriter = TlvContiguousBufferWriter::const_default();
         writer.init(raw_tlv.as_mut_ptr(), raw_tlv.len() as u32);
 
+        /*
         let mut key = [0; chip_cert::K_KEY_IDENTIFIER_LENGTH];
         key[0] = 1;
         key[key.len() - 1] = 2;
+        */
 
         let mut outer_container = tlv_types::TlvType::KtlvTypeNotSpecified;
         // start a struct

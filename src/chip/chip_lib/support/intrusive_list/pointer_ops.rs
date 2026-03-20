@@ -3,8 +3,6 @@ use crate::chip::chip_lib::core::reference_counted::rc::{Allocator, Rc};
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::marker::PhantomData;
-use core::ptr::NonNull;
-use core::cell::Cell;
 
 pub trait PointerOps {
     type Value: ?Sized;

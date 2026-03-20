@@ -37,7 +37,7 @@ pub mod linked_list {
             link_ops::{LinkOps, DefaultLinkOps},
             pointer_ops::{PointerOps, RcPointerOps},
         };
-        use crate::chip::chip_lib::core::reference_counted::rc::{Allocator, Rc};
+        use crate::chip::chip_lib::core::reference_counted::rc::Allocator;
 
         #[derive(Copy, Clone)]
         pub struct DefaultAdapter<T, A>
@@ -121,6 +121,55 @@ pub mod linked_list {
         {
             link_ops: <Link as DefaultLinkOps>::Ops,
             pointer_ops: DefaultPointerOps<UnsafeRef<T>>,
+        }
+
+        #[allow(dead_code)]
+        impl<T> DefaultAdapter<T> {
+            pub const NEW: Self = DefaultAdapter {
+                link_ops: <Link as DefaultLinkOps>::NEW,
+                pointer_ops: DefaultPointerOps::<UnsafeRef<T>>::new(),
+            };
+
+            #[inline]
+            pub const fn new() -> Self {
+                Self::NEW
+            }
+        }
+
+        #[allow(dead_code)]
+        unsafe impl<T> super::super::Adapter for DefaultAdapter<T> {
+            type LinkOps = <Link as DefaultLinkOps>::Ops;
+            type PointerOps = DefaultPointerOps<UnsafeRef<T>>;
+
+            #[inline]
+            unsafe fn get_value(&self, link: <Self::LinkOps as LinkOps>::LinkPtr) -> * const <Self::PointerOps as PointerOps>::Value {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+                link.as_ptr() as * const T
+            }
+
+            #[inline]
+            unsafe fn get_link(&self, value: * const <Self::PointerOps as PointerOps>::Value) -> <Self::LinkOps as LinkOps>::LinkPtr {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+
+                core::ptr::NonNull::new_unchecked(value as * mut _)
+            }
+
+            #[inline]
+            fn link_ops(&self) -> &Self::LinkOps {
+                &self.link_ops
+            }
+
+            #[inline]
+            fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                &mut self.link_ops
+            }
+
+            #[inline]
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.pointer_ops
+            }
         }
     }
 }

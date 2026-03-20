@@ -1,5 +1,7 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
+// for generic_array
+#![allow(deprecated)]
 
 use crate::chip::chip_lib::core::chip_config::{
     CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,

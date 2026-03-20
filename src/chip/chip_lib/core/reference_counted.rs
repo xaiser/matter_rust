@@ -416,9 +416,6 @@ pub mod rc {
         };
         use super::*;
 
-        struct StubDeleter {
-        }
-
         struct StubElement {
             pub value: u8,
         }
@@ -468,9 +465,9 @@ pub mod rc {
         #[test]
         fn data_offset_of_align_32() {
             #[repr(align(32))]
-            struct test(u32);
+            struct Test;
 
-            let value = test(0);
+            let value = Test;
 
             unsafe {
                 assert_eq!(core::mem::size_of::<RcInner<()>>() + 16, data_offset(core::ptr::addr_of!(value)));
@@ -503,12 +500,10 @@ pub mod rc {
         fn get_mut() {
             let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
             let mut e = TestRc::try_new_in(StubElement::new(1), &mut pool).unwrap();
-            unsafe {
-                if let Some(the_e) = TestRc::get_mut(&mut e) {
-                    assert_eq!(1, the_e.value);
-                } else {
-                    assert!(false);
-                }
+            if let Some(the_e) = TestRc::get_mut(&mut e) {
+                assert_eq!(1, the_e.value);
+            } else {
+                assert!(false);
             }
         }
 

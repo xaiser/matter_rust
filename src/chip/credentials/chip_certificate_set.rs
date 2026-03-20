@@ -1178,10 +1178,12 @@ mod chip_certificate_set {
                     assert!(false);
                 }
 
+                /*
                 let mut context = IgorePolicyValidate::default();
                 context.m_effective_time = EffectiveTime::CurrentChipEpochTime(
                     Seconds32::from_secs((expected_not_before + 1).into()),
                 );
+                */
 
                 // this is the key in make_chip_cert
                 let key = make_subject_key_id(1, 2);
@@ -1268,10 +1270,12 @@ mod chip_certificate_set {
                     assert!(false);
                 }
 
+                /*
                 let mut context = IgorePolicyValidate::default();
                 context.m_effective_time = EffectiveTime::CurrentChipEpochTime(
                     Seconds32::from_secs((expected_not_before + 1).into()),
                 );
+                */
 
                 // this is the key in make_chip_cert
                 let key = make_subject_key_id(1, 2);
