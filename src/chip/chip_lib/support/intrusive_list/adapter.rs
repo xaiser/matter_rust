@@ -28,21 +28,81 @@ macro_rules! container_of {
         }
     };
 }
-mod linked_list {
-    mod rc {
+pub mod linked_list {
+    pub mod rc {
         /// A simple implement which the link must be the first element of the struct and the name must be
         /// "link". Also, the pointer must be Rc.
         use super::super::super::{
             linked_list::Link,
-            link_ops::DefaultLinkOps,
-            pointer_ops::PointerOps,
+            link_ops::{LinkOps, DefaultLinkOps},
+            pointer_ops::{PointerOps, RcPointerOps},
         };
-        pub struct DefaultAdapter<PointerOpsType>
-            where
-                PointerOpsType: PointerOps,
+        use crate::chip::chip_lib::core::reference_counted::rc::{Allocator, Rc};
+
+        #[derive(Copy, Clone)]
+        pub struct DefaultAdapter<T, A>
+        where
+            A: Allocator<T>,
         {
             link_ops: <Link as DefaultLinkOps>::Ops,
-            pointer_ops: PointerOpsType,
+            pointer_ops: RcPointerOps<T, A>,
+        }
+
+        #[allow(dead_code)]
+        impl<T, A: Allocator<T>> DefaultAdapter<T, A> {
+            pub const NEW: Self = DefaultAdapter {
+                link_ops: <Link as DefaultLinkOps>::NEW,
+                pointer_ops: RcPointerOps::<T, A>::new(),
+            };
+
+            #[inline]
+            pub const fn new() -> Self {
+                Self::NEW
+            }
+
+            #[inline]
+            pub const fn new_in(alloc: * mut A) -> Self {
+                Self {
+                    link_ops: <Link as DefaultLinkOps>::NEW,
+                    pointer_ops: RcPointerOps::<T, A>::new_in(alloc),
+                }
+            }
+        }
+
+        #[allow(dead_code)]
+        unsafe impl<T, A: Allocator<T>> super::super::Adapter for DefaultAdapter<T, A> {
+            type LinkOps = <Link as DefaultLinkOps>::Ops;
+            type PointerOps = RcPointerOps<T, A>;
+
+            #[inline]
+            unsafe fn get_value(&self, link: <Self::LinkOps as LinkOps>::LinkPtr) -> * const <Self::PointerOps as PointerOps>::Value {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+                link.as_ptr() as * const T
+            }
+
+            #[inline]
+            unsafe fn get_link(&self, value: * const <Self::PointerOps as PointerOps>::Value) -> <Self::LinkOps as LinkOps>::LinkPtr {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+
+                core::ptr::NonNull::new_unchecked(value as * mut _)
+            }
+
+            #[inline]
+            fn link_ops(&self) -> &Self::LinkOps {
+                &self.link_ops
+            }
+
+            #[inline]
+            fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                &mut self.link_ops
+            }
+
+            #[inline]
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.pointer_ops
+            }
         }
     }
 }

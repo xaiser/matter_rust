@@ -708,7 +708,7 @@ where
     /// Creates an empty `LinkedList`.
     //#[cfg(not(feature = "nightly"))]
     #[inline]
-    pub fn new(adapter: A) -> LinkedList<A> {
+    pub const fn new(adapter: A) -> LinkedList<A> {
         LinkedList {
             head: None,
             tail: None,
@@ -922,3 +922,37 @@ where
         LinkedList::new(A::default())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::create_object_pool;
+    use crate::chip::chip_lib::support::{
+        intrusive_list::adapter::linked_list::rc::DefaultAdapter,
+        internal::pool::Statistics,
+        pool::{ObjectPool, KInline, BitMapObjectPool},
+    };
+    use crate::chip::chip_lib::core::reference_counted::rc::{RcInner, Rc};
+    use super::*;
+    use core::ptr;
+
+    const POOL_SIZE: usize = 1;
+    type TestRcInner = RcInner<TestNode>;
+    type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
+    type TestAlloc = TestPool;
+
+
+    struct TestNode {
+        pub link: Link,
+        pub value: u8,
+    }
+
+    type TestRc = Rc<TestNode, TestPool>;
+    type TestLinkedList = LinkedList<DefaultAdapter<TestNode, TestPool>>;
+
+    #[test]
+    fn new_linked_list() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        assert!(linked_list.is_empty());
+    }
+} // end of tests

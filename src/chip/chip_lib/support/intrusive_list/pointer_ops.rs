@@ -57,33 +57,36 @@ impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct RcPointerOps<T, A>
 where
     A: Allocator<T>,
 {
     _phantom: PhantomData<T>,
-    alloc: Cell<Option<NonNull<A>>>,
-}
-
-impl<T, A: Allocator<T>> RcPointerOps<T, A> {
-    pub fn new() -> Self {
-        Self {
-            _phantom: PhantomData,
-            alloc: Cell::new(None),
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.alloc.get().is_some()
-    }
+    alloc: * mut A,
 }
 
 impl<T, A: Allocator<T>> Default for RcPointerOps<T, A> {
-    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
+
+impl<T, A: Allocator<T>> RcPointerOps<T, A> {
+    pub const fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+            alloc: core::ptr::null_mut(),
+        }
+    }
+    pub const fn new_in(alloc: * mut A) -> Self {
+        Self {
+            _phantom: PhantomData,
+            alloc: alloc,
+        }
+    }
+}
+
 
 impl<T, A: Allocator<T>> PointerOps for RcPointerOps<T, A> {
     type Value = T;
@@ -91,20 +94,12 @@ impl<T, A: Allocator<T>> PointerOps for RcPointerOps<T, A> {
 
     #[inline]
     unsafe fn from_raw(&self, raw: *const T) -> Rc<T, A> {
-        // TODO: find a way to remove this check
-        if self.alloc.get().is_none() {
-            panic!("empty alloc in RcPointerOps");
-        }
-        Rc::<T, A>::from_raw_in(raw as *mut T, self.alloc.get().take().unwrap().as_mut())
+        Rc::<T, A>::from_raw_in(raw as *mut T, self.alloc)
     }
 
     #[inline]
     fn into_raw(&self, ptr: Rc<T, A>) -> *const T {
-        let (raw, alloc) = Self::Pointer::into_raw_with_allocator(ptr);
-
-        unsafe {
-            self.alloc.set(Some(NonNull::new_unchecked(alloc)));
-        }
+        let (raw, _) = Self::Pointer::into_raw_with_allocator(ptr);
 
         raw
     }
