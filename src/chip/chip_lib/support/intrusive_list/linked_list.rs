@@ -203,6 +203,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 impl<'a, A: Adapter> Cursor<'a, A>
 where
     A::LinkOps: LinkedListOps,
@@ -303,6 +304,7 @@ where
     list: &'a mut LinkedList<A>,
 }
 
+#[allow(dead_code)]
 impl<'a, A: Adapter> CursorMut<'a, A>
 where
     A::LinkOps: LinkedListOps,
@@ -678,6 +680,7 @@ where
     adapter: A,
 }
 
+#[allow(dead_code)]
 impl<A: Adapter> LinkedList<A>
 where
     A::LinkOps: LinkedListOps,
@@ -876,14 +879,14 @@ where
 
     /// Inserts a new element at the start of the `LinkedList`.
     #[inline]
-    pub fn push_front(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
-        self.cursor_mut().insert_after(val);
+    pub fn push_front(&mut self, val: <A::PointerOps as PointerOps>::Pointer) -> Result<(), ()> {
+        self.cursor_mut().insert_after(val)
     }
 
     /// Inserts a new element at the end of the `LinkedList`.
     #[inline]
-    pub fn push_back(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
-        self.cursor_mut().insert_before(val);
+    pub fn push_back(&mut self, val: <A::PointerOps as PointerOps>::Pointer) -> Result<(), ()> {
+        self.cursor_mut().insert_before(val)
     }
 
     /// Removes the first element of the `LinkedList`.

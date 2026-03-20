@@ -105,4 +105,22 @@ pub mod linked_list {
             }
         }
     }
+
+    pub mod unsafe_ref {
+        /// A simple implement which the link must be the first element of the struct and the name must be
+        /// "link". Also, the pointer must be unsafe_ref.
+        use super::super::super::{
+            linked_list::Link,
+            link_ops::{LinkOps, DefaultLinkOps},
+            pointer_ops::{PointerOps, DefaultPointerOps},
+            unsafe_ref::UnsafeRef,
+        };
+
+        #[derive(Copy, Clone)]
+        pub struct DefaultAdapter<T>
+        {
+            link_ops: <Link as DefaultLinkOps>::Ops,
+            pointer_ops: DefaultPointerOps<UnsafeRef<T>>,
+        }
+    }
 }
