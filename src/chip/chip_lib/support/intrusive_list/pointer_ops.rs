@@ -55,7 +55,7 @@ impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy)]
 pub struct RcPointerOps<T, A>
 where
     A: Allocator<T>,
@@ -67,6 +67,15 @@ where
 impl<T, A: Allocator<T>> Default for RcPointerOps<T, A> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T, A: Allocator<T>> Clone for RcPointerOps<T, A> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: PhantomData,
+            alloc: self.alloc,
+        }
     }
 }
 

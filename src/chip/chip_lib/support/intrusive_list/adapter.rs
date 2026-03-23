@@ -39,13 +39,23 @@ pub mod linked_list {
         };
         use crate::chip::chip_lib::core::reference_counted::rc::Allocator;
 
-        #[derive(Copy, Clone)]
+        #[derive(Copy)]
         pub struct DefaultAdapter<T, A>
         where
             A: Allocator<T>,
         {
             link_ops: <Link as DefaultLinkOps>::Ops,
             pointer_ops: RcPointerOps<T, A>,
+        }
+
+        #[allow(dead_code)]
+        impl<T, A: Allocator<T>> Clone for DefaultAdapter<T, A> {
+            fn clone(&self) -> Self {
+                Self {
+                    link_ops: self.link_ops.clone(),
+                    pointer_ops: self.pointer_ops.clone(),
+                }
+            }
         }
 
         #[allow(dead_code)]

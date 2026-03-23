@@ -580,27 +580,21 @@ where
         A: Clone,
     {
         if let Some(cursor) = self.current {
-            let head_of_new;
             unsafe {
-                head_of_new = self.list.adapter.link_ops().next(cursor);
-            }
-            if head_of_new.is_none() {
-                return LinkedList {
-                    head: None,
-                    tail: None,
+                let mut list = LinkedList {
+                    head: self.list.adapter.link_ops().next(cursor),
+                    tail: self.list.tail,
                     adapter: self.list.adapter.clone(),
                 };
-            } else {
-                unsafe {
-                    self.list.adapter.link_ops_mut().set_prev(head_of_new.unwrap_unchecked(), None);
-                    self.list.adapter.link_ops_mut().set_next(cursor, None);
-                    let new_list = LinkedList {
-                        head: head_of_new,
-                        tail: self.list.tail,
-                        adapter: self.list.adapter.clone(),
-                    };
-                    return new_list;
+                if let Some(head) = list.head {
+                    self.list.adapter.link_ops_mut().set_prev(head, None);
+                } else {
+                    list.tail = None;
                 }
+                self.list.adapter.link_ops_mut().set_next(cursor, None);
+                self.list.tail = self.current;
+
+                list
             }
         } else {
             let new_list = LinkedList {
@@ -626,27 +620,21 @@ where
         A: Clone,
     {
         if let Some(cursor) = self.current {
-            let tail_of_new;
             unsafe {
-                tail_of_new = self.list.adapter.link_ops().prev(cursor);
-            }
-            if tail_of_new.is_none() {
-                return LinkedList {
-                    head: None,
-                    tail: None,
+                let mut list = LinkedList {
+                    head: self.list.head,
+                    tail: self.list.adapter.link_ops().prev(cursor),
                     adapter: self.list.adapter.clone(),
                 };
-            } else {
-                unsafe {
-                    self.list.adapter.link_ops_mut().set_next(tail_of_new.unwrap_unchecked(), None);
-                    self.list.adapter.link_ops_mut().set_prev(cursor, None);
-                    let new_list = LinkedList {
-                        head: self.list.head,
-                        tail: tail_of_new,
-                        adapter: self.list.adapter.clone(),
-                    };
-                    return new_list;
+                if let Some(tail) = list.tail {
+                    self.list.adapter.link_ops_mut().set_next(tail, None);
+                } else {
+                    list.head = None;
                 }
+                self.list.adapter.link_ops_mut().set_prev(cursor, None);
+                self.list.head = self.current;
+
+                list
             }
         } else {
             let new_list = LinkedList {
@@ -1086,5 +1074,437 @@ mod tests {
         
         assert!(linked_list.is_empty());
         assert!(!list_2.is_empty());
+    }
+
+    #[test]
+    fn clone_pointer() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_front(node).is_ok());
+
+        // check the cloned value
+        assert!(linked_list.front().clone_pointer().is_some_and(|p| p.value == 1));
+        // chech the original value
+        assert!(linked_list.front().get().is_some_and(|p| p.value == 1));
+    }
+
+    #[test]
+    fn move_next_prev() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_front(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_front(node).is_ok());
+
+        let mut c = linked_list.front();
+        c.move_next();
+        assert!(c.get().is_some_and(|p| p.value == 1));
+        assert!(c.peek_prev().get().is_some_and(|p| p.value == 2));
+        c.move_prev();
+        assert!(c.get().is_some_and(|p| p.value == 2));
+        assert!(c.peek_next().get().is_some_and(|p| p.value == 1));
+
+        // go to null
+        c.move_prev();
+        assert!(c.is_null());
+
+        // go back to tail
+        c.move_prev();
+        assert!(c.get().is_some_and(|p| p.value == 1));
+
+        // go to null
+        c.move_next();
+        assert!(c.is_null());
+
+        // go to head
+        c.move_next();
+        assert!(c.get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn remove_middle_node() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_next();
+        assert!(c.get().is_some_and(|p| p.value == 2));
+        let middle = c.remove();
+        assert!(middle.is_some_and(|p| p.value == 2));
+        assert!(c.get().is_some_and(|p| p.value == 3));
+        let prev = c.peek_prev();
+        assert!(prev.get().is_some_and(|p| p.value == 1));
+    }
+
+    #[test]
+    fn remove_all() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        assert!(c.remove().is_some_and(|p| p.value == 1));
+        assert!(c.remove().is_some_and(|p| p.value == 2));
+        assert!(c.remove().is_some_and(|p| p.value == 3));
+        assert!(c.remove().is_none());
+    }
+
+    #[test]
+    fn replace_front() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.replace_with(node).is_ok_and(|p| p.value == 1));
+        assert!(c.get().is_some_and(|p| p.value == 4));
+        assert!(c.peek_next().get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn replace_back() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.back_mut();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.replace_with(node).is_ok_and(|p| p.value == 3));
+        assert!(c.get().is_some_and(|p| p.value == 4));
+        assert!(c.peek_next().is_null());
+    }
+
+    #[test]
+    fn replace_middle() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_next();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.replace_with(node).is_ok_and(|p| p.value == 2));
+        assert!(c.get().is_some_and(|p| p.value == 4));
+        assert!(c.peek_next().get().is_some_and(|p| p.value == 3));
+    }
+
+    #[test]
+    fn replace_empty() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_prev();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.replace_with(node).is_err_and(|e| e.is_some_and(|p| p.value == 4)));
+    }
+
+    #[test]
+    fn replace_failed() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        let node_copy = node.clone();
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let mut c = linked_list_1.front_mut();
+        assert!(c.replace_with(node_copy).is_err_and(|e| e.is_none()));
+    }
+
+    #[test]
+    fn insert_after_middle() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_next();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.insert_after(node).is_ok());
+        assert!(c.get().is_some_and(|p| p.value == 2));
+        c.move_next();
+        assert!(c.get().is_some_and(|p| p.value == 4));
+        assert!(c.peek_next().get().is_some_and(|p| p.value == 3));
+    }
+
+    #[test]
+    fn insert_after_null() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_prev();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.insert_after(node).is_ok());
+        let cc = linked_list.front();
+        assert!(cc.get().is_some_and(|p| p.value == 4));
+        assert!(cc.peek_next().get().is_some_and(|p| p.value == 1));
+    }
+
+    #[test]
+    fn insert_before_middle() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_next();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.insert_before(node).is_ok());
+        assert!(c.get().is_some_and(|p| p.value == 2));
+        c.move_prev();
+        assert!(c.get().is_some_and(|p| p.value == 4));
+        assert!(c.peek_next().get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn insert_before_null() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list.push_back(node).is_ok());
+
+        let mut c = linked_list.front_mut();
+        c.move_prev();
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(c.insert_before(node).is_ok());
+        let cc = linked_list.back();
+        assert!(cc.get().is_some_and(|p| p.value == 4));
+        assert!(cc.peek_prev().get().is_some_and(|p| p.value == 3));
+    }
+
+    #[test]
+    fn splice_after_front() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut linked_list_2 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+
+        c1.splice_after(linked_list_2);
+        c1.move_next();
+        assert!(c1.get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn splice_after_middle() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut linked_list_2 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+        let node = make_node(5, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        c1.move_next();
+
+        c1.splice_after(linked_list_2);
+        assert!(c1.get().is_some_and(|p| p.value == 2));
+        c1.move_next();
+        assert!(c1.get().is_some_and(|p| p.value == 4));
+    }
+
+    #[test]
+    fn splice_before_front() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut linked_list_2 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+
+        c1.splice_before(linked_list_2);
+        let c1 = linked_list_1.front_mut();
+
+        assert!(c1.get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn splice_before_middle() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut linked_list_2 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(4, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+        let node = make_node(5, ptr::addr_of_mut!(pool));
+        assert!(linked_list_2.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        c1.move_next();
+
+        c1.splice_before(linked_list_2);
+        assert!(c1.get().is_some_and(|p| p.value == 2));
+        c1.move_prev();
+        assert!(c1.get().is_some_and(|p| p.value == 5));
+    }
+
+    #[test]
+    fn split_after() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        let linked_list_2 = c1.split_after();
+        assert!(c1.get().is_some_and(|p| p.value == 1));
+        assert!(linked_list_2.front().get().is_some_and(|p| p.value == 2));
+    }
+
+    #[test]
+    fn split_single_node() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        let linked_list_2 = c1.split_after();
+        assert!(c1.get().is_some_and(|p| p.value == 1));
+        assert!(linked_list_2.is_empty());
+    }
+
+    #[test]
+    fn split_single_node_null() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        c1.move_next();
+        let linked_list_2 = c1.split_after();
+        assert!(linked_list_2.front().get().is_some_and(|p| p.value == 1));
+        assert!(linked_list_1.is_empty());
+    }
+
+    #[test]
+    fn split_before() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(2, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+        let node = make_node(3, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.back_mut();
+        let linked_list_2 = c1.split_before();
+        assert!(c1.get().is_some_and(|p| p.value == 3));
+        assert!(linked_list_2.front().get().is_some_and(|p| p.value == 1));
+    }
+
+    #[test]
+    fn split_before_single_node() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        let linked_list_2 = c1.split_before();
+        assert!(c1.get().is_some_and(|p| p.value == 1));
+        assert!(linked_list_2.is_empty());
+    }
+
+    #[test]
+    fn split_before_single_node_null() {
+        let mut pool = create_object_pool!(TestRcInner, POOL_SIZE);
+        let mut linked_list_1 = TestLinkedList::new(DefaultAdapter::new_in(ptr::addr_of_mut!(pool)));
+        let node = make_node(1, ptr::addr_of_mut!(pool));
+        assert!(linked_list_1.push_back(node).is_ok());
+
+        let mut c1 = linked_list_1.front_mut();
+        c1.move_next();
+        let linked_list_2 = c1.split_before();
+        assert!(linked_list_2.front().get().is_some_and(|p| p.value == 1));
+        assert!(linked_list_1.is_empty());
     }
 } // end of tests
