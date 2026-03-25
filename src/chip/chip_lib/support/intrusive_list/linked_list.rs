@@ -918,7 +918,13 @@ where
 mod tests {
     use crate::create_object_pool;
     use crate::chip::chip_lib::support::{
-        intrusive_list::adapter::linked_list::rc::DefaultAdapter,
+        intrusive_list::{
+            adapter::{
+                self,
+                linked_list::rc::DefaultAdapter,
+            },
+            unsafe_ref::UnsafeRef,
+        },
         internal::pool::Statistics,
         pool::{ObjectPool, KInline, BitMapObjectPool},
     };
@@ -1506,5 +1512,20 @@ mod tests {
         let linked_list_2 = c1.split_before();
         assert!(linked_list_2.front().get().is_some_and(|p| p.value == 1));
         assert!(linked_list_1.is_empty());
+    }
+
+    #[test]
+    fn linked_list_push_front_one_node_and_pop_unsafe_ref() {
+        //type UnsafeRefTestLinkedList = LinkedList<DefaultAdapter<TestNode, TestPool>>;
+        type UnsafeRefTestLinkedList = LinkedList<adapter::linked_list::unsafe_ref::DefaultAdapter<TestNode>>;
+        let mut pool = create_object_pool!(TestNode, POOL_SIZE);
+        let mut linked_list = UnsafeRefTestLinkedList::new(adapter::linked_list::unsafe_ref::DefaultAdapter::new());
+        unsafe {
+            let node = UnsafeRef::from_raw(pool.allocate(TestNode::new_with(1)));
+            assert!(linked_list.push_front(node).is_ok());
+            assert!(linked_list.front().get().is_some_and(|v| v.value == 1));
+            assert!(linked_list.pop_front().is_some_and(|v| v.value == 1));
+            assert!(linked_list.pop_front().is_none());
+        }
     }
 } // end of tests
