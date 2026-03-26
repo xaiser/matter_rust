@@ -2,7 +2,7 @@ use crate::chip::chip_lib::core::data_model_types::KUNDEFINED_FABRIC_INDEX;
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
 use crate::chip::{FabricIndex, NodeId};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub struct ScopedNodeId {
     m_node_id: NodeId,
     m_fabric_index: FabricIndex,

@@ -54,6 +54,7 @@ mod case_auth_tag {
 
     pub type Serialized = [u8; K_SERIALIZED_LENGTH];
 
+    #[derive(Copy, Clone)]
     pub struct CATValues {
         pub values: [CaseAuthTag; K_MAX_SUBJECT_CAT_ATTRIBUTE_COUNT],
     }
