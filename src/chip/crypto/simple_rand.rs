@@ -61,6 +61,16 @@ impl SeedableRng for SimpleRng {
     }
 }
 
+pub fn get_rand_u8() -> u8 {
+    static mut SIMPLE_GLOBAL_RNG: SimpleRng = SimpleRng {
+        state: 1,
+    };
+
+    unsafe {
+        SIMPLE_GLOBAL_RNG.next_u32() as u8
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,3 +8,5 @@ pub mod raw_session_keystore;
 pub use operational_keystore::OperationalKeystore;
 
 pub use crypto_pal::*;
+
+pub use simple_rand::get_rand_u8;
