@@ -84,8 +84,23 @@ mod tests {
 
     #[test]
     fn backoff_time_base_case() {
-        let mgr = ReliableMessageMgr;
-
-        assert_eq!(Duration::
+        assert!(
+            Duration::from_micros(2375).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(1), 0, true)).as_millis() < 5);
+        assert!(
+            Duration::from_micros(2375).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(1), 1, true)).as_millis() < 5);
+        assert!(
+            Duration::from_micros(6632).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(1), 4, true)).as_millis() < 5);
+        assert!(
+            Duration::from_micros(6632).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(1), 5, true)).as_millis() < 5);
+        assert!(
+            Duration::from_micros(3750).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(2), 0, true)).as_millis() < 5);
+        assert!(
+            Duration::from_micros(12264).abs_diff(
+                ReliableMessageMgr::get_backoff(Duration::from_millis(2), 4, true)).as_millis() < 5);
     }
 } // end of tests
