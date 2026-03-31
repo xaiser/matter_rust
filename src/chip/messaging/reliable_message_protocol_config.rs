@@ -1,3 +1,7 @@
+use crate::chip::{
+    system::system_clock::{self, Timeout},
+    messaging::reliable_message_mgr::ReliableMessageMgr,
+};
 use core::time::Duration;
 
 pub const CHIP_CONFIG_MRP_LOCAL_ACTIVE_RETRY_INTERVAL: Duration = Duration::from_millis(2000);
@@ -54,5 +58,24 @@ impl ReliableMessageProtocolConfig {
         None
     }
 
-    pub fn get_retransmission_timeout
+    pub fn get_retransmission_timeout(active_interval: Timeout, idle_interval: Timeout, last_activity_time: Timeout, activity_threshold: Timeout, is_first_message_on_exchange: bool) -> Timeout {
+        let time_since_last_activity = system_clock::get_monotonic_timestamp().checked_sub(last_activity_time).unwrap_or(Duration::from_millis(0));
+
+        // Calculate the retransmission timeout and take into account that an active/idle state change can happen
+        // in the middle.
+        let mut timeout = Timeout::from_millis(0);
+        for i in 0..(CHIP_CONFIG_RMP_DEFAULT_MAX_RETRANS + 1) {
+            // If we are calculating the timeout for the initial message, we never know whether the peer is active or not, choose
+            // active/idle interval from PeerActiveMode of session per 4.11.2.1. Retransmissions.
+            // If we are calculating the timeout for response message, we know the peer is active, always choose active interval.
+            let base_interval = if time_since_last_activity.checked_add(timeout).unwrap_or(Duration::ZERO) >= activity_threshold && is_first_message_on_exchange {
+                    idle_interval
+                } else {
+                    active_interval
+                };
+            timeout = timeout.saturating_add(ReliableMessageMgr::get_backoff(base_interval, i.try_into().unwrap(), true));
+        }
+
+        timeout
+    }
 }

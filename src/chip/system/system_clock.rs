@@ -1,5 +1,3 @@
-use crate::{ChipError, ChipErrorResult};
-
 pub type Seconds32 = core::time::Duration;
 pub type Milliseconds16 = core::time::Duration;
 pub type Milliseconds32 = core::time::Duration;
@@ -19,10 +17,10 @@ pub trait ClockBase {
 mod internal {
     // no specific platform, a test-able system clock is set up.
     mod no_op {
+        use crate::{chip_ok, ChipError, ChipErrorResult};
         use super::super::*;
-        use core::cell::OnceCell;
         use core::time::Duration;
-        use core::sync::atomic::AtomicU64;
+        use core::sync::atomic::{AtomicU64, Ordering};
 
         static CLOCK: Clock = Clock::new();
 
@@ -43,11 +41,25 @@ mod internal {
         pub fn init() { }
 
         pub fn get_monotonic_timestamp() -> Timestamp {
-            Duration::ZERO
+            let ms = CLOCK.m_system_time.load(Ordering::Relaxed);
+
+            Duration::from_millis(ms)
+        }
+
+        pub fn get_clock_realtime() -> Result<Micsoseconds, ChipError> {
+            let ms = CLOCK.m_real_time.load(Ordering::Relaxed);
+
+            Ok(Duration::from_millis(ms))
+        }
+
+        pub fn set_clock_realtime(a_new_cur_time: Micsoseconds) -> ChipErrorResult {
+            CLOCK.m_real_time.store(a_new_cur_time.as_millis() as u64, Ordering::Relaxed);
+
+            chip_ok!()
         }
     }
 
-    pub use no_op::{init, get_monotonic_timestamp};
+    pub use no_op::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime};
 }// end of internal
 
-pub use internal::{init, get_monotonic_timestamp};
+pub use internal::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime};
