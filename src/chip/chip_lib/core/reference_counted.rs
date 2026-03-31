@@ -47,6 +47,8 @@ pub mod rc {
     use core::ops::Deref;
     use super::super::layout;
 
+    pub type DefaultAlloactor<T, const N: usize> = crate::chip::chip_lib::support::pool::BitMapObjectPool<RcInner<T>, N>;
+
     pub trait Allocator<T> {
         fn allocate(&mut self, init_value: RcInner<T>) -> Result<* mut RcInner<T>, ()>;
 
