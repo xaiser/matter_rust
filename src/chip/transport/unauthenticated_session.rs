@@ -30,3 +30,15 @@ impl SessionBase for UnauthenticatedSession {
     }
     */
 }
+
+#[cfg(test)]
+mod tests {
+    mod holder {
+        use super::super::*;
+        use crate::chip::transport::session::{SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase};
+
+        struct Holder {
+            m_session: SessionHolder,
+        }
+    }
+} // end of tests

@@ -49,6 +49,7 @@ mod session_holder {
     };
 
     use super::Session;
+    use core::ops::Deref;
 
     // Alloactor for reference counted pointer of session
     pub const ALLOACTOR_CAP: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_SECURE_SESSION_POOL_SIZE;
@@ -74,9 +75,19 @@ mod session_holder {
         LinkedList::new(new_session_holder_adapter())
     }
 
+    #[derive(Copy)]
     pub struct SessionHolder {
-        link: Link,
+        m_link: Link,
         m_session: Option<SessionHandle>,
+    }
+
+    impl Clone for SessionHolder {
+        fn clone(&self) -> Self {
+            how
+            if let Some(s) = self.m_session.as_mut() {
+                s.add_holder(
+            }
+        }
     }
 
     impl SessionHolder {
@@ -85,6 +96,22 @@ mod session_holder {
                 link: Link::new(),
                 m_session: None,
             }
+        }
+
+        pub fn contain(&self, session: &SessionHandle) -> bool {
+            self.m_session.as_ref().is_some_and(|s| SessionHandle::ptr_eq(s, session))
+        }
+
+        pub fn is_some(&self) -> bool {
+            self.m_session.is_some()
+        }
+
+        pub fn get(&self) -> Option<SessionHandle> {
+            self.m_session.clone()
+        }
+
+        pub fn as_ref(&self) -> Option<&SessionHandle> {
+            self.m_session.as_ref()
         }
     }
 }
@@ -251,3 +278,4 @@ impl SessionBase for Session {
     }
     */
 }
+
