@@ -1,5 +1,6 @@
+#![allow(dead_code)]
 use crate::chip::transport::session::{
-    SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase, 
+    SessionType, SessionHolderList, SessionBase, 
     new_session_holder_list, SessionBasePrivate};
 
 pub trait AsMut {

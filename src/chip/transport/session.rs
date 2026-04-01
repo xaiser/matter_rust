@@ -1,4 +1,5 @@
 use crate::{
+    chip_internal_log, chip_log_error, chip_internal_log_impl,
     chip::{
         access::subject_descriptor::SubjectDescriptor,
         chip_lib::{
@@ -21,6 +22,8 @@ use crate::{
         ScopedNodeId, FabricIndex,
     },
 };
+
+use core::str::FromStr;
 
 #[repr(u8)]
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -60,7 +63,6 @@ mod session_holder {
     use crate::{
         chip::{
             chip_lib::{
-                core::reference_counted::rc::{DefaultAlloactor, Rc},
                 support::{
                     intrusive_list::{
                         linked_list::{self, Link},
@@ -69,12 +71,11 @@ mod session_holder {
                     },
                 },
             },
-            transport::secure_session::{SecureSession, AsRef},
+            transport::secure_session::AsRef,
         }
     };
 
-    use super::{Session, SessionBase, session_handle::SessionHandle};
-    use core::ops::Deref;
+    use super::{SessionBase, session_handle::SessionHandle};
 
     // Adapter for holder linked list
     type Adapter = adapter::linked_list::unsafe_ref::DefaultAdapter<SessionHolder>;
@@ -92,6 +93,7 @@ mod session_holder {
     }
 
     pub struct SessionHolder {
+        #[allow(dead_code)]
         m_link: Link,
         m_session: Option<SessionHandle>,
     }
@@ -122,7 +124,7 @@ mod session_holder {
             self.m_session.clone()
         }
 
-        pub fn grab_pairing_session(&mut self, mut session: SessionHandle) -> Result<(), SessionHandle> {
+        pub fn grab_pairing_session(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
             if session.as_ref().as_ref().is_some_and(|s| s.is_establishing()) {
@@ -133,7 +135,7 @@ mod session_holder {
             Err(session)
         }
 
-        pub fn grab(&mut self, mut session: SessionHandle) -> Result<(), SessionHandle> {
+        pub fn grab(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
             if !session.is_active_session() {
@@ -284,24 +286,24 @@ pub type SessionHolder = session_holder::SessionHolder;
 pub type SessionHolderList = session_holder::LinkedList;
 pub use session_holder::new_session_holder_list;
 
-pub(super) trait SessionBasePrivate {
+pub trait SessionBasePrivate {
     fn holders(&mut self) -> &mut SessionHolderList;
 }
 
 pub trait SessionBase: SessionBasePrivate {
     fn get_session_type(&self) -> SessionType;
 
-    //fn holders(&mut self) -> &mut SessionHolderList;
-
     fn add_holder(&mut self, holder: &SessionHolder) {
-        let mut list = self.holders();
+        let list = self.holders();
         unsafe {
-            list.push_back(SessionHolderHandle::from_raw(holder));
+            let _ = list.push_back(SessionHolderHandle::from_raw(holder)).inspect_err(|_|
+                chip_log_error!(SecureChannel, "list full")
+            );
         }
     }
 
     fn remove_holder(&mut self, holder: &SessionHolder) {
-        let mut list = self.holders();
+        let list = self.holders();
         unsafe {
             let mut cur_mut = list.cursor_mut_from_ptr(holder);
             cur_mut.remove();
