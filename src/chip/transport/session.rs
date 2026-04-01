@@ -18,6 +18,7 @@ use crate::{
         transport::{
             unauthenticated_session::{self, UnauthenticatedSession},
             secure_session::{self, SecureSession},
+            group_session::{self, IncomingGroupSession, OutgoingGroupSession},
         },
         ScopedNodeId, FabricIndex,
     },
@@ -312,6 +313,29 @@ pub trait SessionBase: SessionBasePrivate {
 
     fn is_active_session(&self) -> bool;
 
+    fn is_group_session(&self) -> bool {
+        match self.get_session_type() {
+            SessionType::KGroupIncoming | SessionType::KGroupOutgoing => {
+                true
+            },
+            _ => {
+                false
+            }
+        }
+    }
+
+    fn compute_round_trip_timeout(&self, upperlayer_processing_timeout: Timeout, is_first_message_on_exchange: bool) -> Timeout {
+        if self.is_group_session() {
+            return Timeout::ZERO;
+        }
+
+        Timeout::ZERO
+    }
+
+    fn get_ack_timeout(&self, is_first_message_on_exchange: bool) -> Milliseconds;
+
+    fn get_message_receipt_timeout(&self, our_last_activity: Timestamp, is_first_message_on_exchange: bool) -> Milliseconds;
+
     /*
     fn get_peer(&self) -> ScopedNodeId;
 
@@ -329,28 +353,11 @@ pub trait SessionBase: SessionBasePrivate {
 
     fn is_comissioning_session(&self) -> bool { false }
 
-    fn get_ack_timeout(&self, is_first_message_on_exchange: bool) -> Milliseconds;
-
-    fn get_message_receipt_timeout(&self, our_last_activity: Timestamp, is_first_message_on_exchange: bool) -> Milliseconds;
-
     fn get_remote_mrp_config(&self) -> &ReliableMessageProtocolConfig {
         self.get_remote_session_parameters().get_mrp_config()
     }
 
-    fn compute_round_trip_timeout(&self, upperlayer_processing_timeout: Timeout, is_first_message_on_exchange: bool) -> Timeout;
-
     fn get_fabric_index(&self) -> FabricIndex;
-
-    fn is_group_session(&self) -> bool {
-        match self.get_session_type() {
-            SessionType::KGroupIncoming | SessionType::KGroupOutgoing => {
-                true
-            },
-            _ => {
-                false
-            }
-        }
-    }
 
     fn is_sescure_session(&self) -> bool {
         self.get_session_type() == SessionType::KSecure
@@ -373,6 +380,8 @@ pub trait SessionBase: SessionBasePrivate {
 pub enum Session {
     Secure(SecureSession),
     Unauthenticated(UnauthenticatedSession),
+    IncomingGroupSession(IncomingGroupSession),
+    OutgoingGroupSession(OutgoingGroupSession),
 }
 
 impl secure_session::AsMut for Session {
@@ -427,6 +436,58 @@ impl unauthenticated_session::AsRef for Session {
     }
 }
 
+impl group_session::incoming::AsMut for Session {
+    fn as_mut(&mut self) -> Option<&mut IncomingGroupSession> {
+        match self {
+            Session::IncomingGroupSession(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
+impl group_session::incoming::AsRef for Session {
+    fn as_ref(&self) -> Option<&IncomingGroupSession> {
+        match self {
+            Session::IncomingGroupSession(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
+impl group_session::outgoing::AsMut for Session {
+    fn as_mut(&mut self) -> Option<&mut OutgoingGroupSession> {
+        match self {
+            Session::OutgoingGroupSession(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
+impl group_session::outgoing::AsRef for Session {
+    fn as_ref(&self) -> Option<&OutgoingGroupSession> {
+        match self {
+            Session::OutgoingGroupSession(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
 impl SessionBasePrivate for Session {
     fn holders(&mut self) -> &mut SessionHolderList {
         match self {
@@ -434,6 +495,12 @@ impl SessionBasePrivate for Session {
                 session.holders()
             },
             Session::Secure(session) => {
+                session.holders()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.holders()
+            },
+            Session::OutgoingGroupSession(session) => {
                 session.holders()
             },
         }
@@ -449,21 +516,14 @@ impl SessionBase for Session {
             Session::Secure(_) => {
                 SessionType::KSecure
             },
-        }
-    }
-
-    /*
-    fn holders(&mut self) -> &mut SessionHolderList {
-        match self {
-            Session::Unauthenticated(session) => {
-                session.holders()
+            Session::IncomingGroupSession(_) => {
+                SessionType::KGroupIncoming
             },
-            Session::Secure(session) => {
-                session.holders()
+            Session::OutgoingGroupSession(_) => {
+                SessionType::KGroupOutgoing
             },
         }
     }
-    */
 
     fn is_active_session(&self) -> bool {
         match self {
@@ -473,35 +533,48 @@ impl SessionBase for Session {
             Session::Secure(session) => {
                 session.is_active_session()
             },
-        }
-    }
-    /*
-    fn add_holder(&mut self, holder: SessionHolderHandle) {
-        match self {
-            Session::Unauthenticated(session) => {
-                session.add_holder(holder);
+            Session::IncomingGroupSession(session) => {
+                session.is_active_session()
             },
-            Session::Secure(session) => {
-                session.add_holder(holder);
+            Session::OutgoingGroupSession(session) => {
+                session.is_active_session()
             },
-            _ => {
-            }
         }
     }
 
-    fn remove_holder(&mut self, holder: SessionHolderHandle) {
+    fn get_ack_timeout(&self, is_first_message_on_exchange: bool) -> Milliseconds {
         match self {
             Session::Unauthenticated(session) => {
-                session.remove_holder(holder)
+                session.get_ack_timeout(is_first_message_on_exchange)
             },
             Session::Secure(session) => {
-                session.add_holder(holder);
+                session.get_ack_timeout(is_first_message_on_exchange)
             },
-            _ => {
-            }
+            Session::IncomingGroupSession(session) => {
+                session.get_ack_timeout(is_first_message_on_exchange)
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_ack_timeout(is_first_message_on_exchange)
+            },
         }
     }
-    */
+
+    fn get_message_receipt_timeout(&self, our_last_activity: Timestamp, is_first_message_on_exchange: bool) -> Milliseconds {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_message_receipt_timeout(our_last_activity, is_first_message_on_exchange)
+            },
+            Session::Secure(session) => {
+                session.get_message_receipt_timeout(our_last_activity, is_first_message_on_exchange)
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_message_receipt_timeout(our_last_activity, is_first_message_on_exchange)
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_message_receipt_timeout(our_last_activity, is_first_message_on_exchange)
+            },
+        }
+    }
 }
 
 impl Session {
@@ -511,6 +584,13 @@ impl Session {
 
     pub const fn new_unauthenticated() -> Session {
         Session::Unauthenticated(UnauthenticatedSession::new())
+    }
+    pub const fn new_incoming_group() -> Session {
+        Session::IncomingGroupSession(IncomingGroupSession::new())
+    }
+
+    pub const fn new_outgoing_group() -> Session {
+        Session::OutgoingGroupSession(OutgoingGroupSession::new())
     }
 }
 

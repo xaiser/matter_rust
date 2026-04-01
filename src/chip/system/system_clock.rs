@@ -5,6 +5,7 @@ pub type Milliseconds = core::time::Duration;
 pub type Micsoseconds = core::time::Duration;
 pub type Timeout = core::time::Duration;
 pub type Timestamp = core::time::Duration;
+pub type Seconds = core::time::Duration;
 
 /*
 pub trait ClockBase {

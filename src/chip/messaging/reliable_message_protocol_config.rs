@@ -1,6 +1,9 @@
-use crate::chip::{
-    system::system_clock::{self, Timeout},
-    messaging::reliable_message_mgr::ReliableMessageMgr,
+use crate::{
+    //chip_static_assert,
+    chip::{
+        system::system_clock::{self, Timeout, Milliseconds},
+        messaging::reliable_message_mgr::ReliableMessageMgr,
+    },
 };
 use core::time::Duration;
 
@@ -77,5 +80,13 @@ impl ReliableMessageProtocolConfig {
         }
 
         timeout
+    }
+
+    pub const fn get_default_mrp_config() -> Self {
+        const IDLE_RETRANS_TIMEOUT: Milliseconds = Milliseconds::from_millis(500);
+        const ACTIVE_RETRANS_TIMEOUT:  Milliseconds = Milliseconds::from_millis(300);
+        const ACTIVE_THRESHOLD_TIME:  Milliseconds = Milliseconds::from_millis(4000);
+
+        Self::new_with_all(IDLE_RETRANS_TIMEOUT, ACTIVE_RETRANS_TIMEOUT, ACTIVE_THRESHOLD_TIME)
     }
 }

@@ -9,6 +9,7 @@ pub mod tracing;
 pub mod transport;
 pub mod access;
 pub mod messaging;
+pub mod ble;
 
 pub use chip_lib::asn1::asn1;
 pub use chip_lib::core::chip_encoding as encoding;

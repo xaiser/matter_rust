@@ -8,11 +8,15 @@ pub enum InterfaceType {
     Thread,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct InterfaceId {}
+#[derive(Debug, Clone, Copy)]
+pub struct InterfaceId;
 
 impl InterfaceId {
     pub const K_MAX_IF_NAME_LENGTH: u32 = 13;
+
+    pub const fn default() -> Self {
+        InterfaceId
+    }
 }
 
 impl fmt::Display for InterfaceId {

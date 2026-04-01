@@ -83,6 +83,15 @@ impl PeerAddress {
         Self { m_transport_type: the_type, m_remote_id: id }
     }
     */
+    pub const fn new() -> Self {
+        Self {
+            m_transport_type: Type::KUndefined,
+            m_remote_id: 0,
+            m_ip_address: IPAddress::default(),
+            m_interface: InterfaceId::default(),
+            m_port: 0,
+        }
+    }
 
     pub fn new_addr_type(addr: IPAddress, the_type: Type) -> Self {
         Self {

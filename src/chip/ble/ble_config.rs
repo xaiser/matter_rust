@@ -1,0 +1,1 @@
+pub const BTP_ACK_TIMEOUT_MS: u64 = 15000;
