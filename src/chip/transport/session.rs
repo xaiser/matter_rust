@@ -32,29 +32,49 @@ pub enum SessionType {
     KGroupOutgoing = 4,
 }
 
-mod session_holder {
+mod session_handle {
     use crate::{
-        //create_object_pool,
         chip::chip_lib::{
             core::reference_counted::rc::{DefaultAlloactor, Rc},
-            support::{
-                intrusive_list::{
-                    linked_list::{self, Link},
-                    adapter,
-                    unsafe_ref::UnsafeRef,
-                },
-                //pool::{ObjectPool, KInline, BitMapObjectPool},
-            },
         }
     };
 
-    use super::{Session, SessionBase};
-    use core::ops::Deref;
+    use super::Session;
 
     // Alloactor for reference counted pointer of session
     pub const ALLOACTOR_CAP: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_SECURE_SESSION_POOL_SIZE;
-    type Alloactor = DefaultAlloactor<Session, ALLOACTOR_CAP>;
-    type SessionHandle = Rc<Session, Alloactor>;
+    pub type Alloactor = DefaultAlloactor<Session, ALLOACTOR_CAP>;
+    pub type SessionHandle= Rc<Session, Alloactor>;
+
+    pub const fn new_session_alloactor() -> Alloactor {
+        Alloactor::new()
+    }
+
+    pub fn try_new_handle(session: Session, alloactor: &mut Alloactor) -> Result<SessionHandle, ()> {
+        SessionHandle::try_new_in(session, alloactor)
+    }
+}
+
+// At the monent, the user must ensure the holder is not moved after allocated.
+mod session_holder {
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::reference_counted::rc::{DefaultAlloactor, Rc},
+                support::{
+                    intrusive_list::{
+                        linked_list::{self, Link},
+                        adapter,
+                        unsafe_ref::UnsafeRef,
+                    },
+                },
+            },
+            transport::secure_session::{SecureSession, AsRef},
+        }
+    };
+
+    use super::{Session, SessionBase, session_handle::SessionHandle};
+    use core::ops::Deref;
 
     // Adapter for holder linked list
     type Adapter = adapter::linked_list::unsafe_ref::DefaultAdapter<SessionHolder>;
@@ -63,15 +83,11 @@ mod session_holder {
     // Handle for holder
     pub type Handle = UnsafeRef<SessionHolder>;
 
-    const fn new_session_alloactor() -> Alloactor {
-        Alloactor::new()
-    }
-
     const fn new_session_holder_adapter() -> Adapter {
         Adapter::new()
     }
 
-    const fn new_session_holder_list() -> LinkedList {
+    pub const fn new_session_holder_list() -> LinkedList {
         LinkedList::new(new_session_holder_adapter())
     }
 
@@ -106,16 +122,27 @@ mod session_holder {
             self.m_session.clone()
         }
 
-        pub fn grab(&mut self, mut session: SessionHandle) -> bool {
+        pub fn grab_pairing_session(&mut self, mut session: SessionHandle) -> Result<(), SessionHandle> {
+            self.release();
+
+            if session.as_ref().as_ref().is_some_and(|s| s.is_establishing()) {
+                self.grab_unchecked(session);
+                return Ok(());
+            }
+
+            Err(session)
+        }
+
+        pub fn grab(&mut self, mut session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
             if !session.is_active_session() {
-                return false;
+                return Err(session);
             }
 
             self.grab_unchecked(session);
 
-            true
+            Ok(())
         }
 
         fn grab_unchecked(&mut self, mut session: SessionHandle) {
@@ -159,16 +186,112 @@ mod session_holder {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use super::super::{
+            session_handle::{
+                new_session_alloactor, try_new_handle,
+            },
+            SessionBasePrivate,
+        };
+        use crate::chip::chip_lib::support::{
+            pool::{ObjectPool, KInline, BitMapObjectPool},
+        };
+
+        const POOL_SIZE: usize = 1;
+        type TestPool = BitMapObjectPool<Holder, POOL_SIZE>;
+
+        struct Holder {
+            pub m_session: SessionHolder,
+        }
+
+        impl Holder {
+            pub fn new() -> Self {
+                Self {
+                    m_session: SessionHolder::new(),
+                }
+            }
+        }
+
+        #[test]
+        fn new_holder_successfully() {
+            let mut pool = TestPool::new();
+            let holder = pool.allocate(Holder::new());
+            assert!(!holder.is_null());
+        }
+
+        #[test]
+        fn grab_successfully() {
+            let mut holder_pool = TestPool::new();
+            let mut holder = holder_pool.allocate(Holder::new());
+
+            let mut session_pool = new_session_alloactor();
+            let mut session = try_new_handle(Session::new_secure(), &mut session_pool);
+            assert!(session.is_ok());
+            let mut session = session.unwrap();
+
+            unsafe {
+                assert!((*holder).m_session.grab(session).is_ok());
+            }
+        }
+
+        #[test]
+        fn drop_successfully() {
+            let mut holder_pool = TestPool::new();
+            let mut holder = holder_pool.allocate(Holder::new());
+
+            let mut session_pool = new_session_alloactor();
+            let mut session = try_new_handle(Session::new_secure(), &mut session_pool);
+            assert!(session.is_ok());
+            let session = session.unwrap();
+            // make some copies used later for check
+            let mut session_copy = session.clone();
+            let session_copy_2 = session.clone();
+
+            assert_eq!(3, SessionHandle::strong_count(&session_copy));
+
+            unsafe {
+                assert!((*holder).m_session.grab(session).is_ok());
+            }
+
+            // ensure grab doesn't increase the reference count
+            assert_eq!(3, SessionHandle::strong_count(&session_copy));
+
+            unsafe {
+                // ensure there is only one holders
+                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().front().get().
+                    is_some_and(|h| h.contain(&session_copy_2)));
+                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().back().get().
+                    is_some_and(|h| h.contain(&session_copy_2)));
+
+                core::ptr::drop_in_place(holder);
+
+                // ensure the holder list is empty
+                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().front().get().
+                    is_none());
+            }
+
+            // the count should be 2
+            assert_eq!(2, SessionHandle::strong_count(&session_copy));
+        }
+    } // end of tests
 }
 
 pub type SessionHolderHandle = session_holder::Handle;
 pub type SessionHolder = session_holder::SessionHolder;
 pub type SessionHolderList = session_holder::LinkedList;
+pub use session_holder::new_session_holder_list;
 
-pub trait SessionBase {
+pub(super) trait SessionBasePrivate {
+    fn holders(&mut self) -> &mut SessionHolderList;
+}
+
+pub trait SessionBase: SessionBasePrivate {
     fn get_session_type(&self) -> SessionType;
 
-    fn holders(&mut self) -> &mut SessionHolderList;
+    //fn holders(&mut self) -> &mut SessionHolderList;
 
     fn add_holder(&mut self, holder: &SessionHolder) {
         let mut list = self.holders();
@@ -263,6 +386,19 @@ impl secure_session::AsMut for Session {
     }
 }
 
+impl secure_session::AsRef for Session {
+    fn as_ref(&self) -> Option<&SecureSession> {
+        match self {
+            Session::Secure(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
 impl unauthenticated_session::AsMut for Session {
     fn as_mut(&mut self) -> Option<&mut UnauthenticatedSession> {
         match self {
@@ -272,6 +408,32 @@ impl unauthenticated_session::AsMut for Session {
             _ => {
                 None
             }
+        }
+    }
+}
+
+impl unauthenticated_session::AsRef for Session {
+    fn as_ref(&self) -> Option<&UnauthenticatedSession> {
+        match self {
+            Session::Unauthenticated(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
+impl SessionBasePrivate for Session {
+    fn holders(&mut self) -> &mut SessionHolderList {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.holders()
+            },
+            Session::Secure(session) => {
+                session.holders()
+            },
         }
     }
 }
@@ -288,6 +450,7 @@ impl SessionBase for Session {
         }
     }
 
+    /*
     fn holders(&mut self) -> &mut SessionHolderList {
         match self {
             Session::Unauthenticated(session) => {
@@ -298,6 +461,7 @@ impl SessionBase for Session {
             },
         }
     }
+    */
 
     fn is_active_session(&self) -> bool {
         match self {
@@ -337,4 +501,15 @@ impl SessionBase for Session {
     }
     */
 }
+
+impl Session {
+    pub const fn new_secure() -> Session {
+        Session::Secure(SecureSession::new())
+    }
+
+    pub const fn new_unauthenticated() -> Session {
+        Session::Unauthenticated(UnauthenticatedSession::new())
+    }
+}
+
 

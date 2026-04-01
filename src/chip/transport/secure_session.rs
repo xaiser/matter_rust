@@ -1,11 +1,23 @@
-use crate::chip::transport::session::{SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase};
+use crate::chip::transport::session::{
+    SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase, 
+    new_session_holder_list, SessionBasePrivate};
 
 pub trait AsMut {
     fn as_mut(&mut self) -> Option<&mut SecureSession>;
 }
 
+pub trait AsRef {
+    fn as_ref(&self) -> Option<&SecureSession>;
+}
+
 pub struct SecureSession {
     m_holders: SessionHolderList,
+}
+
+impl SessionBasePrivate for SecureSession {
+    fn holders(&mut self) -> &mut SessionHolderList {
+        &mut self.m_holders
+    }
 }
 
 impl SessionBase for SecureSession {
@@ -13,13 +25,15 @@ impl SessionBase for SecureSession {
         SessionType::KSecure
     }
 
+    /*
     fn holders(&mut self) -> &mut SessionHolderList {
         &mut self.m_holders
     }
+    */
 
     fn is_active_session(&self) -> bool {
         // TODO: this is just a stub return value
-        false
+        true
     }
     /*
     fn add_holder(&mut self, holder: SessionHolderHandle) {
@@ -33,4 +47,17 @@ impl SessionBase for SecureSession {
         }
     }
     */
+}
+
+impl SecureSession {
+    pub const fn new() -> Self {
+        Self {
+            m_holders: new_session_holder_list(),
+        }
+    }
+
+    pub fn is_establishing(&self) -> bool {
+        // TODO: this is just a stub return
+        true
+    }
 }

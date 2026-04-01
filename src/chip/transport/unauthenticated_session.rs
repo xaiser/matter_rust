@@ -1,4 +1,9 @@
-use crate::chip::transport::session::{SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase};
+use crate::chip::transport::session::{SessionType, SessionHolderHandle, SessionHolder, 
+    SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate};
+
+pub trait AsRef {
+    fn as_ref(&self) -> Option<&UnauthenticatedSession>;
+}
 
 pub trait AsMut {
     fn as_mut(&mut self) -> Option<&mut UnauthenticatedSession>;
@@ -8,18 +13,26 @@ pub struct UnauthenticatedSession {
     m_holders: SessionHolderList,
 }
 
+impl SessionBasePrivate for UnauthenticatedSession {
+    fn holders(&mut self) -> &mut SessionHolderList {
+        &mut self.m_holders
+    }
+}
+
 impl SessionBase for UnauthenticatedSession {
     fn get_session_type(&self) -> SessionType {
         SessionType::KUnauthenticated
     }
 
+    /*
     fn holders(&mut self) -> &mut SessionHolderList {
         &mut self.m_holders
     }
+    */
 
     fn is_active_session(&self) -> bool {
         // TODO: this is just a stub return value
-        false
+        true
     }
 
     /*
@@ -36,14 +49,10 @@ impl SessionBase for UnauthenticatedSession {
     */
 }
 
-#[cfg(test)]
-mod tests {
-    mod holder {
-        use super::super::*;
-        use crate::chip::transport::session::{SessionType, SessionHolderHandle, SessionHolder, SessionHolderList, SessionBase};
-
-        struct Holder {
-            m_session: SessionHolder,
+impl UnauthenticatedSession {
+    pub const fn new() -> Self {
+        Self {
+            m_holders: new_session_holder_list(),
         }
     }
-} // end of tests
+}
