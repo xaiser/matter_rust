@@ -17,6 +17,11 @@ impl SessionBase for UnauthenticatedSession {
         &mut self.m_holders
     }
 
+    fn is_active_session(&self) -> bool {
+        // TODO: this is just a stub return value
+        false
+    }
+
     /*
     fn add_holder(&mut self, holder: SessionHolderHandle) {
         self.m_holders.push_back(holder);

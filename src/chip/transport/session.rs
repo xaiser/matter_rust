@@ -48,7 +48,7 @@ mod session_holder {
         }
     };
 
-    use super::Session;
+    use super::{Session, SessionBase};
     use core::ops::Deref;
 
     // Alloactor for reference counted pointer of session
@@ -75,25 +75,21 @@ mod session_holder {
         LinkedList::new(new_session_holder_adapter())
     }
 
-    #[derive(Copy)]
     pub struct SessionHolder {
         m_link: Link,
         m_session: Option<SessionHandle>,
     }
 
-    impl Clone for SessionHolder {
-        fn clone(&self) -> Self {
-            how
-            if let Some(s) = self.m_session.as_mut() {
-                s.add_holder(
-            }
+    impl Drop for SessionHolder {
+        fn drop(&mut self) {
+            self.release();
         }
     }
 
     impl SessionHolder {
         pub fn new() -> Self {
             Self {
-                link: Link::new(),
+                m_link: Link::new(),
                 m_session: None,
             }
         }
@@ -110,8 +106,57 @@ mod session_holder {
             self.m_session.clone()
         }
 
+        pub fn grab(&mut self, mut session: SessionHandle) -> bool {
+            self.release();
+
+            if !session.is_active_session() {
+                return false;
+            }
+
+            self.grab_unchecked(session);
+
+            true
+        }
+
+        fn grab_unchecked(&mut self, mut session: SessionHandle) {
+            if self.m_session.is_some() {
+                // should never reach here
+                panic!("grab but not release session");
+            }
+
+            // Safety:
+            // 1. There is only 1 owner will access the holder list at a time since CHIP stack
+            //    is running on a single thread.
+            // 2. The rest of session data will remain the same so other owner should still see
+            //    the same data, therefore, keep acting as if no changes in the session.
+            // 3. Since this session is still holded at this monent, the underlying session
+            //    object must be alive.
+            unsafe {
+                SessionHandle::get_mut_unchecked(&mut session).add_holder(self);
+            }
+            self.m_session = Some(session);
+        }
+
         pub fn as_ref(&self) -> Option<&SessionHandle> {
             self.m_session.as_ref()
+        }
+
+        pub fn release(&mut self) {
+            let session = self.m_session.take();
+            if session.is_none() {
+                return;
+            }
+            let mut session = session.unwrap();
+            // Safety:
+            // 1. There is only 1 owner will access the holder list at a time since CHIP stack
+            //    is running on a single thread.
+            // 2. The rest of session data will remain the same so other owner should still see
+            //    the same data, therefore, keep acting as if no changes in the session.
+            // 3. Since this session is still holded at this monent, the underlying session
+            //    object must be alive.
+            unsafe {
+                SessionHandle::get_mut_unchecked(&mut session).remove_holder(self);
+            }
         }
     }
 }
@@ -125,22 +170,24 @@ pub trait SessionBase {
 
     fn holders(&mut self) -> &mut SessionHolderList;
 
-    fn add_holder(&mut self, holder: SessionHolderHandle) {
-        let mut list = self.holders();
-        list.push_back(holder);
-    }
-
-    fn remove_holder(&mut self, holder: SessionHolderHandle) {
+    fn add_holder(&mut self, holder: &SessionHolder) {
         let mut list = self.holders();
         unsafe {
-            let mut cur_mut = list.cursor_mut_from_ptr(SessionHolderHandle::into_raw(holder));
+            list.push_back(SessionHolderHandle::from_raw(holder));
+        }
+    }
+
+    fn remove_holder(&mut self, holder: &SessionHolder) {
+        let mut list = self.holders();
+        unsafe {
+            let mut cur_mut = list.cursor_mut_from_ptr(holder);
             cur_mut.remove();
         }
     }
 
-    /*
     fn is_active_session(&self) -> bool;
 
+    /*
     fn get_peer(&self) -> ScopedNodeId;
 
     fn get_local_scoped_node_id(&self) -> ScopedNodeId;
@@ -240,6 +287,7 @@ impl SessionBase for Session {
             },
         }
     }
+
     fn holders(&mut self) -> &mut SessionHolderList {
         match self {
             Session::Unauthenticated(session) => {
@@ -247,6 +295,17 @@ impl SessionBase for Session {
             },
             Session::Secure(session) => {
                 session.holders()
+            },
+        }
+    }
+
+    fn is_active_session(&self) -> bool {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.is_active_session()
+            },
+            Session::Secure(session) => {
+                session.is_active_session()
             },
         }
     }
