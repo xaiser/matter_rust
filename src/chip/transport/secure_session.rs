@@ -1,18 +1,30 @@
 #![allow(dead_code)]
-use crate::chip::{
-    ble::ble_config::BTP_ACK_TIMEOUT_MS,
-    transport::{
-        session::{
-            SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
+use crate::{
+    verify_or_die,
+    chip::{
+        access::{self, subject_descriptor::SubjectDescriptor},
+        ble::ble_config::BTP_ACK_TIMEOUT_MS,
+        chip_lib::core::{
+            case_auth_tag::CATValues,
+            node_id::{KUNDEFINED_NODE_ID, is_operational_node_id, is_pake_key_id},
+            data_model_types::KUNDEFINED_FABRIC_INDEX,
         },
-        raw::peer_address::{self, PeerAddress},
+        transport::{
+            session::{
+                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
+            },
+            raw::peer_address::{self, PeerAddress},
+        },
+        messaging::{
+            session_parameters::SessionParameters,
+            reliable_message_protocol_config::ReliableMessageProtocolConfig,
+        },
+        system::system_clock::{Timestamp, Seconds, Milliseconds},
+        ScopedNodeId, NodeId, FabricIndex,
     },
-    messaging::{
-        session_parameters::SessionParameters,
-        reliable_message_protocol_config::ReliableMessageProtocolConfig,
-    },
-    system::system_clock::{Timestamp, Seconds, Milliseconds},
 };
+
+use core::cell::OnceCell;
 
 pub trait AsMut {
     fn as_mut(&mut self) -> Option<&mut SecureSession>;
@@ -22,11 +34,24 @@ pub trait AsRef {
     fn as_ref(&self) -> Option<&SecureSession>;
 }
 
+#[derive(PartialEq, Eq, Copy, Clone)]
+enum Type {
+    Kpase = 1,
+    Kcase = 2,
+}
+
 pub struct SecureSession {
     m_holders: SessionHolderList,
     m_peer_address: PeerAddress,
     m_remote_session_params: SessionParameters,
     m_last_peer_activity_time: Timestamp,
+    m_local_session_id: OnceCell<u16>,
+    m_peer_node_id: NodeId,
+    m_fabric_index: FabricIndex,
+    m_local_node_id: NodeId,
+    m_secure_session_type: Type,
+    m_is_case_commissioning_session: bool,
+    m_peer_cats: CATValues,
 }
 
 impl SessionBasePrivate for SecureSession {
@@ -86,6 +111,43 @@ impl SessionBase for SecureSession {
             }
         }
     }
+
+    fn get_peer(&self) -> ScopedNodeId {
+        ScopedNodeId::default_with_ids(self.m_peer_node_id, self.get_fabric_index())
+    }
+
+    fn get_fabric_index(&self) -> FabricIndex {
+        self.m_fabric_index
+    }
+
+    fn get_local_scoped_node_id(&self) -> ScopedNodeId {
+        ScopedNodeId::default_with_ids(self.m_local_node_id, self.get_fabric_index())
+    }
+
+    fn get_subject_descriptor(&self) -> SubjectDescriptor {
+        let subject_descriptor = {
+            if is_operational_node_id(self.m_peer_node_id) {
+                SubjectDescriptor {
+                    fabric_index: self.get_fabric_index(),
+                    auth_mode: access::auth_mode::AuthMode::KCase,
+                    subject: self.m_peer_node_id,
+                    cats: self.m_peer_cats,
+                    is_commissioning: self.is_commissioning_session()
+                }
+            } else if is_pake_key_id(self.m_peer_node_id) {
+                // TODO: continue here
+                SubjectDescriptor::new()
+            } else {
+                verify_or_die!(false);
+                SubjectDescriptor::new()
+            }
+        };
+
+        subject_descriptor
+    }
+
+    // no used
+    fn session_id_for_logging(&self) -> u16 { 0 }
 }
 
 impl SecureSession {
@@ -95,6 +157,13 @@ impl SecureSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
             m_last_peer_activity_time: Timestamp::ZERO,
+            m_local_session_id: OnceCell::new(),
+            m_peer_node_id: KUNDEFINED_NODE_ID,
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            m_local_node_id: KUNDEFINED_NODE_ID,
+            m_secure_session_type: Type::Kpase,
+            m_is_case_commissioning_session: false,
+            m_peer_cats: CATValues::new(),
         }
     }
 
@@ -104,4 +173,38 @@ impl SecureSession {
     }
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
+
+    pub fn get_local_session_id(&self) -> u16 {
+        *(self.m_local_session_id.get_or_init(|| 0))
+    }
+
+    #[inline]
+    fn get_secure_session_type(&self) -> Type {
+        self.m_secure_session_type
+    }
+
+    #[inline]
+    fn is_case_session(&self) -> bool {
+        self.get_secure_session_type() == Type::Kcase
+    }
+
+    #[inline]
+    fn is_pase_session(&self) -> bool {
+        self.get_secure_session_type() == Type::Kpase
+    }
+
+    fn is_commissioning_session(&self) -> bool {
+        // PASE session is always a commissioning session.
+        if self.is_pase_session() {
+            return true;
+        }
+
+        // CASE session is a commissioning session if it was marked as such.
+        // The SessionManager is what keeps track.
+        if self.is_case_session() && self.m_is_case_commissioning_session {
+            return true;
+        }
+
+        false
+    }
 }

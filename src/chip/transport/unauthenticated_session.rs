@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 use crate::chip::{
+    access::subject_descriptor::SubjectDescriptor,
     ble::ble_config::BTP_ACK_TIMEOUT_MS,
+    chip_lib::core::{
+        node_id::KUNDEFINED_NODE_ID,
+        data_model_types::KUNDEFINED_FABRIC_INDEX,
+    },
     transport::{
         session::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
@@ -12,7 +17,10 @@ use crate::chip::{
         reliable_message_protocol_config::ReliableMessageProtocolConfig,
     },
     system::system_clock::{Timestamp, Seconds, Milliseconds},
+    ScopedNodeId, NodeId, FabricIndex,
 };
+
+use core::cell::OnceCell;
 
 pub trait AsRef {
     fn as_ref(&self) -> Option<&UnauthenticatedSession>;
@@ -22,11 +30,21 @@ pub trait AsMut {
     fn as_mut(&mut self) -> Option<&mut UnauthenticatedSession>;
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SessionRole {
+    Kinitiator,
+    Kresponder,
+}
+
 pub struct UnauthenticatedSession {
     m_holders: SessionHolderList,
     m_peer_address: PeerAddress,
     m_remote_session_params: SessionParameters,
     m_last_peer_activity_time: Timestamp,
+    m_peer_node_id: NodeId,
+    m_fabric_index: FabricIndex,
+    m_session_role: OnceCell<SessionRole>,
+    m_ephemeral_initiator_node_id: OnceCell<NodeId>,
 }
 
 impl SessionBasePrivate for UnauthenticatedSession {
@@ -92,6 +110,25 @@ impl SessionBase for UnauthenticatedSession {
             }
         }
     }
+
+    fn get_peer(&self) -> ScopedNodeId {
+        ScopedNodeId::default_with_ids(self.get_peer_node_id(), KUNDEFINED_FABRIC_INDEX)
+    }
+
+    fn get_fabric_index(&self) -> FabricIndex {
+        self.m_fabric_index
+    }
+
+    fn get_subject_descriptor(&self) -> SubjectDescriptor {
+        SubjectDescriptor::new()
+    }
+
+    // no used
+    fn session_id_for_logging(&self) -> u16 { 0 }
+
+    fn get_local_scoped_node_id(&self) -> ScopedNodeId {
+        ScopedNodeId::const_default()
+    }
 }
 
 impl UnauthenticatedSession {
@@ -101,8 +138,30 @@ impl UnauthenticatedSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
             m_last_peer_activity_time: Timestamp::ZERO,
+            m_peer_node_id: KUNDEFINED_NODE_ID,
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            m_session_role: OnceCell::new(),
+            m_ephemeral_initiator_node_id: OnceCell::new(),
         }
     }
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
+
+    #[inline]
+    fn get_session_role(&self) -> SessionRole {
+        *(self.m_session_role.get_or_init(|| SessionRole::Kinitiator))
+    }
+
+    #[inline]
+    fn get_ephemeral_initiator_node_id(&self) -> NodeId {
+        *(self.m_ephemeral_initiator_node_id.get_or_init(|| KUNDEFINED_NODE_ID))
+    }
+
+    fn get_peer_node_id(&self) -> NodeId {
+        if self.get_session_role() == SessionRole::Kinitiator {
+            return KUNDEFINED_NODE_ID;
+        }
+
+        self.get_ephemeral_initiator_node_id()
+    }
 }

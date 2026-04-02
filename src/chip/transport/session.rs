@@ -14,7 +14,7 @@ use crate::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
             session_parameters::SessionParameters,
         },
-        system::system_clock::{Timeout, Milliseconds, Timestamp},
+        system::system_clock::{get_monotonic_timestamp, Timeout, Milliseconds, Timestamp},
         transport::{
             unauthenticated_session::{self, UnauthenticatedSession},
             secure_session::{self, SecureSession},
@@ -27,7 +27,7 @@ use crate::{
 use core::str::FromStr;
 
 #[repr(u8)]
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SessionType {
     KUndefined = 0,
     KUnauthenticated = 1,
@@ -198,6 +198,7 @@ mod session_holder {
                 new_session_alloactor, try_new_handle,
             },
             SessionBasePrivate,
+            Session,
         };
         use crate::chip::chip_lib::support::{
             pool::{ObjectPool, KInline, BitMapObjectPool},
@@ -329,19 +330,23 @@ pub trait SessionBase: SessionBasePrivate {
             return Timeout::ZERO;
         }
 
-        Timeout::ZERO
+        self.get_ack_timeout(is_first_message_on_exchange).saturating_add(upperlayer_processing_timeout).saturating_add(self.get_message_receipt_timeout(get_monotonic_timestamp(), false))
     }
 
     fn get_ack_timeout(&self, is_first_message_on_exchange: bool) -> Milliseconds;
 
     fn get_message_receipt_timeout(&self, our_last_activity: Timestamp, is_first_message_on_exchange: bool) -> Milliseconds;
 
-    /*
+    fn session_id_for_logging(&self) -> u16;
+
     fn get_peer(&self) -> ScopedNodeId;
+
+    fn get_fabric_index(&self) -> FabricIndex;
 
     fn get_local_scoped_node_id(&self) -> ScopedNodeId;
 
-    fn get_subject_descritptor(&self) -> SubjectDescriptor;
+    fn get_subject_descriptor(&self) -> SubjectDescriptor;
+    /*
 
     fn allows_mrp(&self) -> bool;
 
@@ -357,8 +362,6 @@ pub trait SessionBase: SessionBasePrivate {
         self.get_remote_session_parameters().get_mrp_config()
     }
 
-    fn get_fabric_index(&self) -> FabricIndex;
-
     fn is_sescure_session(&self) -> bool {
         self.get_session_type() == SessionType::KSecure
     }
@@ -368,8 +371,6 @@ pub trait SessionBase: SessionBasePrivate {
     }
 
     fn notify_session_hang(&self);
-
-    fn session_id_for_logging(&self) -> u16;
 
     fn notify_session_released(&self);
 
@@ -575,6 +576,91 @@ impl SessionBase for Session {
             },
         }
     }
+
+    fn session_id_for_logging(&self) -> u16 {
+        match self {
+            Session::Unauthenticated(session) => {
+                0
+            },
+            Session::Secure(session) => {
+                session.get_local_session_id()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_group_id()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_group_id()
+            },
+        }
+    }
+
+    fn get_peer(&self) -> ScopedNodeId {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_peer()
+            },
+            Session::Secure(session) => {
+                session.get_peer()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_peer()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_peer()
+            },
+        }
+    }
+
+    fn get_fabric_index(&self) -> FabricIndex {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_fabric_index()
+            },
+            Session::Secure(session) => {
+                session.get_fabric_index()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_fabric_index()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_fabric_index()
+            },
+        }
+    }
+
+    fn get_local_scoped_node_id(&self) -> ScopedNodeId {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_local_scoped_node_id()
+            },
+            Session::Secure(session) => {
+                session.get_local_scoped_node_id()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_local_scoped_node_id()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_local_scoped_node_id()
+            },
+        }
+    }
+
+    fn get_subject_descriptor(&self) -> SubjectDescriptor {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_subject_descriptor()
+            },
+            Session::Secure(session) => {
+                session.get_subject_descriptor()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_subject_descriptor()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_subject_descriptor()
+            },
+        }
+    }
 }
 
 impl Session {
@@ -594,4 +680,49 @@ impl Session {
     }
 }
 
+pub fn get_session_type_string(session: &session_handle::SessionHandle) -> &str {
+    match session.get_session_type() {
+        SessionType::KGroupIncoming => {
+            "G"
+        },
+        SessionType::KGroupOutgoing => {
+            "G"
+        },
+        SessionType::KSecure => {
+            "S"
+        },
+        SessionType::KUnauthenticated => {
+            "U"
+        },
+        _ => {
+            "?"
+        }
+    }
+}
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_session_successfully() {
+        let session = Session::new_secure();
+
+        assert_eq!(SessionType::KSecure, session.get_session_type());
+    }
+
+    #[test]
+    fn get_round_trip_timeout() {
+        let session = Session::new_secure();
+
+        assert!(session.compute_round_trip_timeout(Timeout::from_millis(1), true).as_millis() != 0);
+    }
+
+    #[test]
+    fn get_round_trip_timeout_group() {
+        let session = Session::new_incoming_group();
+
+        assert!(session.compute_round_trip_timeout(Timeout::from_millis(1), true) == Timeout::ZERO);
+    }
+} // end of tests

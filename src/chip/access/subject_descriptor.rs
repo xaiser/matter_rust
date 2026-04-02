@@ -12,7 +12,7 @@ use crate::chip::{
 pub struct SubjectDescriptor {
     pub fabric_index: FabricIndex,
     pub auth_mode: AuthMode,
-    pub sujbect: NodeId,
+    pub subject: NodeId,
     pub cats: CATValues,
     pub is_commissioning: bool,
 }
@@ -22,7 +22,7 @@ impl SubjectDescriptor {
         Self {
             fabric_index: KUNDEFINED_FABRIC_INDEX,
             auth_mode: AuthMode::KNone,
-            sujbect: KUNDEFINED_NODE_ID,
+            subject: KUNDEFINED_NODE_ID,
             cats: CATValues::new(),
             is_commissioning: false,
         }
