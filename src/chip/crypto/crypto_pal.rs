@@ -795,6 +795,14 @@ pub trait FromOpaqueContext<const CONTEXT_SIZE: usize> {
 }
 
 impl<const CONTEXT_SIZE: usize> SymmetricKeyHandle<CONTEXT_SIZE> {
+    pub const fn new() -> Self {
+        Self {
+            m_context: OpaqueContext::<CONTEXT_SIZE>::new(),
+        }
+    }
+}
+
+impl<const CONTEXT_SIZE: usize> SymmetricKeyHandle<CONTEXT_SIZE> {
     pub fn as_ref<T>(&self) -> &T
         where
             T: FromOpaqueContext<CONTEXT_SIZE>
@@ -819,6 +827,14 @@ impl<const CONTEXT_SIZE: usize> Drop for SymmetricKeyHandle<CONTEXT_SIZE> {
 #[repr(align(8))]
 pub struct OpaqueContext<const CONTEXT_SIZE: usize> {
     pub m_opaque: [u8; CONTEXT_SIZE],
+}
+
+impl<const CONTEXT_SIZE: usize> OpaqueContext<CONTEXT_SIZE> {
+    pub const fn new() -> Self {
+        Self {
+            m_opaque: [0; CONTEXT_SIZE],
+        }
+    }
 }
 
 impl<const CONTEXT_SIZE: usize> Default for OpaqueContext<CONTEXT_SIZE> {
@@ -1431,6 +1447,20 @@ impl HKDFSha {
 
         hk.expand(info, out).map_err(|_| chip_error_internal!())
     }
+}
+
+pub trait SymmetricKeyContext {
+    fn get_key_hash(&mut self) -> u16;
+
+    fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> ChipErrorResult;
+
+    fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> ChipErrorResult;
+
+    fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
+
+    fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
+
+    fn release(&mut self);
 }
 
 #[cfg(test)]
