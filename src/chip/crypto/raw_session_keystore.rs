@@ -52,6 +52,12 @@ impl<const CONTEXT_SIZE: usize> FromOpaqueContext<CONTEXT_SIZE> for RawHkdfKeyHa
 #[derive(Default)]
 pub struct RawKeySessionKeystore;
 
+impl RawKeySessionKeystore {
+    pub const fn new() -> Self {
+        RawKeySessionKeystore
+    }
+}
+
 impl SessionKeystore for RawKeySessionKeystore {
     fn create_key_aes128(&mut self, key_material: &Symmetric128BitsKeyByteArray) -> Result<Aes128KeyHandle, ChipError> {
         let mut key = Aes128KeyHandle::default();
