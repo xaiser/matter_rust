@@ -1,6 +1,6 @@
 //type Aes128Ccm = Ccm<Aes128, U8, U13>;
 
-mod aes128_ccm {
+mod key_128 {
     use crate::{
         chip::{
             crypto::{
@@ -17,32 +17,92 @@ mod aes128_ccm {
         verify_or_return_error,
         verify_or_return_value,
     };
+    use typenum::Unsigned;
     use aes::Aes128;
-    use ccm::{
+
+    use aead::{
         KeyInit,
-        Ccm,
+        AeadInPlace,
+        AeadCore,
     };
 
     use core::ptr::NonNull;
+    use core::marker::PhantomData;
 
-    pub fn create_aes128_ccm<Ccm: KeyInit>(key: &Aes128KeyHandle) -> Result<Ccm, ()> {
-            Ccm::new_from_slice(key.as_ref::<Symmetric128BitsKeyByteArray>()).map_err(|_| ())
+    mod mode_ccm {
+        use super::*;
+        use ccm::{
+            Nonce,
+            Tag,
+            KeyInit,
+            Ccm,
+            AeadInPlace,
+            AeadCore,
+        };
+
+        pub fn create_aes128_ccm<Ccm: KeyInit>(key: &Aes128KeyHandle) -> Result<Ccm, ()> {
+                Ccm::new_from_slice(key.as_ref::<Symmetric128BitsKeyByteArray>()).map_err(|_| ())
+        }
+
+        pub fn encrypt<C: KeyInit + AeadInPlace + AeadCore>(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> ChipErrorResult {
+            verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
+
+            let ccm = create_aes128_ccm::<C>(key).map_err(|_| chip_error_invalid_argument!())?;
+            let input_size = plaintext.len();
+            let tag;
+            
+            if let Some(text) = ciphertext.get_mut(..input_size) {
+                text.copy_from_slice(plaintext);
+                tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| chip_error_internal!())?;
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
+
+            let tag_size = tag.len();
+
+            if let Some(in_mic) = mic.get_mut(..tag_size) {
+                in_mic.copy_from_slice(tag.as_slice());
+            } else {
+                return Err(chip_error_internal!());
+            }
+
+            chip_ok!()
+        }
+        
+        pub fn decrypt<C: KeyInit + AeadInPlace + AeadCore>(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> ChipErrorResult {
+            verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
+            verify_or_return_error!(<C as AeadCore>::TagSize::to_usize() == tag.len(), Err(chip_error_invalid_argument!()));
+
+            let ccm = create_aes128_ccm::<C>(key).map_err(|_| chip_error_invalid_argument!())?;
+            let cipher_text_size = ciphertext.len();
+
+            if let Some(text) = plaintext.get_mut(..cipher_text_size) {
+                text.copy_from_slice(ciphertext);
+                ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| chip_error_internal!())?;
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
+
+            chip_ok!()
+        }
     }
 
-    pub struct SymmetricKeyContext {
+    pub struct SymmetricKeyContext<C: KeyInit + AeadInPlace + AeadCore> {
         m_hash: u16,
         m_encryption_key: Aes128KeyHandle,
         m_privacy_key: Aes128KeyHandle,
         m_keystore: Option<NonNull<dyn SessionKeystore>>,
+        m_phantom: PhantomData<C>,
     }
 
-    impl SymmetricKeyContext {
+    impl<C: KeyInit + AeadInPlace + AeadCore> SymmetricKeyContext<C> {
         pub const fn new() -> Self {
             Self {
                 m_hash: 0,
                 m_encryption_key: Aes128KeyHandle::new(),
                 m_privacy_key: Aes128KeyHandle::new(),
                 m_keystore: None,
+                m_phantom: PhantomData,
             }
         }
 
@@ -72,17 +132,17 @@ mod aes128_ccm {
         }
     }
 
-    impl crypto_pal::SymmetricKeyContext for SymmetricKeyContext {
+    impl<C: KeyInit + AeadInPlace + AeadCore> crypto_pal::SymmetricKeyContext for SymmetricKeyContext<C> {
         fn get_key_hash(&mut self) -> u16 {
             self.m_hash
         }
 
         fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> ChipErrorResult {
-            chip_ok!()
+            return mode_ccm::encrypt::<C>(plaintext, aad, &self.m_encryption_key, aad, mic, ciphertext);
         }
 
         fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> ChipErrorResult {
-            chip_ok!()
+            return mode_ccm::decrypt::<C>(ciphertext, aad, mic, &self.m_encryption_key, nonce, plaintext);
         }
 
         fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
@@ -113,6 +173,31 @@ mod tests {
         AeadInPlace,
         KeyInit,
     };
+    mod test_ccm {
+        use super::*;
+        use super::super::*;
+
+        /*
+        #[test]
+        fn encrypt() {
+            let mut rng = SimpleRng::default_with_seed(12345);
+            let key = [1u8; 16];
+            let nonce = [1u8; 13];
+            let aad = [1u8; 1];
+
+            let input = [1u8; 16];
+            let mut output = [1u8; 16];
+
+            assert!(ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output).is_ok());
+            let mut output = [1u8; 16];
+            let r1 = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
+            let mut output = [1u8; 16];
+            let r2 = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
+
+            assert_eq!(r1, r2);
+        }
+        */
+    }
 
     #[test]
     fn encrypt() {
