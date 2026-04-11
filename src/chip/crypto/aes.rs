@@ -29,7 +29,7 @@ mod key_128 {
     use core::ptr::NonNull;
     use core::marker::PhantomData;
 
-    mod mode_ccm {
+    pub mod mode_ccm {
         use super::*;
         use ccm::{
             Nonce,
@@ -53,7 +53,10 @@ mod key_128 {
             
             if let Some(text) = ciphertext.get_mut(..input_size) {
                 text.copy_from_slice(plaintext);
-                tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| chip_error_internal!())?;
+                tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| {
+                    text.fill(0);
+                    chip_error_internal!()
+                })?;
             } else {
                 return Err(chip_error_invalid_argument!());
             }
@@ -78,14 +81,39 @@ mod key_128 {
 
             if let Some(text) = plaintext.get_mut(..cipher_text_size) {
                 text.copy_from_slice(ciphertext);
-                ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| chip_error_internal!())?;
+                ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| {
+                    text.fill(0);
+                    chip_error_internal!()
+                })?;
             } else {
                 return Err(chip_error_invalid_argument!());
             }
 
             chip_ok!()
         }
-    }
+    } // end of mod ccm
+
+    pub mod mode_ctr {
+        use super::*;
+        use aes::{
+            cipher::{KeyIvInit, StreamCipher, IvSizeUser},
+            Aes128,
+        };
+        use ctr;
+
+        pub fn create_aes128<C: KeyIvInit>(key: &Aes128KeyHandle, iv: &[u8]) -> Result<C, ()> {
+            C::new_from_slices(key.as_ref::<Symmetric128BitsKeyByteArray>(), iv).map_err(|_| ())
+        }
+
+        pub fn encrypt<Ctr: KeyIvInit + StreamCipher>(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+            let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
+            let input_size = input.len();
+
+            ctr.apply_keystream_b2b(input, output).map_err(|_| chip_error_internal!())?;
+
+            chip_ok!()
+        }
+    } // end of mod ctr
 
     pub struct SymmetricKeyContext<C: KeyInit + AeadInPlace + AeadCore> {
         m_hash: u16,
@@ -163,8 +191,9 @@ mod key_128 {
 mod tests {
     use super::*;
     use crate::chip::crypto::{
-        simple_rand::SimpleRng,
+        //simple_rand::SimpleRng,
     };
+    use aes::Aes128;
     use ccm::{
         consts::{U8, U10, U13},
         Ccm,
@@ -177,12 +206,15 @@ mod tests {
         use super::*;
         use super::super::*;
 
-        /*
+        type Aes128Ccm = Ccm<Aes128, U8, U13>;
+
         #[test]
         fn encrypt() {
-            let mut rng = SimpleRng::default_with_seed(12345);
             let key = [1u8; 16];
-            let nonce = [1u8; 13];
+            let ccm = Aes128Ccm::new_from_slice(&key);
+            assert!(ccm.is_ok());
+            let ccm = ccm.unwrap();
+            let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
             let aad = [1u8; 1];
 
             let input = [1u8; 16];
@@ -196,50 +228,59 @@ mod tests {
 
             assert_eq!(r1, r2);
         }
-        */
-    }
 
-    #[test]
-    fn encrypt() {
-        let mut rng = SimpleRng::default_with_seed(12345);
-        let key = [1u8; 16];
-        let ccm = Aes128Ccm::new_from_slice(&key);
-        assert!(ccm.is_ok());
-        let ccm = ccm.unwrap();
-        let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
-        let aad = [1u8; 1];
+        #[test]
+        fn decrypt() {
+            let key = [1u8; 16];
+            let ccm = Aes128Ccm::new_from_slice(&key);
+            assert!(ccm.is_ok());
+            let ccm = ccm.unwrap();
+            let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
+            let aad = [1u8; 1];
 
-        let input = [1u8; 16];
-        let mut output = [1u8; 16];
+            let input = [1u8; 16];
+            let mut output = [1u8; 16];
 
-        assert!(ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output).is_ok());
-        let mut output = [1u8; 16];
-        let r1 = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
-        let mut output = [1u8; 16];
-        let r2 = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
+            let tag = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
+            assert!(tag.is_ok());
+            let tag = tag.unwrap();
 
-        assert_eq!(r1, r2);
-    }
+            assert!(ccm.decrypt_in_place_detached(&nonce, &aad[..], &mut output, &tag).is_ok());
 
-    #[test]
-    fn decrypt() {
-        let mut rng = SimpleRng::default_with_seed(12345);
-        let key = [1u8; 16];
-        let ccm = Aes128Ccm::new_from_slice(&key);
-        assert!(ccm.is_ok());
-        let ccm = ccm.unwrap();
-        let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
-        let aad = [1u8; 1];
+            assert_eq!(output, [1u8; 16]);
+        }
+    } // end of test_ccm
 
-        let input = [1u8; 16];
-        let mut output = [1u8; 16];
+    mod test_ctr {
+        use super::*;
+        use super::super::*;
+        use crate::chip::crypto::crypto_pal::Aes128KeyHandle;
 
-        let tag = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
-        assert!(tag.is_ok());
-        let tag = tag.unwrap();
+        type Aes128Ctr = ctr::Ctr32LE<Aes128>;
 
-        assert!(ccm.decrypt_in_place_detached(&nonce, &aad[..], &mut output, &tag).is_ok());
+        #[test]
+        fn encrypt() {
+            let key = Aes128KeyHandle::new();
+            let iv = [1u8; 16];
+            let input = [1u8; 16];
+            let mut output = [0u8; 16];
 
-        assert_eq!(output, [1u8; 16]);
-    }
+            assert!(key_128::mode_ctr::encrypt::<Aes128Ctr>(&input[..], &key, &iv[..], &mut output).is_ok());
+        }
+
+        #[test]
+        fn decrypt() {
+            let key = Aes128KeyHandle::new();
+            let iv = [1u8; 16];
+            let input = [1u8; 16];
+            let mut output = [0u8; 16];
+            let mut output_2 = [0u8; 16];
+
+            assert!(key_128::mode_ctr::encrypt::<Aes128Ctr>(&input[..], &key, &iv[..], &mut output).is_ok());
+
+            assert!(key_128::mode_ctr::encrypt::<Aes128Ctr>(&output, &key, &iv[..], &mut output_2).is_ok());
+
+            assert_eq!(input, output_2);
+        }
+    } // end of test_ctr
 } // end of tests
