@@ -857,6 +857,34 @@ impl<const CONTEXT_SIZE: usize> FromOpaqueContext<CONTEXT_SIZE> for Symmetric128
     }
 }
 
+#[derive(Default, Clone)]
+pub struct SymmetricEncryptResult {
+    pub tag_size: usize,
+    pub ciphertext_size: usize,
+}
+
+impl SymmetricEncryptResult {
+    pub const fn new(tag_size: usize, ciphertext_size: usize) -> Self {
+        Self {
+            tag_size,
+            ciphertext_size,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct SymmetricDecryptResult{
+    pub plaintext_size: usize,
+}
+
+impl SymmetricDecryptResult {
+    pub const fn new(plaintext_size: usize) -> Self {
+        Self {
+            plaintext_size
+        }
+    }
+}
+
 pub type Symmetric128BitsKeyHandle = SymmetricKeyHandle<CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES>;
 
 pub type Aes128KeyHandle = Symmetric128BitsKeyHandle;
@@ -1452,9 +1480,9 @@ impl HKDFSha {
 pub trait SymmetricKeyContext {
     fn get_key_hash(&mut self) -> u16;
 
-    fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> ChipErrorResult;
+    fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError>;
 
-    fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> ChipErrorResult;
+    fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError>;
 
     fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
 

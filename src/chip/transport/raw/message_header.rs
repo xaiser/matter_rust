@@ -52,7 +52,7 @@ const KMAX_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize =
         KMAX_PACKETBUFFER_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES
     };
 
-const KMAX_TAG_LEN: usize = 16;
+pub(crate) const KMAX_TAG_LEN: usize = 16;
 
 // This is somewhat of an under-estimate, because in practice any time we have a
 // tag we will not have source/destination node IDs, but above we are including
@@ -1000,6 +1000,18 @@ impl PayloadHeader {
 #[derive(Default)]
 pub struct MessageAuthenticationCode {
     m_tag: [u8; KMAX_TAG_LEN],
+}
+
+impl MessageAuthenticationCode {
+    pub fn set_tag_ref(&mut self, tag: &[u8]) -> bool {
+        const TAG_LEN: usize = CHIP_CRYPTO_AEAD_MIC_LENGTH_BYTES;
+        if TAG_LEN > 0 && TAG_LEN <= KMAX_TAG_LEN && TAG_LEN == tag.len() {
+            self.m_tag.copy_from_slice(tag);
+            return true;
+        }
+
+        false
+    }
 }
 
 impl MessageAuthenticationCode {

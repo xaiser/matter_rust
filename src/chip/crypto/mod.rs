@@ -4,7 +4,7 @@ pub mod persistent_storage_operational_keystore;
 pub mod simple_rand;
 pub mod session_keystore;
 pub mod raw_session_keystore;
-mod aes;
+pub mod aes;
 //pub mod raw_symmetric_key_context;
 
 pub use operational_keystore::OperationalKeystore;

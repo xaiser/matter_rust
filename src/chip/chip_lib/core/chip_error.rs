@@ -402,6 +402,13 @@ macro_rules! chip_error_invalid_argument {
 }
 
 #[macro_export]
+macro_rules! chip_error_invalid_use_of_session_key {
+    () => {
+        chip_core_error!(0x3b)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_ca_cert_not_found {
     () => {
         chip_core_error!(0x4a)

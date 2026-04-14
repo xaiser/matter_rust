@@ -3,19 +3,25 @@ use crate::{
     chip::{
         chip_lib::support::buffer_writer::{self, EndianBufferWriter, BufferWriter},
         crypto::{
+            aes::key_128::{mode_ccm, mode_ctr},
             crypto_pal::{
                 Aes128KeyHandle, AttestationChallenge, SymmetricKeyContext, P256Keypair, P256PublicKey, HkdfKeyHandle,
-                P256EcdhDeriveSecret, ECPKeypair,
+                P256EcdhDeriveSecret, ECPKeypair, SymmetricEncryptResult, SymmetricDecryptResult,
             },
             session_keystore::SessionKeystore,
         },
-        transport::raw::message_header::{MessageAuthenticationCode, PacketHeader},
+        transport::raw::message_header::{MessageAuthenticationCode, PacketHeader, KMAX_TAG_LEN},
         NodeId,
     },
-    verify_or_return_error, verify_or_return_value,
+    verify_or_return_error, verify_or_return_value, verify_or_die,
     ChipError, ChipErrorResult, chip_ok, chip_core_error, chip_sdk_error,
-    chip_error_incorrect_state, chip_error_internal, chip_error_no_memory, chip_error_invalid_argument,
+    chip_error_incorrect_state, chip_error_internal, chip_error_no_memory, chip_error_invalid_argument, chip_error_invalid_use_of_session_key,
 };
+
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_detail;
+use core::str::FromStr;
 
 use core::ptr::NonNull;
 
@@ -70,6 +76,8 @@ impl CryptoContext {
     pub const KPRIVACY_NONCE_MIC_FRAGMENT_OFFSET: usize = 5;
     pub const KPRIVACY_NONCE_MIC_FRAGMENT_LENGTH: usize = 11;
     pub const KAESCCM_NONCE_LEN: usize = 13;
+
+    const KMAX_AAD_LEN: usize = 128;
 
     /* Session Establish Key Info */
     const SE_KEYS_INFO: [u8; 11] = [ 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x73 ];
@@ -199,12 +207,62 @@ impl CryptoContext {
         }
     }
 
-    pub fn encrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        chip_ok!()
+    pub fn encrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &mut MessageAuthenticationCode) -> Result<SymmetricEncryptResult, ChipError> {
+        let tag_len = header.mic_tag_length();
+
+        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+
+        let mut aad = [0u8; Self::KMAX_AAD_LEN];
+        let mut tag = [0u8; KMAX_TAG_LEN];
+
+        let aad_len = Self::get_additional_auth_data(header, &mut aad)?;
+        verify_or_return_error!(aad_len <= Self::KMAX_AAD_LEN, Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(usize::from(tag_len) <= KMAX_TAG_LEN, Err(chip_error_invalid_argument!()));
+
+        let result_sizes;
+
+        if let Some(context_ptr) = self.m_key_context.as_ref() 
+        {
+            unsafe {
+                result_sizes = context_ptr.as_ref().message_encrypt(input, &aad[..aad_len], &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+            }
+        } else {
+            verify_or_return_error!(self.m_key_available, Err(chip_error_invalid_use_of_session_key!()));
+            result_sizes = mode_ccm::encrypt_autosize(input, &aad[..aad_len], &self.m_encryption_key, &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+        }
+
+        if !mac.set_tag_ref(&tag[..tag_len as usize]) {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        Ok(result_sizes)
     }
 
-    pub fn decrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        chip_ok!()
+    pub fn decrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> Result<SymmetricDecryptResult, ChipError> {
+        let tag_len = header.mic_tag_length();
+        let tag = mac.get_tag();
+        verify_or_return_error!(usize::from(tag_len) <= tag.len(), Err(chip_error_invalid_argument!()));
+
+        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+
+        let mut aad = [0u8; Self::KMAX_AAD_LEN];
+
+        let aad_len = Self::get_additional_auth_data(header, &mut aad)?;
+        verify_or_return_error!(aad_len <= Self::KMAX_AAD_LEN, Err(chip_error_invalid_argument!()));
+
+        let result_sizes;
+
+        if let Some(context_ptr) = self.m_key_context.as_ref() 
+        {
+            unsafe {
+                result_sizes = context_ptr.as_ref().message_decrypt(input, &aad[..aad_len], &nonce[..], &tag[..tag_len as usize], &mut output[..input.len()])?;
+            }
+        } else {
+            verify_or_return_error!(self.m_key_available, Err(chip_error_invalid_use_of_session_key!()));
+            result_sizes = mode_ccm::decrypt_autosize(input, &aad[..aad_len], &tag[..tag_len as usize], &self.m_decryption_key, &nonce[..], &mut output[..input.len()])?;
+        }
+
+        Ok(result_sizes)
     }
 
     pub fn privacy_encrypt(&self, input: &[u8], output: &mut [u8], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
@@ -246,7 +304,7 @@ mod tests {
         chip::{
             crypto::{
                 raw_session_keystore::RawKeySessionKeystore,
-                session_keystore::SessionKeystore,
+                session_keystore::{SessionKeystore, SessionKeys},
                 Symmetric128BitsKeyByteArray, Aes128KeyHandle, Hmac128KeyHandle, HkdfKeyHandle, Symmetric128BitsKeyHandle,
                 P256EcdhDeriveSecret, AttestationChallenge, FromOpaqueContext, OpaqueContext, HKDFSha, clear_secret_data,
                 ECPKeyTarget, P256KeypairBase,
@@ -254,6 +312,90 @@ mod tests {
         },
     };
     use core::ptr;
+
+    #[derive(Default)]
+    pub struct TestKeySessionKeystore {
+        pub m_aes128_session_keys: SessionKeys,
+        pub m_hkdf_session_keys: SessionKeys,
+    }
+
+    impl SessionKeystore for TestKeySessionKeystore {
+        fn create_key_aes128(&mut self, key_material: &Symmetric128BitsKeyByteArray) -> Result<Aes128KeyHandle, ChipError> {
+            let mut key = Aes128KeyHandle::default();
+            key.as_mut::<Symmetric128BitsKeyByteArray>().copy_from_slice(key_material);
+
+            Ok(key)
+        }
+
+        fn create_key_hmac128(&mut self, key_material: &Symmetric128BitsKeyByteArray) -> Result<Hmac128KeyHandle, ChipError> {
+            let mut key = Hmac128KeyHandle::default();
+            key.as_mut::<Symmetric128BitsKeyByteArray>().copy_from_slice(key_material);
+
+            Ok(key)
+        }
+
+        fn create_key_hkdf(&mut self, _key_material: &[u8]) -> Result<HkdfKeyHandle, ChipError> {
+            let key = HkdfKeyHandle::default();
+
+            Ok(key)
+        }
+
+        fn destroy_key_128bits(&mut self, _key: &mut Symmetric128BitsKeyHandle) {
+        }
+
+        fn destroy_key_hkdf(&mut self, _key: &mut HkdfKeyHandle) {
+        }
+
+        fn drive_key(&mut self, secret: &P256EcdhDeriveSecret, salt: &[u8], info: &[u8]) -> Result<Aes128KeyHandle, ChipError> {
+            Ok(Aes128KeyHandle::default())
+        }
+
+        fn derive_session_keys_aes128(&mut self, _secret: &[u8], salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError> {
+            let mut session_keys = SessionKeys::default();
+
+            // i2r
+            let src = self.m_aes128_session_keys.i2r_key.as_ref::<Symmetric128BitsKeyByteArray>();
+            let mut dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            dest.copy_from_slice(src);
+
+            // r2i
+            let src = self.m_aes128_session_keys.r2i_key.as_ref::<Symmetric128BitsKeyByteArray>();
+            let mut dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            dest.copy_from_slice(src);
+
+            // challenge
+            let src = self.m_aes128_session_keys.attestation_challenge.const_bytes();
+            let mut dest = session_keys.attestation_challenge.bytes();
+            dest.copy_from_slice(src);
+
+            Ok(session_keys)
+        }
+
+        fn derive_session_keys_hkdf(&mut self, _secret: &HkdfKeyHandle, salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError> {
+            let mut session_keys = SessionKeys::default();
+
+            // i2r
+            let src = self.m_hkdf_session_keys.i2r_key.as_ref::<Symmetric128BitsKeyByteArray>();
+            let mut dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            dest.copy_from_slice(src);
+
+            // r2i
+            let src = self.m_hkdf_session_keys.r2i_key.as_ref::<Symmetric128BitsKeyByteArray>();
+            let mut dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            dest.copy_from_slice(src);
+
+            // challenge
+            let src = self.m_hkdf_session_keys.attestation_challenge.const_bytes();
+            let mut dest = session_keys.attestation_challenge.bytes();
+            dest.copy_from_slice(src);
+
+            Ok(session_keys)
+        }
+
+        fn persist_icd_key(&mut self) -> Result<Symmetric128BitsKeyHandle, ChipError> {
+            Ok(Symmetric128BitsKeyHandle::default())
+        }
+    }
 
     #[test]
     fn init_by_secret_successfully() {
@@ -303,5 +445,34 @@ mod tests {
 
         assert!(context.init_from_key_pair(ptr::addr_of_mut!(keystore), &keypair, &remote_public_key, &salt[..], SessionInfoType::KSessionEstablishment, 
                 SessionRole::KInitiator).is_ok());
+    }
+
+    #[test]
+    fn encrypt_decrypt() {
+        let mut context = CryptoContext::new();
+        // ensure the encrypt & decrypt use the same key(default)
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        let nonce = [1u8; CryptoContext::KAESCCM_NONCE_LEN];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+
+        let mut output_2 = [0u8; 16];
+
+        assert!(context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
     }
 } // end of tests
