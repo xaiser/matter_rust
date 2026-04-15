@@ -33,6 +33,11 @@ pub mod key_128 {
     use core::ptr::NonNull;
     use core::marker::PhantomData;
 
+    const KEY_SIZE_BYTES: usize = 16;
+
+    // re-export
+    pub type RawSymmetricKeyContext<T, N> = SymmetricKeyContext<ccm::Ccm<Aes128, T, N>, ctr::Ctr32LE<Aes128>>;
+
     pub mod mode_ccm {
         use super::*;
         use ccm::{
@@ -43,8 +48,8 @@ pub mod key_128 {
             AeadInPlace,
             AeadCore,
             NonceSize,
-            consts::{U4, U6, U7, U8, U9, U10, U11, U12, U13, U14, U16},
         };
+        pub use ccm::consts::{U4, U6, U7, U8, U9, U10, U11, U12, U13, U14, U16};
 
         use generic_array::ArrayLength;
 
@@ -261,12 +266,26 @@ pub mod key_128 {
         }
 
         fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
-            return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, nonce, output);
+            let mut iv = [0u8; KEY_SIZE_BYTES];
+            let nonce_size = <M as AeadCore>::NonceSize::to_usize();
+            if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
+                &iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
+                return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
         }
 
         fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
-            // ctr decrypt is simply xor, so we can shared the encrypt function call.
-            return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, nonce, output);
+            let mut iv = [0u8; KEY_SIZE_BYTES];
+            let nonce_size = <M as AeadCore>::NonceSize::to_usize();
+            if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
+                &iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
+                // ctr decrypt is simply xor, so we can shared the encrypt function call.
+                return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
+            } else {
+                return Err(chip_error_invalid_argument!());
+            }
         }
 
         fn release(&mut self) {

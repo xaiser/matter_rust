@@ -53,10 +53,6 @@ pub struct CryptoContext {
 
 type NonceStorage = [u8; CryptoContext::KAESCCM_NONCE_LEN];
 // Somehow rustc melt down on this define
-/*
-type NonceView<'a> = &'a mut [u8; CryptoContext::KAESCCM_NONCE_LEN];
-type ConstNonceView<'a> = &'a [u8; CryptoContext::KAESCCM_NONCE_LEN];
-*/
 
 impl Drop for CryptoContext {
     fn drop(&mut self) {
@@ -95,6 +91,18 @@ impl CryptoContext {
             m_attestation_challenge: AttestationChallenge::const_default(),
             m_key_store: None,
             m_key_context: None,
+        }
+    }
+
+    pub const fn new_with_key_context(key_context: NonNull<dyn SymmetricKeyContext>) -> Self {
+        Self {
+            m_session_role: SessionRole::KInitiator,
+            m_key_available: false,
+            m_encryption_key: Aes128KeyHandle::new(),
+            m_decryption_key: Aes128KeyHandle::new(),
+            m_attestation_challenge: AttestationChallenge::const_default(),
+            m_key_store: None,
+            m_key_context: Some(key_context),
         }
     }
 
@@ -266,14 +274,37 @@ impl CryptoContext {
     }
 
     pub fn privacy_encrypt(&self, input: &[u8], output: &mut [u8], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        chip_ok!()
+        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+
+        if let Some(context_ptr) = self.m_key_context.as_ref() 
+        {
+            let mut privacy_nonce: [u8; Self::KAESCCM_NONCE_LEN] = [0; Self::KAESCCM_NONCE_LEN];
+            Self::build_privacy_nonce(&mut privacy_nonce, header.get_session_id(), mac)?;
+            unsafe {
+                return context_ptr.as_ref().privacy_encrypt(input, &privacy_nonce[..], &mut output[..input.len()]);
+            }
+        } else {
+            return Err(chip_error_invalid_use_of_session_key!());
+        }
     }
+
     pub fn privacy_decrypt(&self, input: &[u8], output: &mut [u8], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        chip_ok!()
+        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+
+        if let Some(context_ptr) = self.m_key_context.as_ref() 
+        {
+            let mut privacy_nonce: [u8; Self::KAESCCM_NONCE_LEN] = [0; Self::KAESCCM_NONCE_LEN];
+            Self::build_privacy_nonce(&mut privacy_nonce, header.get_session_id(), mac)?;
+            unsafe {
+                return context_ptr.as_ref().privacy_decrypt(input, &privacy_nonce[..], &mut output[..input.len()]);
+            }
+        } else {
+            return Err(chip_error_invalid_use_of_session_key!());
+        }
     }
 
     pub fn get_attestation_challenge(&self) -> &[u8] {
-        &[]
+        self.m_attestation_challenge.const_bytes()
     }
 
     pub fn is_initiator(&self) -> bool {
@@ -303,6 +334,7 @@ mod tests {
     use crate::{
         chip::{
             crypto::{
+                aes::key_128::{self, SymmetricKeyContext, mode_ccm},
                 raw_session_keystore::RawKeySessionKeystore,
                 session_keystore::{SessionKeystore, SessionKeys},
                 Symmetric128BitsKeyByteArray, Aes128KeyHandle, Hmac128KeyHandle, HkdfKeyHandle, Symmetric128BitsKeyHandle,
@@ -312,6 +344,9 @@ mod tests {
         },
     };
     use core::ptr;
+
+    // tag = 16 bytes, nonce = 13 byte
+    type TestKeyContext = key_128::RawSymmetricKeyContext<mode_ccm::U16, mode_ccm::U13>;
 
     #[derive(Default)]
     pub struct TestKeySessionKeystore {
@@ -448,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn encrypt_decrypt() {
+    fn encrypt_decrypt_correctly() {
         let mut context = CryptoContext::new();
         // ensure the encrypt & decrypt use the same key(default)
         let mut keystore = TestKeySessionKeystore::default();
@@ -474,5 +509,204 @@ mod tests {
         let mut output_2 = [0u8; 16];
 
         assert!(context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+    }
+
+    #[test]
+    fn encrypt_empty_input() {
+        let mut context = CryptoContext::new();
+        // ensure the encrypt & decrypt use the same key(default)
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [];
+        let mut output = [0u8; 16];
+        let nonce = [1u8; CryptoContext::KAESCCM_NONCE_LEN];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+    }
+
+    #[test]
+    fn encrypt_empty_header() {
+        let mut context = CryptoContext::new();
+        // ensure the encrypt & decrypt use the same key(default)
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        let nonce = [1u8; CryptoContext::KAESCCM_NONCE_LEN];
+        // create a encrypted header
+        let header = PacketHeader::default();
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+    }
+
+    #[test]
+    fn decrypt_empty_input() {
+        let mut context = CryptoContext::new();
+        // ensure the encrypt & decrypt use the same key(default)
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        let nonce = [1u8; CryptoContext::KAESCCM_NONCE_LEN];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+
+        let mut output_2 = [];
+
+        assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+    }
+
+    #[test]
+    fn decrypt_empty_header() {
+        let mut context = CryptoContext::new();
+        // ensure the encrypt & decrypt use the same key(default)
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        let nonce = [1u8; CryptoContext::KAESCCM_NONCE_LEN];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+
+        let mut output_2 = [0u8; 16];
+        let header = PacketHeader::default();
+
+        assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+    }
+
+    #[test]
+    fn privacy_encrypt_decrypt_correctly() {
+        let mut encrypt_key = Symmetric128BitsKeyByteArray::default();
+        let mut privacy_key = Symmetric128BitsKeyByteArray::default();
+        encrypt_key.fill(1);
+        privacy_key.fill(2);
+        let mut keystore = TestKeySessionKeystore::default();
+        let mut key_context = TestKeyContext::new();
+
+        assert!(key_context.init(&encrypt_key, &privacy_key, 0, ptr::addr_of_mut!(keystore)).is_ok());
+
+        let mut context = CryptoContext::new_with_key_context(NonNull::from_mut(&mut key_context));
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+
+        let mut output_2 = [0u8; 16];
+
+        assert!(context.privacy_decrypt(&output, &mut output_2, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+    }
+
+    #[test]
+    fn privacy_encrypt_empyt_input() {
+        let mut encrypt_key = Symmetric128BitsKeyByteArray::default();
+        let mut privacy_key = Symmetric128BitsKeyByteArray::default();
+        encrypt_key.fill(1);
+        privacy_key.fill(2);
+        let mut keystore = TestKeySessionKeystore::default();
+        let mut key_context = TestKeyContext::new();
+
+        assert!(key_context.init(&encrypt_key, &privacy_key, 0, ptr::addr_of_mut!(keystore)).is_ok());
+
+        let mut context = CryptoContext::new_with_key_context(NonNull::from_mut(&mut key_context));
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [];
+        let mut output = [0u8; 16];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+    }
+
+    #[test]
+    fn privacy_encrypt_no_key_context() {
+        let mut keystore = TestKeySessionKeystore::default();
+
+        let mut context = CryptoContext::new();
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        // fill up stub value
+        secret.bytes().fill(0x1);
+
+        let salt = [1u8; 2];
+
+        assert!(context.init_from_secret(ptr::addr_of_mut!(keystore), secret.const_bytes(), &salt[..], SessionInfoType::KSessionEstablishment, 
+                SessionRole::KInitiator).is_ok());
+
+        let input = [1u8; 16];
+        let mut output = [0u8; 16];
+        // create a encrypted header
+        let header = PacketHeader::default().set_session_id(0x1);
+        let mut mac = MessageAuthenticationCode::default();
+
+        assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
     }
 } // end of tests
