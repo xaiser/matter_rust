@@ -123,6 +123,18 @@ impl SessionBase for UnauthenticatedSession {
         SubjectDescriptor::new()
     }
 
+    fn allows_mrp(&self) -> bool {
+        self.m_peer_address.get_transport_type() == peer_address::Type::KUdp
+    }
+
+    fn allow_large_payload(&self) -> bool {
+        self.m_peer_address.get_transport_type() == peer_address::Type::KTcp
+    }
+
+    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+        Some(&self.m_remote_session_params)
+    }
+
     // no used
     fn session_id_for_logging(&self) -> u16 { 0 }
 

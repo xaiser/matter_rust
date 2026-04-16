@@ -4,15 +4,19 @@ pub mod incoming {
     use crate::{
         verify_or_die,
         chip::{
-            access::subject_descriptor::SubjectDescriptor,
+            access::{
+                auth_mode::AuthMode,
+                subject_descriptor::SubjectDescriptor,
+            },
             chip_lib::core::{
-                node_id::KUNDEFINED_NODE_ID,
+                node_id::{KUNDEFINED_NODE_ID, node_id_from_group_id},
                 data_model_types::KUNDEFINED_FABRIC_INDEX,
             },
             transport::session::{
                 SessionType, SessionHolderList, SessionBase, 
                 new_session_holder_list, SessionBasePrivate
             },
+            messaging::session_parameters::SessionParameters,
             system::system_clock::{Milliseconds, Timestamp},
             GroupId, ScopedNodeId, NodeId, FabricIndex,
         },
@@ -72,7 +76,21 @@ pub mod incoming {
         }
 
         fn get_subject_descriptor(&self) -> SubjectDescriptor {
-            SubjectDescriptor::new()
+            let mut subject_descriptor = SubjectDescriptor::new();
+            subject_descriptor.auth_mode = AuthMode::KGroup;
+            subject_descriptor.subject = node_id_from_group_id(self.m_group_id);
+            subject_descriptor.fabric_index = self.get_fabric_index();
+
+            subject_descriptor
+        }
+
+        fn allows_mrp(&self) -> bool { false }
+        fn allow_large_payload(&self) -> bool { false }
+
+        fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+            verify_or_die!(false);
+
+            None
         }
 
         // no used
@@ -110,6 +128,7 @@ pub mod outgoing {
                 SessionType, SessionHolderList, SessionBase, 
                 new_session_holder_list, SessionBasePrivate
             },
+            messaging::session_parameters::SessionParameters,
             system::system_clock::{Milliseconds, Timestamp},
             ScopedNodeId, GroupId, FabricIndex,
         },
@@ -156,6 +175,15 @@ pub mod outgoing {
 
         fn get_subject_descriptor(&self) -> SubjectDescriptor {
             SubjectDescriptor::new()
+        }
+
+        fn allows_mrp(&self) -> bool { false }
+        fn allow_large_payload(&self) -> bool { false }
+
+        fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+            verify_or_die!(false);
+
+            None
         }
 
         // no used

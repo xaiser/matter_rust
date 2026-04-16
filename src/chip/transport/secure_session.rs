@@ -14,12 +14,13 @@ use crate::{
                 SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
             },
             raw::peer_address::{self, PeerAddress},
+            crypto_context::CryptoContext,
         },
         messaging::{
             session_parameters::SessionParameters,
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
         },
-        system::system_clock::{Timestamp, Seconds, Milliseconds},
+        system::system_clock::{Timestamp, Seconds, Milliseconds, get_monotonic_timestamp},
         ScopedNodeId, NodeId, FabricIndex,
     },
 };
@@ -52,6 +53,7 @@ pub struct SecureSession {
     m_secure_session_type: Type,
     m_is_case_commissioning_session: bool,
     m_peer_cats: CATValues,
+    m_crypto_context: CryptoContext,
 }
 
 impl SessionBasePrivate for SecureSession {
@@ -125,25 +127,41 @@ impl SessionBase for SecureSession {
     }
 
     fn get_subject_descriptor(&self) -> SubjectDescriptor {
-        let subject_descriptor = {
-            if is_operational_node_id(self.m_peer_node_id) {
-                SubjectDescriptor {
-                    fabric_index: self.get_fabric_index(),
-                    auth_mode: access::auth_mode::AuthMode::KCase,
-                    subject: self.m_peer_node_id,
-                    cats: self.m_peer_cats,
-                    is_commissioning: self.is_commissioning_session()
-                }
-            } else if is_pake_key_id(self.m_peer_node_id) {
-                // TODO: continue here
-                SubjectDescriptor::new()
-            } else {
-                verify_or_die!(false);
-                SubjectDescriptor::new()
+        let mut subject_descriptor = SubjectDescriptor::new();
+
+        if is_operational_node_id(self.m_peer_node_id) {
+            subject_descriptor.fabric_index = self.get_fabric_index();
+            subject_descriptor.auth_mode = access::auth_mode::AuthMode::KCase;
+            subject_descriptor.subject = self.m_peer_node_id;
+            subject_descriptor.cats = self.m_peer_cats;
+            subject_descriptor.is_commissioning = self.is_commissioning_session();
+        } else if is_pake_key_id(self.m_peer_node_id) {
+            if self.m_crypto_context.is_responder() {
+                subject_descriptor.auth_mode = access::auth_mode::AuthMode::KPase;
+                subject_descriptor.subject = self.m_peer_node_id;
+                subject_descriptor.fabric_index = self.get_fabric_index();
+                subject_descriptor.is_commissioning = self.is_commissioning_session();
             }
-        };
+        } else {
+            verify_or_die!(false);
+        }
 
         subject_descriptor
+    }
+
+    fn allows_mrp(&self) -> bool {
+        self.m_peer_address.get_transport_type() == peer_address::Type::KUdp
+    }
+
+    fn allow_large_payload(&self) -> bool {
+        self.m_peer_address.get_transport_type() == peer_address::Type::KTcp
+    }
+
+    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+        Some(&self.m_remote_session_params)
+    }
+
+    fn get_mrp_base_timeout(&self) -> Timestamp {
     }
 
     // no used
@@ -164,6 +182,7 @@ impl SecureSession {
             m_secure_session_type: Type::Kpase,
             m_is_case_commissioning_session: false,
             m_peer_cats: CATValues::new(),
+            m_crypto_context: CryptoContext::new(),
         }
     }
 
@@ -206,5 +225,12 @@ impl SecureSession {
         }
 
         false
+    }
+
+    fn get_last_peer_activity_time(&self) -> TimeStamp {
+        self.m_last_peer_activity_time
+    }
+
+    fn is_peer_active(&self) -> bool {
     }
 }

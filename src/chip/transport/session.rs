@@ -54,7 +54,7 @@ mod session_handle {
         Alloactor::new()
     }
 
-    pub fn try_new_handle(session: Session, alloactor: &mut Alloactor) -> Result<SessionHandle, ()> {
+    pub fn try_new_handle(session: Session, alloactor: *mut Alloactor) -> Result<SessionHandle, ()> {
         SessionHandle::try_new_in(session, alloactor)
     }
 }
@@ -204,6 +204,8 @@ mod session_holder {
             pool::{ObjectPool, KInline, BitMapObjectPool},
         };
 
+        use core::ptr;
+
         const POOL_SIZE: usize = 1;
         type TestPool = BitMapObjectPool<Holder, POOL_SIZE>;
 
@@ -232,7 +234,7 @@ mod session_holder {
             let mut holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = try_new_handle(Session::new_secure(), &mut session_pool);
+            let mut session = try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let mut session = session.unwrap();
 
@@ -247,7 +249,7 @@ mod session_holder {
             let mut holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = try_new_handle(Session::new_secure(), &mut session_pool);
+            let mut session = try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
             // make some copies used later for check
@@ -346,15 +348,16 @@ pub trait SessionBase: SessionBasePrivate {
     fn get_local_scoped_node_id(&self) -> ScopedNodeId;
 
     fn get_subject_descriptor(&self) -> SubjectDescriptor;
-    /*
 
     fn allows_mrp(&self) -> bool;
 
     fn allow_large_payload(&self) -> bool;
 
-    fn get_remote_session_parameters(&self) -> &SessionParameters;
+    fn get_remote_session_parameters(&self) -> Option<&SessionParameters>;
 
     fn get_mrp_base_timeout(&self) -> Timeout;
+
+    /*
 
     fn is_comissioning_session(&self) -> bool { false }
 
@@ -658,6 +661,74 @@ impl SessionBase for Session {
             },
             Session::OutgoingGroupSession(session) => {
                 session.get_subject_descriptor()
+            },
+        }
+    }
+
+    fn allows_mrp(&self) -> bool {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.allows_mrp()
+            },
+            Session::Secure(session) => {
+                session.allows_mrp()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.allows_mrp()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.allows_mrp()
+            },
+        }
+    }
+
+    fn allow_large_payload(&self) -> bool {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.allow_large_payload()
+            },
+            Session::Secure(session) => {
+                session.allow_large_payload()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.allow_large_payload()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.allow_large_payload()
+            },
+        }
+    }
+
+    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_remote_session_parameters()
+            },
+            Session::Secure(session) => {
+                session.get_remote_session_parameters()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_remote_session_parameters()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_remote_session_parameters()
+            },
+        }
+    }
+
+    fn get_mrp_base_timeout(&self) -> Timeout {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.get_mrp_base_timeout()
+            },
+            Session::Secure(session) => {
+                session.get_mrp_base_timeout()
+            },
+            Session::IncomingGroupSession(session) => {
+                session.get_mrp_base_timeout()
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.get_mrp_base_timeout()
             },
         }
     }
