@@ -87,14 +87,24 @@ pub mod incoming {
         fn allows_mrp(&self) -> bool { false }
         fn allow_large_payload(&self) -> bool { false }
 
-        fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+        fn get_remote_session_parameters(&self) -> &SessionParameters {
             verify_or_die!(false);
 
-            None
+            static NEVER_USED: SessionParameters = SessionParameters::new();
+
+            &NEVER_USED
+        }
+
+        fn set_fabric_index(&mut self, fabric_index: FabricIndex) {
+            self.m_fabric_index = fabric_index
         }
 
         // no used
         fn session_id_for_logging(&self) -> u16 { 0 }
+
+        fn get_mrp_base_timeout(&self) -> Timestamp {
+            Timestamp::ZERO
+        }
     }
 
     impl IncomingGroupSession {
@@ -145,6 +155,7 @@ pub mod outgoing {
     pub struct OutgoingGroupSession {
         m_holders: SessionHolderList,
         m_group_id: GroupId,
+        m_fabric_index: FabricIndex,
     }
 
     impl SessionBasePrivate for OutgoingGroupSession {
@@ -180,10 +191,16 @@ pub mod outgoing {
         fn allows_mrp(&self) -> bool { false }
         fn allow_large_payload(&self) -> bool { false }
 
-        fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+        fn get_remote_session_parameters(&self) -> &SessionParameters {
             verify_or_die!(false);
 
-            None
+            static NEVER_USED: SessionParameters = SessionParameters::new();
+
+            &NEVER_USED
+        }
+
+        fn set_fabric_index(&mut self, fabric_index: FabricIndex) {
+            self.m_fabric_index = fabric_index
         }
 
         // no used
@@ -200,6 +217,10 @@ pub mod outgoing {
         fn get_local_scoped_node_id(&self) -> ScopedNodeId {
             ScopedNodeId::const_default()
         }
+
+        fn get_mrp_base_timeout(&self) -> Timestamp {
+            Timestamp::ZERO
+        }
     }
 
     impl OutgoingGroupSession {
@@ -207,6 +228,7 @@ pub mod outgoing {
             Self {
                 m_holders: new_session_holder_list(),
                 m_group_id: 0,
+                m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             }
         }
 

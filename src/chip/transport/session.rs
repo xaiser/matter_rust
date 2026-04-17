@@ -76,7 +76,7 @@ mod session_holder {
         }
     };
 
-    use super::{SessionBase, session_handle::SessionHandle};
+    use super::{SessionBase, session_handle::SessionHandle, SessionHangOp};
 
     // Adapter for holder linked list
     type Adapter = adapter::linked_list::unsafe_ref::DefaultAdapter<SessionHolder>;
@@ -188,6 +188,10 @@ mod session_holder {
                 SessionHandle::get_mut_unchecked(&mut session).remove_holder(self);
             }
         }
+
+        pub fn on_session_hang(&self) -> Option<SessionHangOp> {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -290,6 +294,11 @@ pub type SessionHolder = session_holder::SessionHolder;
 pub type SessionHolderList = session_holder::LinkedList;
 pub use session_holder::new_session_holder_list;
 
+#[derive(Clone, Copy)]
+pub enum SessionHangOp {
+    Delete,
+}
+
 pub trait SessionBasePrivate {
     fn holders(&mut self) -> &mut SessionHolderList;
 }
@@ -353,17 +362,16 @@ pub trait SessionBase: SessionBasePrivate {
 
     fn allow_large_payload(&self) -> bool;
 
-    fn get_remote_session_parameters(&self) -> Option<&SessionParameters>;
+    fn get_remote_session_parameters(&self) -> &SessionParameters;
 
     fn get_mrp_base_timeout(&self) -> Timeout;
-
-    /*
-
-    fn is_comissioning_session(&self) -> bool { false }
 
     fn get_remote_mrp_config(&self) -> &ReliableMessageProtocolConfig {
         self.get_remote_session_parameters().get_mrp_config()
     }
+
+
+    fn is_commissioning_session(&self) -> bool { false }
 
     fn is_sescure_session(&self) -> bool {
         self.get_session_type() == SessionType::KSecure
@@ -373,12 +381,30 @@ pub trait SessionBase: SessionBasePrivate {
         self.get_session_type() == SessionType::KUnauthenticated
     }
 
-    fn notify_session_hang(&self);
-
-    fn notify_session_released(&self);
-
     fn set_fabric_index(&mut self, fabric_index: FabricIndex);
-    */
+
+    fn notify_session_hang(&mut self) {
+        let mut holder = self.holders().front_mut();
+        while !holder.is_null() {
+            let op = holder.get().unwrap().on_session_hang();
+            match op {
+                Some(op) => {
+                    match op {
+                        SessionHangOp::Delete => {
+                            holder.remove();
+                        }
+                    }
+                },
+                None => {
+                    holder.move_next();
+                }
+            }
+        }
+    }
+
+    fn notify_session_released(&mut self) {
+        breakhere
+    }
 }
 
 pub enum Session {
@@ -699,7 +725,7 @@ impl SessionBase for Session {
         }
     }
 
-    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
+    fn get_remote_session_parameters(&self) -> &SessionParameters {
         match self {
             Session::Unauthenticated(session) => {
                 session.get_remote_session_parameters()
@@ -729,6 +755,40 @@ impl SessionBase for Session {
             },
             Session::OutgoingGroupSession(session) => {
                 session.get_mrp_base_timeout()
+            },
+        }
+    }
+
+    fn is_commissioning_session(&self) -> bool {
+        match self {
+            Session::Unauthenticated(session) => {
+                false
+            },
+            Session::Secure(session) => {
+                session.is_commissioning_session()
+            },
+            Session::IncomingGroupSession(session) => {
+                false
+            },
+            Session::OutgoingGroupSession(session) => {
+                false
+            },
+        }
+    }
+
+    fn set_fabric_index(&mut self, fabric_index: FabricIndex) {
+        match self {
+            Session::Unauthenticated(session) => {
+                session.set_fabric_index(fabric_index)
+            },
+            Session::Secure(session) => {
+                session.set_fabric_index(fabric_index)
+            },
+            Session::IncomingGroupSession(session) => {
+                session.set_fabric_index(fabric_index)
+            },
+            Session::OutgoingGroupSession(session) => {
+                session.set_fabric_index(fabric_index)
             },
         }
     }

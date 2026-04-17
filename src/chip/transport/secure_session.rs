@@ -157,11 +157,34 @@ impl SessionBase for SecureSession {
         self.m_peer_address.get_transport_type() == peer_address::Type::KTcp
     }
 
-    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
-        Some(&self.m_remote_session_params)
+    fn get_remote_session_parameters(&self) -> &SessionParameters {
+        &self.m_remote_session_params
     }
 
     fn get_mrp_base_timeout(&self) -> Timestamp {
+        if self.is_peer_active() {
+            self.get_remote_mrp_config().m_active_retrans_timeout
+        } else {
+            self.get_remote_mrp_config().m_idle_retrans_timeout
+        }
+    }
+
+    fn is_commissioning_session(&self) -> bool {
+        if self.is_pase_session() {
+            return true;
+        }
+
+        // CASE session is a commissioning session if it was marked as such.
+        // The SessionManager is what keeps track.
+        if self.is_case_session() && self.m_is_case_commissioning_session {
+            return true;
+        }
+
+        false
+    }
+
+    fn set_fabric_index(&mut self, fabric_index: FabricIndex) {
+        self.m_fabric_index = fabric_index
     }
 
     // no used
@@ -212,25 +235,12 @@ impl SecureSession {
         self.get_secure_session_type() == Type::Kpase
     }
 
-    fn is_commissioning_session(&self) -> bool {
-        // PASE session is always a commissioning session.
-        if self.is_pase_session() {
-            return true;
-        }
-
-        // CASE session is a commissioning session if it was marked as such.
-        // The SessionManager is what keeps track.
-        if self.is_case_session() && self.m_is_case_commissioning_session {
-            return true;
+    fn is_peer_active(&self) -> bool {
+        let now = get_monotonic_timestamp();
+        if let Some(diff) = now.checked_sub(self.get_last_peer_activity_time()) {
+            return diff < self.get_remote_mrp_config().m_active_threshold_time;
         }
 
         false
-    }
-
-    fn get_last_peer_activity_time(&self) -> TimeStamp {
-        self.m_last_peer_activity_time
-    }
-
-    fn is_peer_active(&self) -> bool {
     }
 }

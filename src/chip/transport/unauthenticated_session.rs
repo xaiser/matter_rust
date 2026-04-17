@@ -16,7 +16,7 @@ use crate::chip::{
         session_parameters::SessionParameters,
         reliable_message_protocol_config::ReliableMessageProtocolConfig,
     },
-    system::system_clock::{Timestamp, Seconds, Milliseconds},
+    system::system_clock::{Timestamp, Seconds, Milliseconds, get_monotonic_timestamp},
     ScopedNodeId, NodeId, FabricIndex,
 };
 
@@ -131,8 +131,20 @@ impl SessionBase for UnauthenticatedSession {
         self.m_peer_address.get_transport_type() == peer_address::Type::KTcp
     }
 
-    fn get_remote_session_parameters(&self) -> Option<&SessionParameters> {
-        Some(&self.m_remote_session_params)
+    fn get_remote_session_parameters(&self) -> &SessionParameters {
+        &self.m_remote_session_params
+    }
+
+    fn get_mrp_base_timeout(&self) -> Timestamp {
+        if self.is_peer_active() {
+            self.get_remote_mrp_config().m_active_retrans_timeout
+        } else {
+            self.get_remote_mrp_config().m_idle_retrans_timeout
+        }
+    }
+
+    fn set_fabric_index(&mut self, fabric_index: FabricIndex) {
+        self.m_fabric_index = fabric_index
     }
 
     // no used
@@ -175,5 +187,13 @@ impl UnauthenticatedSession {
         }
 
         self.get_ephemeral_initiator_node_id()
+    }
+
+    fn is_peer_active(&self) -> bool {
+        if let Some(diff) = get_monotonic_timestamp().checked_sub(self.get_last_peer_activity_time()) {
+            return diff < self.get_remote_mrp_config().m_active_threshold_time;
+        }
+
+        false
     }
 }
