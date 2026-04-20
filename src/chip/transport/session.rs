@@ -57,6 +57,20 @@ mod session_handle {
     pub fn try_new_handle(session: Session, alloactor: *mut Alloactor) -> Result<SessionHandle, ()> {
         SessionHandle::try_new_in(session, alloactor)
     }
+
+    fn notify_session_released(origin_session: &mut SessionHandle) {
+        /*
+        let session = origin_session.clone();
+
+        while(!session.holders().empty()) {
+            if let Some(holder) = session.holders().front_mut().get() {
+                holder.session_released();
+            } else {
+                break;
+            }
+        }
+        */
+    }
 }
 
 // At the monent, the user must ensure the holder is not moved after allocated.
@@ -73,10 +87,12 @@ mod session_holder {
                 },
             },
             transport::secure_session::AsRef,
-        }
+        },
+        verify_or_die,
     };
 
     use super::{SessionBase, session_handle::SessionHandle, SessionHangOp};
+    use core::cell::RefCell;
 
     // Adapter for holder linked list
     type Adapter = adapter::linked_list::unsafe_ref::DefaultAdapter<SessionHolder>;
@@ -96,7 +112,7 @@ mod session_holder {
     pub struct SessionHolder {
         #[allow(dead_code)]
         m_link: Link,
-        m_session: Option<SessionHandle>,
+        m_session: RefCell<Option<SessionHandle>>,
     }
 
     impl Drop for SessionHolder {
@@ -109,23 +125,38 @@ mod session_holder {
         pub fn new() -> Self {
             Self {
                 m_link: Link::new(),
-                m_session: None,
+                m_session: RefCell::new(None),
             }
         }
 
         pub fn contain(&self, session: &SessionHandle) -> bool {
-            self.m_session.as_ref().is_some_and(|s| SessionHandle::ptr_eq(s, session))
+            if let Ok(m_session) = self.m_session.try_borrow() {
+                m_session.as_ref().is_some_and(|s| SessionHandle::ptr_eq(s, session))
+            } else {
+                verify_or_die!(false);
+                false
+            }
         }
 
         pub fn is_some(&self) -> bool {
-            self.m_session.is_some()
+            if let Ok(session) = self.m_session.try_borrow() {
+                session.is_some()
+            } else {
+                verify_or_die!(false);
+                false
+            }
         }
 
         pub fn get(&self) -> Option<SessionHandle> {
-            self.m_session.clone()
+            if let Ok(session) = self.m_session.try_borrow() {
+                session.clone()
+            } else {
+                verify_or_die!(false);
+                None
+            }
         }
 
-        pub fn grab_pairing_session(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
+        pub fn grab_pairing_session(&self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
             if session.as_ref().as_ref().is_some_and(|s| s.is_establishing()) {
@@ -136,7 +167,7 @@ mod session_holder {
             Err(session)
         }
 
-        pub fn grab(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
+        pub fn grab(&self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
             if !session.is_active_session() {
@@ -148,10 +179,14 @@ mod session_holder {
             Ok(())
         }
 
-        fn grab_unchecked(&mut self, mut session: SessionHandle) {
-            if self.m_session.is_some() {
-                // should never reach here
-                panic!("grab but not release session");
+        fn grab_unchecked(&self, mut session: SessionHandle) {
+            if let Ok(m_session) = self.m_session.try_borrow() {
+                if m_session.is_some() {
+                    // should never reach here
+                    panic!("grab but not release session");
+                }
+            } else {
+                panic!("cannot borrow for grab");
             }
 
             // Safety:
@@ -164,15 +199,37 @@ mod session_holder {
             unsafe {
                 SessionHandle::get_mut_unchecked(&mut session).add_holder(self);
             }
-            self.m_session = Some(session);
+            if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
+                *m_session = Some(session);
+            } else {
+                panic!("cannot borrow mut for grab");
+            }
         }
 
+        /*
         pub fn as_ref(&self) -> Option<&SessionHandle> {
-            self.m_session.as_ref()
+            if let Ok(m_session) = self.m_session.try_borrow() {
+                m_session.as_deref()
+            } else {
+                verify_or_die!(false);
+                None
+            }
         }
+        */
 
-        pub fn release(&mut self) {
+        pub fn release(&self) {
+            /*
             let session = self.m_session.take();
+            if session.is_none() {
+                return;
+            }
+            */
+            let session;
+            if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
+                session = m_session.take();
+            } else {
+                panic!("cannot borrow mut for release");
+            }
             if session.is_none() {
                 return;
             }
@@ -191,6 +248,10 @@ mod session_holder {
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
             None
+        }
+
+        pub fn session_released(&self) {
+            self.release()
         }
     }
 
@@ -400,10 +461,6 @@ pub trait SessionBase: SessionBasePrivate {
                 }
             }
         }
-    }
-
-    fn notify_session_released(&mut self) {
-        breakhere
     }
 }
 

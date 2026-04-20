@@ -417,6 +417,7 @@ pub mod rc {
             pool::{ObjectPool, KInline, BitMapObjectPool},
         };
         use super::*;
+        use core::cell::RefCell;
 
         struct StubElement {
             pub value: u8,
@@ -436,6 +437,11 @@ pub mod rc {
         type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
         type TestRc = Rc<StubElement, TestPool>;
         type TestWeak = Weak<StubElement, TestPool>;
+
+        type TestCellRcInner = RcInner<RefCell<StubElement>>;
+        type TestCellPool = BitMapObjectPool<TestCellRcInner, POOL_SIZE>;
+        type TestCellRc = Rc<RefCell<StubElement>, TestCellPool>;
+        type TestCellWeak = Weak<RefCell<StubElement>, TestCellPool>;
 
         #[test]
         fn data_offset_of_u8() {
@@ -624,6 +630,42 @@ pub mod rc {
             assert_eq!(1, TestRc::strong_count(&rc));
             assert_eq!(0, TestRc::weak_count(&rc));
             assert!(TestRc::is_unique(&rc));
+        }
+
+        #[test]
+        fn new_rc_cell_successfully() {
+            let mut pool = create_object_pool!(TestCellRcInner, POOL_SIZE);
+            let e = TestCellRc::try_new_in(RefCell::new(StubElement::new(0)), &mut pool);
+
+            assert!(e.is_ok());
+            let e = e.unwrap();
+
+            assert_eq!(1, TestCellRc::strong_count(&e));
+            assert_eq!(0, TestCellRc::weak_count(&e));
+            assert!(TestCellRc::is_unique(&e));
+        }
+
+        #[test]
+        fn rc_as_cell_ptr() {
+            let mut pool = create_object_pool!(TestCellRcInner, POOL_SIZE);
+            let e = TestCellRc::try_new_in(RefCell::new(StubElement::new(1)), &mut pool).unwrap();
+            unsafe {
+                let mut_ptr: * mut StubElement = (*(TestCellRc::as_ptr(&e))).as_ptr();
+                assert_eq!((*mut_ptr).value, 1);
+            }
+        }
+
+        #[test]
+        fn cell_get_mut() {
+            let mut pool = create_object_pool!(TestCellRcInner, POOL_SIZE);
+            let mut e = TestCellRc::try_new_in(RefCell::new(StubElement::new(1)), &mut pool).unwrap();
+            if let Some(the_e) = TestCellRc::get_mut(&mut e) {
+                assert_eq!(1, the_e.borrow_mut().value);
+                (*the_e.borrow_mut()).value = 2;
+                assert_eq!(2, the_e.borrow_mut().value);
+            } else {
+                assert!(false);
+            }
         }
     } // end of mod tests
 }
