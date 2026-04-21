@@ -43,7 +43,7 @@ mod session_handle {
         }
     };
 
-    use super::Session;
+    use super::{Session, SessionBasePrivate, SessionHangOp};
 
     use core::cell::{RefCell, Ref, RefMut};
 
@@ -83,6 +83,69 @@ mod session_handle {
         pub fn eq(a: &SessionHandle, b: &SessionHandle) -> bool {
             SharedSession::ptr_eq(&a.m_session, &b.m_session)
         }
+        
+        pub fn notify_session_released(&mut self) {
+            // A holder to ensure at least one keeper for the Rc.
+            let copy = self.clone();
+
+            if let Ok(mut session) = self.m_session.try_borrow_mut() {
+                let mut current = session.holders().front_mut();
+                while !current.is_null() {
+                    if let Some(holder) = current.remove() {
+                        let _ = holder.session_released();
+                    } else {
+                        // sholdn't reach here
+                        break;
+                    }
+                }
+                /*
+                let curent = session.holders().front_mut();
+                while(!session.holders().empty()) {
+                    if let Some(holder) = session.holders().front_mut().get() {
+                        holder.session_released();
+                    } else {
+                        break;
+                    }
+                }
+                */
+            } else {
+                panic!("cannot borrow session mut in notify_release");
+            };
+        }
+
+        fn notify_session_hang(&mut self) {
+            let copy = self.clone();
+
+            if let Ok(mut session) = self.m_session.try_borrow_mut() {
+                let mut current = session.holders().front_mut();
+                while !current.is_null() {
+                    if let Some(holder) = current.get() {
+                        match holder.on_session_hang() {
+                            Some(op) => {
+                                match op {
+                                    SessionHangOp::Delete => {
+                                        current.remove();
+                                    }
+                                }
+                            },
+                            None => {
+                                current.move_next();
+                            }
+                        }
+                    } else {
+                        // sholdn't reach here
+                        break;
+                    }
+                }
+            } else {
+                panic!("cannot borrow session mut in notify_release");
+            };
+        }
+
+        // a functino mostly added for test
+        pub(super) fn get(&self) -> &SharedSession {
+            &self.m_session
+        }
     }
 
     pub const fn new_session_alloactor() -> Alloactor {
@@ -95,8 +158,8 @@ mod session_handle {
     }
     */
 
-    fn notify_session_released(origin_session: &mut SessionHandle) {
         /*
+    fn notify_session_released(origin_session: &mut SessionHandle) {
         let session = origin_session.clone();
 
         while(!session.holders().empty()) {
@@ -106,8 +169,8 @@ mod session_handle {
                 break;
             }
         }
-        */
     }
+        */
 }
 
 // At the monent, the user must ensure the holder is not moved after allocated.
@@ -264,12 +327,15 @@ mod session_holder {
         }
 
         pub fn release(&self) {
+            /*
             let session;
             if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
                 session = m_session.take();
             } else {
                 panic!("cannot borrow mut for release");
             }
+            */
+            let session = self.session_released();
             if session.is_none() {
                 return;
             }
@@ -297,8 +363,14 @@ mod session_holder {
             None
         }
 
-        pub fn session_released(&self) {
-            self.release()
+        pub fn session_released(&self) -> Option<SessionHandle> {
+            //let session;
+            if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
+                return m_session.take();
+            } else {
+                panic!("cannot borrow mut for session released");
+                return None;
+            }
         }
     }
 
@@ -318,7 +390,7 @@ mod session_holder {
 
         use core::ptr;
 
-        const POOL_SIZE: usize = 1;
+        const POOL_SIZE: usize = 2;
         type TestPool = BitMapObjectPool<Holder, POOL_SIZE>;
 
         struct Holder {
@@ -352,6 +424,7 @@ mod session_holder {
 
             unsafe {
                 assert!((*holder).m_session.grab(session).is_ok());
+                assert!((*holder).m_session.get().is_some());
             }
         }
 
@@ -368,31 +441,74 @@ mod session_holder {
             let mut session_copy = session.clone();
             let session_copy_2 = session.clone();
 
-            assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
+            //assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
+            assert_eq!(3, SharedSession::strong_count(session.get()));
 
             unsafe {
                 assert!((*holder).m_session.grab(session).is_ok());
             }
 
             // ensure grab doesn't increase the reference count
-            assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
+            assert_eq!(3, SharedSession::strong_count(session_copy.get()));
 
             unsafe {
                 // ensure there is only one holders
-                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().front().get().
-                    is_some_and(|h| h.contain(&session_copy_2)));
-                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().back().get().
-                    is_some_and(|h| h.contain(&session_copy_2)));
-
+                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some_and(|h| h.contain(&session_copy_2))));
+                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().back().get().is_some_and(|h| h.contain(&session_copy_2))));
                 core::ptr::drop_in_place(holder);
-
                 // ensure the holder list is empty
-                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().front().get().
-                    is_none());
+                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().front().get().is_none()));
             }
 
             // the count should be 2
-            assert_eq!(2, SharedSession::strong_count(&session_copy.m_session));
+            assert_eq!(2, SharedSession::strong_count(session_copy.get()));
+        }
+
+        #[test]
+        fn holder_releaes_itself() {
+            let mut holder_pool = TestPool::new();
+            let mut holder_1 = holder_pool.allocate(Holder::new());
+            let mut holder_2 = holder_pool.allocate(Holder::new());
+
+            let mut session_pool = new_session_alloactor();
+            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = session.unwrap();
+
+            unsafe {
+                assert!((*holder_1).m_session.grab(session.clone()).is_ok());
+                assert!((*holder_2).m_session.grab(session.clone()).is_ok());
+                assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some()));
+
+                (*holder_1).m_session.release();
+                assert!((*holder_1).m_session.get().is_none());
+                assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some()));
+                (*holder_2).m_session.release();
+                assert!((*holder_2).m_session.get().is_none());
+                assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().get().is_none()));
+            }
+        }
+
+        #[test]
+        fn session_release_all() {
+            let mut holder_pool = TestPool::new();
+            let mut holder_1 = holder_pool.allocate(Holder::new());
+            let mut holder_2 = holder_pool.allocate(Holder::new());
+
+            let mut session_pool = new_session_alloactor();
+            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let mut session = session.unwrap();
+
+            unsafe {
+                assert!((*holder_1).m_session.grab(session.clone()).is_ok());
+                assert!((*holder_2).m_session.grab(session.clone()).is_ok());
+                assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some()));
+
+                session.notify_session_released();
+
+                assert!((*holder_1).m_session.get().is_none());
+                assert!((*holder_2).m_session.get().is_none());
+                assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().get().is_none()));
+            }
         }
     } // end of tests
 }
@@ -490,27 +606,6 @@ pub trait SessionBase: SessionBasePrivate {
     }
 
     fn set_fabric_index(&mut self, fabric_index: FabricIndex);
-
-    fn notify_session_hang(&mut self) {
-        /*
-        let mut holder = self.holders().front_mut();
-        while !holder.is_null() {
-            let op = holder.get().unwrap().on_session_hang();
-            match op {
-                Some(op) => {
-                    match op {
-                        SessionHangOp::Delete => {
-                            holder.remove();
-                        }
-                    }
-                },
-                None => {
-                    holder.move_next();
-                }
-            }
-        }
-        */
-    }
 }
 
 pub enum Session {
