@@ -45,18 +45,55 @@ mod session_handle {
 
     use super::Session;
 
+    use core::cell::{RefCell, Ref, RefMut};
+
     // Alloactor for reference counted pointer of session
     pub const ALLOACTOR_CAP: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_SECURE_SESSION_POOL_SIZE;
-    pub type Alloactor = DefaultAlloactor<Session, ALLOACTOR_CAP>;
-    pub type SessionHandle= Rc<Session, Alloactor>;
+    pub type Alloactor = DefaultAlloactor<RefCell<Session>, ALLOACTOR_CAP>;
+    //pub type SessionHandle= Rc<Session, Alloactor>;
+    pub(super) type SharedSession = Rc<RefCell<Session>, Alloactor>;
+
+    pub struct SessionHandle {
+        m_session: SharedSession,
+    }
+
+    impl Clone for SessionHandle {
+        fn clone(&self) -> Self {
+            Self {
+                m_session: self.m_session.clone(),
+            }
+        }
+    }
+
+    impl SessionHandle {
+        pub fn try_new_handle(session: Session, alloactor: * mut Alloactor) -> Result<SessionHandle, ()> {
+            Ok(Self {
+                m_session: SharedSession::try_new_in(RefCell::new(session), alloactor)?,
+            })
+        }
+
+        pub fn try_ref(&self) -> Result<Ref<'_, Session>, ()> {
+            self.m_session.try_borrow().map_err(|_| ())
+        }
+
+        pub fn try_mut(&self) -> Result<RefMut<'_, Session>, ()> {
+            self.m_session.try_borrow_mut().map_err(|_| ())
+        }
+
+        pub fn eq(a: &SessionHandle, b: &SessionHandle) -> bool {
+            SharedSession::ptr_eq(&a.m_session, &b.m_session)
+        }
+    }
 
     pub const fn new_session_alloactor() -> Alloactor {
         Alloactor::new()
     }
 
+    /*
     pub fn try_new_handle(session: Session, alloactor: *mut Alloactor) -> Result<SessionHandle, ()> {
         SessionHandle::try_new_in(session, alloactor)
     }
+    */
 
     fn notify_session_released(origin_session: &mut SessionHandle) {
         /*
@@ -131,7 +168,7 @@ mod session_holder {
 
         pub fn contain(&self, session: &SessionHandle) -> bool {
             if let Ok(m_session) = self.m_session.try_borrow() {
-                m_session.as_ref().is_some_and(|s| SessionHandle::ptr_eq(s, session))
+                m_session.as_ref().is_some_and(|s| SessionHandle::eq(s, session))
             } else {
                 verify_or_die!(false);
                 false
@@ -159,7 +196,14 @@ mod session_holder {
         pub fn grab_pairing_session(&self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
-            if session.as_ref().as_ref().is_some_and(|s| s.is_establishing()) {
+            //if session.as_ref().as_ref().is_some_and(|s| s.is_establishing()) {
+            if session.try_ref().is_ok_and(|s| {
+                if let Some(secure_session) = s.as_ref() {
+                    secure_session.is_establishing()
+                } else {
+                    false
+                }
+            }) {
                 self.grab_unchecked(session);
                 return Ok(());
             }
@@ -170,6 +214,14 @@ mod session_holder {
         pub fn grab(&self, session: SessionHandle) -> Result<(), SessionHandle> {
             self.release();
 
+            if session.try_ref().is_ok_and(|s| s.is_active_session()) {
+                self.grab_unchecked(session);
+
+                return Ok(());
+            }
+
+            Err(session)
+            /*
             if !session.is_active_session() {
                 return Err(session);
             }
@@ -177,6 +229,7 @@ mod session_holder {
             self.grab_unchecked(session);
 
             Ok(())
+            */
         }
 
         fn grab_unchecked(&self, mut session: SessionHandle) {
@@ -196,9 +249,13 @@ mod session_holder {
             //    the same data, therefore, keep acting as if no changes in the session.
             // 3. Since this session is still holded at this monent, the underlying session
             //    object must be alive.
-            unsafe {
-                SessionHandle::get_mut_unchecked(&mut session).add_holder(self);
+            //SessionHandle::get_mut_unchecked(&mut session).add_holder(self);
+            if let Ok(mut session) = session.try_mut() {
+                session.add_holder(self);
+            } else {
+                panic!("cannot borrow session mut for grab");
             }
+
             if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
                 *m_session = Some(session);
             } else {
@@ -206,24 +263,7 @@ mod session_holder {
             }
         }
 
-        /*
-        pub fn as_ref(&self) -> Option<&SessionHandle> {
-            if let Ok(m_session) = self.m_session.try_borrow() {
-                m_session.as_deref()
-            } else {
-                verify_or_die!(false);
-                None
-            }
-        }
-        */
-
         pub fn release(&self) {
-            /*
-            let session = self.m_session.take();
-            if session.is_none() {
-                return;
-            }
-            */
             let session;
             if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
                 session = m_session.take();
@@ -241,9 +281,16 @@ mod session_holder {
             //    the same data, therefore, keep acting as if no changes in the session.
             // 3. Since this session is still holded at this monent, the underlying session
             //    object must be alive.
+            /*
             unsafe {
                 SessionHandle::get_mut_unchecked(&mut session).remove_holder(self);
             }
+            */
+            if let Ok(mut s) = session.try_mut() {
+                s.remove_holder(self);
+            } else {
+                panic!("cannot borrow session mut for releae");
+            };
         }
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
@@ -260,7 +307,7 @@ mod session_holder {
         use super::*;
         use super::super::{
             session_handle::{
-                new_session_alloactor, try_new_handle,
+                new_session_alloactor, SessionHandle, SharedSession,
             },
             SessionBasePrivate,
             Session,
@@ -299,7 +346,7 @@ mod session_holder {
             let mut holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let mut session = session.unwrap();
 
@@ -314,38 +361,38 @@ mod session_holder {
             let mut holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
             // make some copies used later for check
             let mut session_copy = session.clone();
             let session_copy_2 = session.clone();
 
-            assert_eq!(3, SessionHandle::strong_count(&session_copy));
+            assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
 
             unsafe {
                 assert!((*holder).m_session.grab(session).is_ok());
             }
 
             // ensure grab doesn't increase the reference count
-            assert_eq!(3, SessionHandle::strong_count(&session_copy));
+            assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
 
             unsafe {
                 // ensure there is only one holders
-                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().front().get().
+                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().front().get().
                     is_some_and(|h| h.contain(&session_copy_2)));
-                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().back().get().
+                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().back().get().
                     is_some_and(|h| h.contain(&session_copy_2)));
 
                 core::ptr::drop_in_place(holder);
 
                 // ensure the holder list is empty
-                assert!(SessionHandle::get_mut_unchecked(&mut session_copy).holders().front().get().
+                assert!(SharedSession::get_mut_unchecked(&mut session_copy.m_session).holders().front().get().
                     is_none());
             }
 
             // the count should be 2
-            assert_eq!(2, SessionHandle::strong_count(&session_copy));
+            assert_eq!(2, SharedSession::strong_count(&session_copy.m_session));
         }
     } // end of tests
 }
@@ -445,6 +492,7 @@ pub trait SessionBase: SessionBasePrivate {
     fn set_fabric_index(&mut self, fabric_index: FabricIndex);
 
     fn notify_session_hang(&mut self) {
+        /*
         let mut holder = self.holders().front_mut();
         while !holder.is_null() {
             let op = holder.get().unwrap().on_session_hang();
@@ -461,6 +509,7 @@ pub trait SessionBase: SessionBasePrivate {
                 }
             }
         }
+        */
     }
 }
 
@@ -868,7 +917,7 @@ impl Session {
     }
 }
 
-pub fn get_session_type_string(session: &session_handle::SessionHandle) -> &str {
+pub fn get_session_type_string(session: &Session) -> &str {
     match session.get_session_type() {
         SessionType::KGroupIncoming => {
             "G"
