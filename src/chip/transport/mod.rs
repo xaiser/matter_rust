@@ -7,5 +7,6 @@ pub mod group_session;
 mod crypto_context;
 mod secure_session;
 mod unauthenticated_session;
+pub mod peer_message_counter;
 
 pub use raw::peer_address::PeerAddress;

@@ -41,7 +41,7 @@ pub struct UnauthenticatedSession {
     m_peer_address: PeerAddress,
     m_remote_session_params: SessionParameters,
     m_last_peer_activity_time: Timestamp,
-    m_peer_node_id: NodeId,
+    m_last_activity_time: Timestamp,
     m_fabric_index: FabricIndex,
     m_session_role: OnceCell<SessionRole>,
     m_ephemeral_initiator_node_id: OnceCell<NodeId>,
@@ -58,14 +58,7 @@ impl SessionBase for UnauthenticatedSession {
         SessionType::KUnauthenticated
     }
 
-    /*
-    fn holders(&mut self) -> &mut SessionHolderList {
-        &mut self.m_holders
-    }
-    */
-
     fn is_active_session(&self) -> bool {
-        // TODO: this is just a stub return value
         true
     }
 
@@ -162,7 +155,7 @@ impl UnauthenticatedSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
             m_last_peer_activity_time: Timestamp::ZERO,
-            m_peer_node_id: KUNDEFINED_NODE_ID,
+            m_last_activity_time: Timestamp::ZERO,
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             m_session_role: OnceCell::new(),
             m_ephemeral_initiator_node_id: OnceCell::new(),
@@ -195,5 +188,28 @@ impl UnauthenticatedSession {
         }
 
         false
+    }
+
+    pub fn get_last_activity_time(&self) -> Timestamp { self.m_last_activity_time }
+
+    pub fn mark_active(&mut self) -> {
+        self.m_last_activity_time = get_monotonic_timestamp();
+    }
+
+    pub fn mark_active_rx(&mut self) -> {
+        self.m_last_peer_activity_time = get_monotonic_timestamp();
+        self.mark_active();
+    }
+
+    pub fn get_peer_address(&self) -> &PeerAddress {
+        &self.m_peer_address
+    }
+
+    pub fn set_peer_address(&mut self, address: PeerAddress) {
+        self.m_peer_address = address;
+    }
+
+    pub fn set_remote_session_parameters(&mut self, session_params: SessionParameters) {
+        self.m_remote_session_params = session_params;
     }
 }

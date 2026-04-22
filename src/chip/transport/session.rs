@@ -98,16 +98,6 @@ mod session_handle {
                         break;
                     }
                 }
-                /*
-                let curent = session.holders().front_mut();
-                while(!session.holders().empty()) {
-                    if let Some(holder) = session.holders().front_mut().get() {
-                        holder.session_released();
-                    } else {
-                        break;
-                    }
-                }
-                */
             } else {
                 panic!("cannot borrow session mut in notify_release");
             };
@@ -151,26 +141,6 @@ mod session_handle {
     pub const fn new_session_alloactor() -> Alloactor {
         Alloactor::new()
     }
-
-    /*
-    pub fn try_new_handle(session: Session, alloactor: *mut Alloactor) -> Result<SessionHandle, ()> {
-        SessionHandle::try_new_in(session, alloactor)
-    }
-    */
-
-        /*
-    fn notify_session_released(origin_session: &mut SessionHandle) {
-        let session = origin_session.clone();
-
-        while(!session.holders().empty()) {
-            if let Some(holder) = session.holders().front_mut().get() {
-                holder.session_released();
-            } else {
-                break;
-            }
-        }
-    }
-        */
 }
 
 // At the monent, the user must ensure the holder is not moved after allocated.
