@@ -192,11 +192,11 @@ impl UnauthenticatedSession {
 
     pub fn get_last_activity_time(&self) -> Timestamp { self.m_last_activity_time }
 
-    pub fn mark_active(&mut self) -> {
+    pub fn mark_active(&mut self) {
         self.m_last_activity_time = get_monotonic_timestamp();
     }
 
-    pub fn mark_active_rx(&mut self) -> {
+    pub fn mark_active_rx(&mut self) {
         self.m_last_peer_activity_time = get_monotonic_timestamp();
         self.mark_active();
     }
