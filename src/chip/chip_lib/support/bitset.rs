@@ -118,12 +118,12 @@ where
                 let wshift = rhs / bits_per_word();
                 let offset = rhs % bits_per_word();
                 if offset == 0 {
-                    for n in words(NB)-1..=wshift {
+                    for n in (wshift..=(words(NB)-1)).rev() {
                         self.m_data[n] = self.m_data[n - wshift];
                     }
                 } else {
                     let sub_offset = bits_per_word() - offset;
-                    for n in words(NB)-1..wshift {
+                    for n in (wshift+1..=(words(NB)-1)).rev() {
                         self.m_data[n] = (self.m_data[n - wshift] << offset) | (self.m_data[n - wshift - 1] >> sub_offset);
                     }
                     self.m_data[wshift] = self.m_data[0] << offset;
@@ -214,12 +214,7 @@ mod tests {
         let mut w = Bitset::<33>::new();
         assert!(w.set(31).is_some());
         assert!(w.test(31).is_some_and(|t| t));
-        println!("{:?}", w.m_data);
-        println!("words is {}", words(33) - 1);
-        println!("suboffset is {}", bits_per_word() - 1);
-        println!("after shift is {}", w.m_data[0] >> 31);
         w <<= 1;
-        println!("{:?}", w.m_data);
         assert!(w.test(31).is_some_and(|t| !t));
         assert!(w.test(32).is_some_and(|t| t));
     }
