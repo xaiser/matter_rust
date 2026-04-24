@@ -1,3 +1,5 @@
+use core::ops::ShlAssign;
+
 const fn bits_per_word() -> usize {
     core::mem::size_of::<WordT>() * 8
 }
@@ -90,6 +92,48 @@ where
 
         return Some(*last == (!(0 as WordT) >> (words(NB) * bits_per_word() - NB)));
     }
+
+    pub fn any(&self) -> bool {
+        for w in self.m_data {
+            if w != (0 as WordT) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    pub fn none(&self) -> bool {
+        !self.any()
+    }
+}
+
+impl<const NB: usize> ShlAssign<usize> for Bitset<NB>
+where
+    [(); words(NB)]:
+{
+    fn shl_assign(&mut self, rhs: usize) {
+        if rhs < NB {
+            if rhs != 0 {
+                let wshift = rhs / bits_per_word();
+                let offset = rhs % bits_per_word();
+                if offset == 0 {
+                    for n in words(NB)-1..=wshift {
+                        self.m_data[n] = self.m_data[n - wshift];
+                    }
+                } else {
+                    let sub_offset = bits_per_word() - offset;
+                    for n in words(NB)-1..wshift {
+                        self.m_data[n] = (self.m_data[n - wshift] << offset) | (self.m_data[n - wshift - 1] >> sub_offset);
+                    }
+                    self.m_data[wshift] = self.m_data[0] << offset;
+                }
+                self.m_data[..wshift].fill(0);
+            }
+        } else {
+            self.m_data.fill(0);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +151,13 @@ mod tests {
         let mut w = Bitset::<1>::new();
         assert!(w.set(0).is_some());
         assert!(w.test(0).is_some_and(|t| t));
+    }
+
+    #[test]
+    fn test_33() {
+        let mut w = Bitset::<33>::new();
+        assert!(w.set(32).is_some());
+        assert!(w.test(32).is_some_and(|t| t));
     }
 
     #[test]
@@ -129,5 +180,47 @@ mod tests {
         }
 
         assert!(w.all().is_some_and(|t| !t));
+    }
+
+    #[test]
+    fn any() {
+        let mut w = Bitset::<1>::new();
+        assert!(!w.any());
+        assert!(w.set(0).is_some());
+        assert!(w.any());
+    }
+
+    #[test]
+    fn left_shift_assign() {
+        let mut w = Bitset::<1>::new();
+        assert!(w.set(0).is_some());
+        assert!(w.any());
+        w <<= 1;
+        assert!(w.none());
+    }
+
+    #[test]
+    fn left_shift_assign_2() {
+        let mut w = Bitset::<2>::new();
+        assert!(w.set(0).is_some());
+        assert!(w.test(0).is_some_and(|t| t));
+        w <<= 1;
+        assert!(w.test(0).is_some_and(|t| !t));
+        assert!(w.test(1).is_some_and(|t| t));
+    }
+
+    #[test]
+    fn left_shift_assign_33() {
+        let mut w = Bitset::<33>::new();
+        assert!(w.set(31).is_some());
+        assert!(w.test(31).is_some_and(|t| t));
+        println!("{:?}", w.m_data);
+        println!("words is {}", words(33) - 1);
+        println!("suboffset is {}", bits_per_word() - 1);
+        println!("after shift is {}", w.m_data[0] >> 31);
+        w <<= 1;
+        println!("{:?}", w.m_data);
+        assert!(w.test(31).is_some_and(|t| !t));
+        assert!(w.test(32).is_some_and(|t| t));
     }
 } // end of tests
