@@ -1,3 +1,4 @@
+//TODO: optimize N = 32 bits
 use core::ops::ShlAssign;
 
 const fn bits_per_word() -> usize {
@@ -27,6 +28,15 @@ where
     [(); words(N)]:
 {
     m_data: [WordT; words(N)],
+}
+
+impl<const NB: usize> Default for Bitset<NB>
+where
+    [(); words(NB)]:
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const NB: usize> Bitset<NB>
@@ -63,7 +73,7 @@ where
     }
 
     pub fn set(&mut self, pos: usize) -> Option<&mut Self> {
-        self.set_val(pos, true)
+        self.set_val(pos, tru
     }
 
     pub fn clean(&mut self, pos: usize) -> Option<&mut Self> {
@@ -82,15 +92,18 @@ where
         }
     }
 
-    pub fn all(&self) -> Option<bool> {
-        let (last, rest) = self.m_data.split_last()?;
-        for w in rest {
-            if *w != !(0 as WordT) {
-                return Some(false);
+    pub fn all(&self) -> bool {
+        if let Some((last, rest)) = self.m_data.split_last() {
+            for w in rest {
+                if *w != !(0 as WordT) {
+                    return false;
+                }
             }
+
+            return *last == (!(0 as WordT) >> (words(NB) * bits_per_word() - NB));
         }
 
-        return Some(*last == (!(0 as WordT) >> (words(NB) * bits_per_word() - NB)));
+        false
     }
 
     pub fn any(&self) -> bool {
@@ -147,6 +160,12 @@ mod tests {
     }
 
     #[test]
+    fn init_0() {
+        let mut w = Bitset::<0>::new();
+        assert!(w.set(0).is_none());
+    }
+
+    #[test]
     fn test() {
         let mut w = Bitset::<1>::new();
         assert!(w.set(0).is_some());
@@ -163,23 +182,29 @@ mod tests {
     #[test]
     fn all() {
         let mut w = Bitset::<10>::new();
-        assert!(w.all().is_some_and(|t| !t));
+        assert!(!w.all());
         for i in 0..10 {
             let _ = w.set(i);
         }
 
-        assert!(w.all().is_some_and(|t| t));
+        assert!(w.all());
+    }
+
+    #[test]
+    fn all_0() {
+        let mut w = Bitset::<0>::new();
+        assert!(!w.all());
     }
 
     #[test]
     fn not_all() {
         let mut w = Bitset::<10>::new();
-        assert!(w.all().is_some_and(|t| !t));
+        assert!(!w.all());
         for i in 0..9 {
             let _ = w.set(i);
         }
 
-        assert!(w.all().is_some_and(|t| !t));
+        assert!(!w.all());
     }
 
     #[test]
@@ -217,5 +242,12 @@ mod tests {
         w <<= 1;
         assert!(w.test(31).is_some_and(|t| !t));
         assert!(w.test(32).is_some_and(|t| t));
+    }
+
+    #[test]
+    fn left_shift_0() {
+        let mut w = Bitset::<0>::new();
+        w <<= 1;
+        assert!(w.set(0).is_none());
     }
 } // end of tests
