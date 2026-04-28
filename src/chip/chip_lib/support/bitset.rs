@@ -72,23 +72,23 @@ where
         }
     }
 
-    pub fn set(&mut self, pos: usize) -> Option<&mut Self> {
-        self.set_val(pos, tru
+    pub fn set(&mut self, pos: usize)  {
+        let _ = self.set_val(pos, true);
     }
 
-    pub fn clean(&mut self, pos: usize) -> Option<&mut Self> {
-        self.set_val(pos, false)
+    pub fn clean(&mut self, pos: usize) {
+        let _ = self.set_val(pos, false);
     }
 
     pub fn reset(&mut self) {
         self.m_data.fill(0)
     }
 
-    pub fn test(&self, pos: usize) -> Option<bool> {
+    pub fn test(&self, pos: usize) -> bool {
         if let Some(w) = self.getword(pos) {
-            Some((w & bitmask(pos)) != (0 as WordT))
+            (w & bitmask(pos)) != (0 as WordT)
         } else {
-            None
+            false
         }
     }
 
@@ -156,27 +156,29 @@ mod tests {
     #[test]
     fn init() {
         let mut w = Bitset::<1>::new();
-        assert!(w.set(0).is_some());
+        w.set(0);
+        assert!(w.test(0));
     }
 
     #[test]
     fn init_0() {
         let mut w = Bitset::<0>::new();
-        assert!(w.set(0).is_none());
+        w.set(0);
+        assert!(!w.test(0));
     }
 
     #[test]
     fn test() {
         let mut w = Bitset::<1>::new();
-        assert!(w.set(0).is_some());
-        assert!(w.test(0).is_some_and(|t| t));
+        w.set(0);
+        assert!(w.test(0));
     }
 
     #[test]
     fn test_33() {
         let mut w = Bitset::<33>::new();
-        assert!(w.set(32).is_some());
-        assert!(w.test(32).is_some_and(|t| t));
+        w.set(32);
+        assert!(w.test(32));
     }
 
     #[test]
@@ -184,7 +186,7 @@ mod tests {
         let mut w = Bitset::<10>::new();
         assert!(!w.all());
         for i in 0..10 {
-            let _ = w.set(i);
+            w.set(i);
         }
 
         assert!(w.all());
@@ -201,7 +203,7 @@ mod tests {
         let mut w = Bitset::<10>::new();
         assert!(!w.all());
         for i in 0..9 {
-            let _ = w.set(i);
+            w.set(i);
         }
 
         assert!(!w.all());
@@ -211,14 +213,14 @@ mod tests {
     fn any() {
         let mut w = Bitset::<1>::new();
         assert!(!w.any());
-        assert!(w.set(0).is_some());
+        w.set(0);
         assert!(w.any());
     }
 
     #[test]
     fn left_shift_assign() {
         let mut w = Bitset::<1>::new();
-        assert!(w.set(0).is_some());
+        w.set(0);
         assert!(w.any());
         w <<= 1;
         assert!(w.none());
@@ -227,27 +229,28 @@ mod tests {
     #[test]
     fn left_shift_assign_2() {
         let mut w = Bitset::<2>::new();
-        assert!(w.set(0).is_some());
-        assert!(w.test(0).is_some_and(|t| t));
+        w.set(0);
+        assert!(w.test(0));
         w <<= 1;
-        assert!(w.test(0).is_some_and(|t| !t));
-        assert!(w.test(1).is_some_and(|t| t));
+        assert!(!w.test(0));
+        assert!(w.test(1));
     }
 
     #[test]
     fn left_shift_assign_33() {
         let mut w = Bitset::<33>::new();
-        assert!(w.set(31).is_some());
-        assert!(w.test(31).is_some_and(|t| t));
+        w.set(31);
+        assert!(w.test(31));
         w <<= 1;
-        assert!(w.test(31).is_some_and(|t| !t));
-        assert!(w.test(32).is_some_and(|t| t));
+        assert!(!w.test(31));
+        assert!(w.test(32));
     }
 
     #[test]
     fn left_shift_0() {
         let mut w = Bitset::<0>::new();
         w <<= 1;
-        assert!(w.set(0).is_none());
+        w.set(0);
+        assert!(!w.test(0));
     }
 } // end of tests

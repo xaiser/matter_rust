@@ -28,11 +28,11 @@ mod peer_message_counter {
 
     // Counter position indicator with respect to our current
     // mSynced.mMaxCounter.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub(super) enum Position
     {
         BeforeWindow,
-        InWindow(u32),
+        InWindow,
         MaxCounter,
         FutureCounter,
     }
@@ -256,7 +256,8 @@ impl PeerMessageCounter {
      */
     fn classify_with_rollover(&self, counter: u32) -> Option<Position> {
         let current_max_count = self.m_status.max_counter()?;
-        let counter_increase = counter - current_max_count;
+        //let counter_increase = counter - current_max_count;
+        let (counter_increase, _) = counter.overflowing_sub(current_max_count);
         const future_counter_window: u32 = (1 << 31) - 1;
 
         if counter_increase >= 1 && counter_increase <= future_counter_window {
@@ -278,9 +279,9 @@ impl PeerMessageCounter {
             return Some(Position::MaxCounter);
         }
 
-        let offset = current_max_count - counter;
-        if offset <= CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE as u32 {
-            return Some(Position::InWindow(offset));
+        let (offset, is_overflow) = current_max_count.overflowing_sub(counter);
+        if !is_overflow && offset <= CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE as u32 {
+            return Some(Position::InWindow);
         }
 
         Some(Position::BeforeWindow)
@@ -295,11 +296,15 @@ impl PeerMessageCounter {
             Position::FutureCounter => {
                 chip_ok!()
             },
-            Position::InWindow(offset) => {
-                if self.m_status.window().is_some_and(|w| w.test((offset - 1) as usize).unwrap_or(false)) {
-                    Err(chip_error_duplicate_message_received!())
-                } else {
+            Position::InWindow => {
+                if let Some(synced) = self.m_status.synced() {
+                    let (offset, _) = synced.m_max_counter.overflowing_sub(counter);
+                    if synced.m_window.test((offset - 1) as usize) {
+                        return Err(chip_error_duplicate_message_received!());
+                    }
                     chip_ok!()
+                } else {
+                    Err(chip_error_incorrect_state!())
                 }
             },
             _ => {
@@ -332,5 +337,107 @@ mod tests {
         let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
         counter.sync_starting(&challenge);
         assert!(counter.is_synchronizing());
+    }
+
+    #[test]
+    fn verify_challenge_successfully() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+    }
+
+    #[test]
+    fn verify_challenge_incorrect_state() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        assert!(counter.verify_challeng(0, &challenge).is_err_and(|e| e == chip_error_incorrect_state!()));
+    }
+
+    #[test]
+    fn verify_challenge_incorrect_challenge() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        let challenge_wrong = [1u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        assert!(counter.verify_challeng(0, &challenge_wrong).is_err_and(|e| e == chip_error_invalid_argument!()));
+    }
+
+    #[test]
+    fn classify_with_rollover_future() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(1).is_some_and(|p| p == Position::FutureCounter));
+    }
+
+    #[test]
+    fn classify_with_rollover_farest_future() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(0 + ((1 << 31) -1)).is_some_and(|p| p == Position::FutureCounter));
+    }
+
+    #[test]
+    fn classify_with_rollover_future_overflow() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(1 + ((1 << 31) -1)).is_some_and(|p| p == Position::BeforeWindow));
+    }
+
+    #[test]
+    fn classify_max_counter() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(0).is_some_and(|p| p == Position::MaxCounter));
+    }
+
+    #[test]
+    fn classify_in_oldest_window() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(32, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(0).is_some_and(|p| p == Position::InWindow));
+    }
+
+    #[test]
+    fn classify_in_latest_window() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(32, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(31).is_some_and(|p| p == Position::InWindow));
+    }
+
+    #[test]
+    fn classify_before_window() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(33, &challenge).is_ok());
+        assert!(counter.classify_with_rollover(0).is_some_and(|p| p == Position::BeforeWindow));
+    }
+
+    #[test]
+    fn classify_with_rollover_incorect_state() {
+        let mut counter = PeerMessageCounter::new();
+        assert!(counter.classify_with_rollover(1).is_none());
     }
 } // end of tests
