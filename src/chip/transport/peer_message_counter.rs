@@ -12,6 +12,7 @@ use crate::{
     chip_error_incorrect_state,
     chip_error_invalid_argument,
     chip_error_duplicate_message_received,
+    chip_error_internal,
     verify_or_die,
     verify_or_return_error,
     verify_or_return_value,
@@ -44,6 +45,13 @@ mod peer_message_counter {
     }
 
     impl Status {
+        pub fn new_synced_counter(counter: u32) -> Self {
+            let mut inner = Synced { m_max_counter: counter, m_window: Window::default() };
+            inner.m_window.reset();
+
+            Status::Synced(inner)
+        }
+
         pub fn reset(&mut self) {
             match self {
                 Status::SyncInProcess(sip) => {
@@ -227,16 +235,31 @@ impl PeerMessageCounter {
         }
 
         self.m_status.reset();
-        self.m_status = Status::Synced(Synced::default());
-
-        if let Some(sync) = self.m_status.synced_mut() {
-            sync.m_max_counter = counter;
-            sync.m_window.reset();
-        } else {
-            return Err(chip_error_incorrect_state!());
-        }
+        self.m_status = Status::new_synced_counter(counter);
 
         chip_ok!()
+    }
+
+    pub fn verify_grop(&self, counter: u32) -> ChipErrorResult {
+        let pos = self.classify_with_rollover(counter).ok_or(chip_error_incorrect_state!())?;
+
+        self.verify_position_encrypted(pos, counter)
+    }
+
+    pub fn verify_or_trust_first_group(&mut self, counter: u32) -> ChipErrorResult {
+        match self.m_status {
+            Status::NotSynced => {
+                self.set_counter(counter);
+                return chip_ok!();
+            }, 
+            Status::Synced(_) => {
+                return self.verify_grop(counter);
+            },
+            _ => {
+                verify_or_die!(false);
+                return Err(chip_error_internal!());
+            }
+        }
     }
 
     /*
@@ -299,6 +322,7 @@ impl PeerMessageCounter {
             Position::InWindow => {
                 if let Some(synced) = self.m_status.synced() {
                     let (offset, _) = synced.m_max_counter.overflowing_sub(counter);
+                    // this will return false if overflow
                     if synced.m_window.test((offset - 1) as usize) {
                         return Err(chip_error_duplicate_message_received!());
                     }
@@ -311,6 +335,37 @@ impl PeerMessageCounter {
                 Err(chip_error_duplicate_message_received!())
             }
         }
+    }
+
+    fn set_counter(&mut self, value: u32) {
+        self.reset();
+        self.m_status = Status::new_synced_counter(value);
+    }
+
+    fn commit_with_position(&mut self, position: Position, counter: u32) -> ChipErrorResult {
+        match position {
+            Position::InWindow => {
+                let synced = self.m_status.synced_mut().ok_or(chip_error_incorrect_state!())?;
+                let (offset, _) = synced.m_max_counter.overflowing_sub(counter);
+                synced.m_window.set((offset - 1) as usize);
+            },
+            Position::MaxCounter => {
+                // do nothing
+            },
+            _ => {
+                let synced = self.m_status.synced_mut().ok_or(chip_error_incorrect_state!())?;
+                let (shift, _) = counter.overflowing_sub(synced.m_max_counter);
+                synced.m_max_counter = shift;
+                let shift = shift as usize;
+                if shift > CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE {
+                    synced.m_window.reset();
+                } else {
+                    synced.m_window <<= shift;
+                    synced.m_window.set(shift - 1);
+                }
+            }
+        }
+        chip_ok!()
     }
 }
 
@@ -439,5 +494,111 @@ mod tests {
     fn classify_with_rollover_incorect_state() {
         let mut counter = PeerMessageCounter::new();
         assert!(counter.classify_with_rollover(1).is_none());
+    }
+
+    #[test]
+    fn verify_position_encrypt_future() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.verify_position_encrypted(Position::FutureCounter, 1).is_ok());
+    }
+
+    // TODO: wait for window movement implementation
+    /*
+    #[test]
+    fn verify_position_encrypt_in_window() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(1, &challenge).is_ok());
+        assert!(counter.verify_position_encrypted(Position::FutureCounter, 1).is_ok());
+    }
+    */
+    #[test]
+    fn verify_position_encrypt_not_in_window() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.verify_position_encrypted(Position::InWindow, u32::MAX).is_ok());
+    }
+
+    #[test]
+    fn verify_position_encrypt_before() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.verify_position_encrypted(Position::BeforeWindow, 0).is_err_and(|e| e == chip_error_duplicate_message_received!()));
+    }
+
+    #[test]
+    fn verify_or_trust_first_group_not_syncd() {
+        let mut counter = PeerMessageCounter::new();
+        assert!(counter.verify_or_trust_first_group(1).is_ok());
+        assert!(counter.is_synchronized());
+    }
+
+    #[test]
+    #[should_panic]
+    fn verify_or_trust_first_group_syncing() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_or_trust_first_group(1).is_err());
+    }
+
+    #[test]
+    fn verify_or_trust_first_group_synced() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(0, &challenge).is_ok());
+        assert!(counter.verify_or_trust_first_group(1).is_ok());
+    }
+
+    #[test]
+    fn commit_with_pos_in_window_successfully() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(1, &challenge).is_ok());
+        assert!(counter.commit_with_position(Position::InWindow, 0).is_ok());
+    }
+
+    #[test]
+    fn commit_with_pos_in_window_incorrect_state() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.commit_with_position(Position::InWindow, 0).is_err_and(|e| e == chip_error_incorrect_state!()));
+    }
+
+    #[test]
+    fn commit_with_pos_max_counter() {
+        let mut counter = PeerMessageCounter::new();
+        assert!(counter.commit_with_position(Position::MaxCounter, 0).is_ok());
+    }
+
+    #[test]
+    fn commit_with_pos_future_successfully() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(1, &challenge).is_ok());
+        assert!(counter.commit_with_position(Position::FutureCounter, (CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE + 2) as u32).is_ok());
+        assert!(counter.m_status.synced().is_some());
+        assert!(counter.m_status.synced().is_some_and(
+                |s| s.m_max_counter == ((CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE + 2) as u32) && s.m_window.none()));
     }
 } // end of tests
