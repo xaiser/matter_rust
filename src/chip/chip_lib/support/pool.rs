@@ -18,15 +18,21 @@ struct Data<ElementType, const N: usize> {
     //pub m_memory_view_for_debug: [T; N],
 }
 
+pub const fn size_guard(n: usize) -> usize {
+    (n + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE
+}
+
 //pub struct BitMapObjectPool<ElementType, const M: usize, const N: usize> {
 pub struct BitMapObjectPool<ElementType, const N: usize>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     m_allocated: usize,
     m_high_water_mark: usize,
     m_capacity: usize,
-    m_usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
+    //m_usage: [AtomicU32; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
+    m_usage: [AtomicU32; size_guard(N)],
     //m_usage: [AtomicU32; M],
     m_data: Data<ElementType, N>,
 }
@@ -35,21 +41,18 @@ pub trait ObjectPool<ElementType, Mem> {
     fn create_object(&mut self, init_value: ElementType) -> *mut ElementType;
     fn release_object(&mut self, element: *mut ElementType);
     fn releaes_all(&mut self);
-    //fn for_each_active_object<F: FnOnce(*mut ElementType) -> Loop>(&mut self, f: F)
     fn for_each_active_object<F>(&mut self, f: F) -> Loop
     where
         F: FnOnce(*mut ElementType) -> Loop + FnMut(*mut ElementType) -> Loop;
-
-    /*
-    fn for_each_active_object_const<F>(&mut self, f: F)
-        where
-            F: Fn(*mut ElementType) -> Loop;
-    */
+    fn for_each_active_object_const<F>(&self, f: F) -> Loop
+    where
+        F: Fn(*const ElementType) -> Loop;
 }
 
 impl<ElementType, const N: usize> StaticAllocatorBitMap for BitMapObjectPool<ElementType, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     fn capacity(&self) -> usize {
         self.m_capacity
@@ -61,7 +64,8 @@ where
 
 impl<ElementType, const N: usize> Statistics for BitMapObjectPool<ElementType, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     fn allocated(&self) -> usize {
         self.m_allocated
@@ -85,7 +89,8 @@ where
 
 impl<ElementType, const N: usize> BitMapObjectPool<ElementType, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     pub const fn new() -> Self {
         let memory: [MaybeUninit<ElementType>; N] = [const { MaybeUninit::uninit() }; N];
@@ -103,7 +108,7 @@ where
             m_high_water_mark: 0,
             m_capacity: N,
             //m_usage: usage,
-            m_usage: [const { AtomicU32::new(0) }; (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE],
+            m_usage: [const { AtomicU32::new(0) }; size_guard(N)],
             m_data: Data { m_memory: memory },
         }
     }
@@ -134,6 +139,10 @@ where
 
     pub fn at(&mut self, index: usize) -> *mut ElementType {
         return self.m_data.m_memory[index].as_mut_ptr();
+    }
+
+    pub fn at_const(&self, index: usize) -> *const ElementType {
+        return self.m_data.m_memory[index].as_ptr();
     }
 
     pub fn allocate(&mut self, init_value: ElementType) -> *mut ElementType {
@@ -170,7 +179,8 @@ where
 impl<ElementType, const N: usize> Allocator<ElementType>
     for BitMapObjectPool<RcInner<ElementType>, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     fn allocate(&mut self, init_value: RcInner<ElementType>) -> Result<* mut RcInner<ElementType>, ()> {
         let obj = self.allocate(init_value);
@@ -194,7 +204,8 @@ where
 impl<ElementType, const N: usize> ObjectPool<ElementType, KInline>
     for BitMapObjectPool<ElementType, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     fn create_object(&mut self, init_value: ElementType) -> *mut ElementType {
         return self.allocate(init_value);
@@ -237,13 +248,26 @@ where
         return Loop::Finish;
     }
 
-    /*
-    fn for_each_active_object_const<F>(&mut self, f: F)
-        where
-            F: FnOnce(*mut ElementType) -> Loop + Fn(*mut ElementType) -> Loop
+    fn for_each_active_object_const<F>(&self, f: F) -> Loop
+    where
+        F: Fn(*const ElementType) -> Loop
     {
+        let capacity = self.capacity();
+        for word in (0..).take_while(|&word| word * K_BIT_CHUNK_SIZE < capacity) {
+            let usage = &self.m_usage[word];
+            let value = usage.load(Ordering::Relaxed);
+            for offset in (0..).clone().take_while(|&offset| {
+                offset < K_BIT_CHUNK_SIZE && offset + word * K_BIT_CHUNK_SIZE < capacity
+            }) {
+                if (value & (K_BIT1 << offset)) != 0 {
+                    if f(self.at_const(word * K_BIT_CHUNK_SIZE + offset)) == Loop::Break {
+                        return Loop::Break;
+                    }
+                }
+            }
+        }
+        return Loop::Finish;
     }
-    */
 }
 
 #[macro_export]

@@ -50,8 +50,7 @@ mod session_handle {
     // Alloactor for reference counted pointer of session
     pub const ALLOACTOR_CAP: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_SECURE_SESSION_POOL_SIZE;
     pub type Alloactor = DefaultAlloactor<RefCell<Session>, ALLOACTOR_CAP>;
-    //pub type SessionHandle= Rc<Session, Alloactor>;
-    pub(super) type SharedSession = Rc<RefCell<Session>, Alloactor>;
+    pub type SharedSession = Rc<RefCell<Session>, Alloactor>;
 
     pub struct SessionHandle {
         m_session: SharedSession,
@@ -142,6 +141,8 @@ mod session_handle {
         Alloactor::new()
     }
 }
+
+pub use session_handle::{Alloactor, SharedSession, SessionHandle, ALLOACTOR_CAP};
 
 // At the monent, the user must ensure the holder is not moved after allocated.
 mod session_holder {

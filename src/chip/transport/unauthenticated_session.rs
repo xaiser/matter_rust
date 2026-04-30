@@ -2,13 +2,21 @@
 use crate::chip::{
     access::subject_descriptor::SubjectDescriptor,
     ble::ble_config::BTP_ACK_TIMEOUT_MS,
-    chip_lib::core::{
-        node_id::KUNDEFINED_NODE_ID,
-        data_model_types::KUNDEFINED_FABRIC_INDEX,
+    chip_lib::{
+        core::{
+            node_id::KUNDEFINED_NODE_ID,
+            data_model_types::KUNDEFINED_FABRIC_INDEX,
+        },
+        support::{
+            iterators::Loop,
+            pool::{size_guard, ObjectPool, BitMapObjectPool},
+        },
     },
     transport::{
+        peer_message_counter::PeerMessageCounter,
         session::{
-            SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
+            SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
+            SharedSession, Alloactor as DefaultAlloactor, ALLOACTOR_CAP,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -20,7 +28,10 @@ use crate::chip::{
     ScopedNodeId, NodeId, FabricIndex,
 };
 
-use core::cell::OnceCell;
+use core::{
+    ptr::{self, NonNull},
+    cell::OnceCell,
+};
 
 pub trait AsRef {
     fn as_ref(&self) -> Option<&UnauthenticatedSession>;
@@ -45,6 +56,7 @@ pub struct UnauthenticatedSession {
     m_fabric_index: FabricIndex,
     m_session_role: OnceCell<SessionRole>,
     m_ephemeral_initiator_node_id: OnceCell<NodeId>,
+    m_peer_message_counter: PeerMessageCounter,
 }
 
 impl SessionBasePrivate for UnauthenticatedSession {
@@ -159,6 +171,7 @@ impl UnauthenticatedSession {
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
             m_session_role: OnceCell::new(),
             m_ephemeral_initiator_node_id: OnceCell::new(),
+            m_peer_message_counter: PeerMessageCounter::new(),
         }
     }
 
@@ -211,5 +224,39 @@ impl UnauthenticatedSession {
 
     pub fn set_remote_session_parameters(&mut self, session_params: SessionParameters) {
         self.m_remote_session_params = session_params;
+    }
+
+    pub fn get_peer_message_counter(&self) -> &PeerMessageCounter {
+        &self.m_peer_message_counter
+    }
+}
+
+type EntryType = SharedSession;
+
+pub struct UnauthenticatedSessionTable
+{
+    m_entries: [SharedSession; ALLOACTOR_CAP],
+    m_alloactor: DefaultAlloactor,
+}
+
+impl UnauthenticatedSessionTable
+{
+    fn find_latest_recent_used_entry(&self) -> Option<&SharedSession> {
+        let mut result = None;
+        let mut oldest_time = Timestamp::MAX;
+
+        for s in &self.m_entries {
+            if EntryType::is_unique(s) {
+                // we are the only owner, just borrow, no need for check
+                let session_borrow = s.borrow();
+                let session = session_borrow.as_ref().unwrap();
+                if session.get_last_activity_time() < oldest_time {
+                    result = Some(s);
+                    oldest_time = session.get_last_activity_time();
+                }
+            }
+        }
+
+        result
     }
 }

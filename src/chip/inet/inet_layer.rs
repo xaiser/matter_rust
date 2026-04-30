@@ -54,7 +54,8 @@ pub trait EndPointProperties {
 
 pub struct EndPointManagerImplPool<EndPointImpl, const N: usize>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    //[(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     m_layer_state: ObjectLifeCycle,
     m_system_layer: *mut LayerImpl,
@@ -63,7 +64,7 @@ where
 
 impl<EndPointImpl, const N: usize> EndPointManagerImplPool<EndPointImpl, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     pub const fn default() -> Self {
         EndPointManagerImplPool {
@@ -77,7 +78,7 @@ where
 impl<EndPointImpl: EndPointProperties + EndPointBasis + DefaultWithMgr, const N: usize>
     EndPointManager for EndPointManagerImplPool<EndPointImpl, N>
 where
-    [(); (N + K_BIT_CHUNK_SIZE - 1) / K_BIT_CHUNK_SIZE]:,
+    [(); size_guard(N)]:,
 {
     type EndPointType = EndPointImpl;
 
