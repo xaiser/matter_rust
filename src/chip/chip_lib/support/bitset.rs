@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn all_0() {
-        let mut w = Bitset::<0>::new();
+        let w = Bitset::<0>::new();
         assert!(!w.all());
     }
 

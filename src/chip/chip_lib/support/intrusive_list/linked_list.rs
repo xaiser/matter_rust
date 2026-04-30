@@ -935,9 +935,10 @@ mod tests {
     const POOL_SIZE: usize = 10;
     type TestRcInner = RcInner<TestNode>;
     type TestPool = BitMapObjectPool<TestRcInner, POOL_SIZE>;
-    type TestAlloc = TestPool;
+    //type TestAlloc = TestPool;
 
     struct TestNode {
+        #[allow(dead_code)]
         pub link: Link,
         pub value: u8,
     }

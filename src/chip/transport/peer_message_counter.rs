@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn classify_with_rollover_incorect_state() {
-        let mut counter = PeerMessageCounter::new();
+        let counter = PeerMessageCounter::new();
         assert!(counter.classify_with_rollover(1).is_none());
     }
 
@@ -700,13 +700,13 @@ mod tests {
 
     #[test]
     fn verify_position_unencrypt_max_counter() {
-        let mut counter = PeerMessageCounter::new();
+        let counter = PeerMessageCounter::new();
         assert!(counter.verify_position_unencrypted(Position::MaxCounter, 0).is_err_and(|e| e == chip_error_duplicate_message_received!()));
     }
 
     #[test]
     fn verify_position_unencrypt_future() {
-        let mut counter = PeerMessageCounter::new();
+        let counter = PeerMessageCounter::new();
         assert!(counter.verify_position_encrypted(Position::FutureCounter, 1).is_ok());
     }
 } // end of tests

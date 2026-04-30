@@ -392,12 +392,12 @@ mod session_holder {
         #[test]
         fn grab_successfully() {
             let mut holder_pool = TestPool::new();
-            let mut holder = holder_pool.allocate(Holder::new());
+            let holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
-            let mut session = session.unwrap();
+            let session = session.unwrap();
 
             unsafe {
                 assert!((*holder).m_session.grab(session).is_ok());
@@ -408,14 +408,14 @@ mod session_holder {
         #[test]
         fn drop_successfully() {
             let mut holder_pool = TestPool::new();
-            let mut holder = holder_pool.allocate(Holder::new());
+            let holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
             // make some copies used later for check
-            let mut session_copy = session.clone();
+            let session_copy = session.clone();
             let session_copy_2 = session.clone();
 
             //assert_eq!(3, SharedSession::strong_count(&session_copy.m_session));
@@ -444,11 +444,11 @@ mod session_holder {
         #[test]
         fn holder_releaes_itself() {
             let mut holder_pool = TestPool::new();
-            let mut holder_1 = holder_pool.allocate(Holder::new());
-            let mut holder_2 = holder_pool.allocate(Holder::new());
+            let holder_1 = holder_pool.allocate(Holder::new());
+            let holder_2 = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             let session = session.unwrap();
 
             unsafe {
@@ -468,11 +468,11 @@ mod session_holder {
         #[test]
         fn session_release_all() {
             let mut holder_pool = TestPool::new();
-            let mut holder_1 = holder_pool.allocate(Holder::new());
-            let mut holder_2 = holder_pool.allocate(Holder::new());
+            let holder_1 = holder_pool.allocate(Holder::new());
+            let holder_2 = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let mut session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
             let mut session = session.unwrap();
 
             unsafe {

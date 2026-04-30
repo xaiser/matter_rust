@@ -441,7 +441,7 @@ pub mod rc {
         type TestCellRcInner = RcInner<RefCell<StubElement>>;
         type TestCellPool = BitMapObjectPool<TestCellRcInner, POOL_SIZE>;
         type TestCellRc = Rc<RefCell<StubElement>, TestCellPool>;
-        type TestCellWeak = Weak<RefCell<StubElement>, TestCellPool>;
+        //type TestCellWeak = Weak<RefCell<StubElement>, TestCellPool>;
 
         #[test]
         fn data_offset_of_u8() {

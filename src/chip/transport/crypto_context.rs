@@ -383,47 +383,47 @@ mod tests {
         fn destroy_key_hkdf(&mut self, _key: &mut HkdfKeyHandle) {
         }
 
-        fn drive_key(&mut self, secret: &P256EcdhDeriveSecret, salt: &[u8], info: &[u8]) -> Result<Aes128KeyHandle, ChipError> {
+        fn drive_key(&mut self, _secret: &P256EcdhDeriveSecret, _salt: &[u8], _info: &[u8]) -> Result<Aes128KeyHandle, ChipError> {
             Ok(Aes128KeyHandle::default())
         }
 
-        fn derive_session_keys_aes128(&mut self, _secret: &[u8], salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError> {
+        fn derive_session_keys_aes128(&mut self, _secret: &[u8], _salt: &[u8], _info: &[u8]) -> Result<SessionKeys, ChipError> {
             let mut session_keys = SessionKeys::default();
 
             // i2r
             let src = self.m_aes128_session_keys.i2r_key.as_ref::<Symmetric128BitsKeyByteArray>();
-            let mut dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            let dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
             dest.copy_from_slice(src);
 
             // r2i
             let src = self.m_aes128_session_keys.r2i_key.as_ref::<Symmetric128BitsKeyByteArray>();
-            let mut dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            let dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
             dest.copy_from_slice(src);
 
             // challenge
             let src = self.m_aes128_session_keys.attestation_challenge.const_bytes();
-            let mut dest = session_keys.attestation_challenge.bytes();
+            let dest = session_keys.attestation_challenge.bytes();
             dest.copy_from_slice(src);
 
             Ok(session_keys)
         }
 
-        fn derive_session_keys_hkdf(&mut self, _secret: &HkdfKeyHandle, salt: &[u8], info: &[u8]) -> Result<SessionKeys, ChipError> {
+        fn derive_session_keys_hkdf(&mut self, _secret: &HkdfKeyHandle, _salt: &[u8], _info: &[u8]) -> Result<SessionKeys, ChipError> {
             let mut session_keys = SessionKeys::default();
 
             // i2r
             let src = self.m_hkdf_session_keys.i2r_key.as_ref::<Symmetric128BitsKeyByteArray>();
-            let mut dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            let dest = session_keys.i2r_key.as_mut::<Symmetric128BitsKeyByteArray>();
             dest.copy_from_slice(src);
 
             // r2i
             let src = self.m_hkdf_session_keys.r2i_key.as_ref::<Symmetric128BitsKeyByteArray>();
-            let mut dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
+            let dest = session_keys.r2i_key.as_mut::<Symmetric128BitsKeyByteArray>();
             dest.copy_from_slice(src);
 
             // challenge
             let src = self.m_hkdf_session_keys.attestation_challenge.const_bytes();
-            let mut dest = session_keys.attestation_challenge.bytes();
+            let dest = session_keys.attestation_challenge.bytes();
             dest.copy_from_slice(src);
 
             Ok(session_keys)

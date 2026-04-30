@@ -327,7 +327,7 @@ mod tests {
             let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
             let aad = [1u8; 1];
 
-            let input = [1u8; 16];
+            //let input = [1u8; 16];
             let mut output = [1u8; 16];
 
             assert!(ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output).is_ok());
@@ -348,7 +348,7 @@ mod tests {
             let nonce = Nonce::<U13>::from_slice(&[1u8; 13]);
             let aad = [1u8; 1];
 
-            let input = [1u8; 16];
+            //let input = [1u8; 16];
             let mut output = [1u8; 16];
 
             let tag = ccm.encrypt_in_place_detached(&nonce, &aad[..], &mut output);
