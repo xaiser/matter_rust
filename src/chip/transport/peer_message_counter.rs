@@ -5,7 +5,7 @@ use crate::{
         },
     },
     ChipErrorResult,
-    ChipError,
+    //ChipError,
     chip_ok,
     chip_sdk_error,
     chip_core_error,
@@ -88,6 +88,7 @@ mod peer_message_counter {
             }
         }
 
+        #[allow(dead_code)]
         pub fn max_counter_mut(&mut self) -> Option<&mut u32> {
             match self {
                 Status::Synced(s) => {
@@ -110,6 +111,7 @@ mod peer_message_counter {
             }
         }
 
+        #[allow(dead_code)]
         pub fn window_mut(&mut self) -> Option<&mut Window> {
             match self {
                 Status::Synced(s) => {
@@ -121,6 +123,7 @@ mod peer_message_counter {
             }
         }
 
+        #[allow(dead_code)]
         pub fn window(&self) -> Option<&Window> {
             match self {
                 Status::Synced(s) => {
@@ -176,7 +179,7 @@ mod peer_message_counter {
     */
 }
 
-use peer_message_counter::{Status, Synced, SyncInProcess, Position};
+use peer_message_counter::{Status, SyncInProcess, Position};
 
 pub type Challenge = [u8; PeerMessageCounter::K_CHALLENGE_SIZE];
 
@@ -335,9 +338,9 @@ impl PeerMessageCounter {
         let current_max_count = self.m_status.max_counter()?;
         //let counter_increase = counter - current_max_count;
         let (counter_increase, _) = counter.overflowing_sub(current_max_count);
-        const future_counter_window: u32 = (1 << 31) - 1;
+        const FUTURE_COUNTER_WINDOW: u32 = (1 << 31) - 1;
 
-        if counter_increase >= 1 && counter_increase <= future_counter_window {
+        if counter_increase >= 1 && counter_increase <= FUTURE_COUNTER_WINDOW {
             return Some(Position::FutureCounter);
         }
 

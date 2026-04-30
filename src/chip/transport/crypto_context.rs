@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 use crate::{
     chip::{
-        chip_lib::support::buffer_writer::{self, EndianBufferWriter, BufferWriter},
+        chip_lib::support::buffer_writer::{self, BufferWriter},
         crypto::{
-            aes::key_128::{mode_ccm, mode_ctr},
+            aes::key_128::{mode_ccm},
             crypto_pal::{
                 Aes128KeyHandle, AttestationChallenge, SymmetricKeyContext, P256Keypair, P256PublicKey, HkdfKeyHandle,
                 P256EcdhDeriveSecret, ECPKeypair, SymmetricEncryptResult, SymmetricDecryptResult,
@@ -13,15 +13,17 @@ use crate::{
         transport::raw::message_header::{MessageAuthenticationCode, PacketHeader, KMAX_TAG_LEN},
         NodeId,
     },
-    verify_or_return_error, verify_or_return_value, verify_or_die,
+    verify_or_return_error, verify_or_return_value,
     ChipError, ChipErrorResult, chip_ok, chip_core_error, chip_sdk_error,
     chip_error_incorrect_state, chip_error_internal, chip_error_no_memory, chip_error_invalid_argument, chip_error_invalid_use_of_session_key,
 };
 
+/*
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_detail;
 use core::str::FromStr;
+*/
 
 use core::ptr::NonNull;
 
@@ -470,10 +472,10 @@ mod tests {
         let mut keystore = RawKeySessionKeystore::new();
 
         let mut keypair = P256Keypair::default();
-        keypair.initialize(ECPKeyTarget::Ecdh);
+        let _ = keypair.initialize(ECPKeyTarget::Ecdh);
 
         let mut remote_keypair = P256Keypair::default();
-        remote_keypair.initialize(ECPKeyTarget::Ecdh);
+        let _ = remote_keypair.initialize(ECPKeyTarget::Ecdh);
         let remote_public_key = remote_keypair.public_key();
 
         let salt = [1u8; 2];

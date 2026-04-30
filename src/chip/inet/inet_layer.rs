@@ -6,7 +6,6 @@ use crate::ChipError;
 //use crate::chip::chip_lib::support::internal::pool::*;
 use super::end_point_basis::DefaultWithMgr;
 use super::end_point_basis::EndPointBasis;
-use crate::chip::chip_lib::support::internal::pool::K_BIT_CHUNK_SIZE;
 use crate::chip::chip_lib::support::iterators::Loop;
 
 use core::str::FromStr;

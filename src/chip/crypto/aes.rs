@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //type Aes128Ccm = Ccm<Aes128, U8, U13>;
 
 pub mod key_128 {
@@ -10,7 +11,6 @@ pub mod key_128 {
         },
         ChipErrorResult, chip_ok, ChipError, 
         chip_core_error,
-        chip_no_error,
         chip_sdk_error,
         chip_error_internal,
         chip_error_invalid_argument,
@@ -47,11 +47,8 @@ pub mod key_128 {
             Ccm,
             AeadInPlace,
             AeadCore,
-            NonceSize,
         };
         pub use ccm::consts::{U4, U6, U7, U8, U9, U10, U11, U12, U13, U14, U16};
-
-        use generic_array::ArrayLength;
 
         pub fn create_aes128_ccm<Ccm: KeyInit>(key: &Aes128KeyHandle) -> Result<Ccm, ()> {
                 Ccm::new_from_slice(key.as_ref::<Symmetric128BitsKeyByteArray>()).map_err(|_| ())
@@ -181,10 +178,8 @@ pub mod key_128 {
     pub mod mode_ctr {
         use super::*;
         use aes::{
-            cipher::{KeyIvInit, StreamCipher, IvSizeUser},
-            Aes128,
+            cipher::{KeyIvInit, StreamCipher},
         };
-        use ctr;
 
         pub fn create_aes128<C: KeyIvInit>(key: &Aes128KeyHandle, iv: &[u8]) -> Result<C, ()> {
             C::new_from_slices(key.as_ref::<Symmetric128BitsKeyByteArray>(), iv).map_err(|_| ())
@@ -192,7 +187,7 @@ pub mod key_128 {
 
         pub fn encrypt<Ctr: KeyIvInit + StreamCipher>(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
             let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
-            let input_size = input.len();
+            //let input_size = input.len();
 
             ctr.apply_keystream_b2b(input, output).map_err(|_| chip_error_internal!())?;
 
@@ -258,7 +253,7 @@ pub mod key_128 {
         }
 
         fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
-            return mode_ccm::encrypt::<M>(plaintext, aad, &self.m_encryption_key, aad, mic, ciphertext);
+            return mode_ccm::encrypt::<M>(plaintext, aad, &self.m_encryption_key, nonce, mic, ciphertext);
         }
 
         fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
@@ -269,7 +264,7 @@ pub mod key_128 {
             let mut iv = [0u8; KEY_SIZE_BYTES];
             let nonce_size = <M as AeadCore>::NonceSize::to_usize();
             if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
-                &iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
+                iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
                 return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
             } else {
                 return Err(chip_error_invalid_argument!());
@@ -280,7 +275,7 @@ pub mod key_128 {
             let mut iv = [0u8; KEY_SIZE_BYTES];
             let nonce_size = <M as AeadCore>::NonceSize::to_usize();
             if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
-                &iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
+                iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
                 // ctr decrypt is simply xor, so we can shared the encrypt function call.
                 return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
             } else {

@@ -16,7 +16,8 @@ use crate::chip::{
         peer_message_counter::PeerMessageCounter,
         session::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
-            SharedSession, Alloactor as DefaultAlloactor, ALLOACTOR_CAP,
+            SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
+            Session, new_session_alloactor,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -235,23 +236,36 @@ type EntryType = SharedSession;
 
 pub struct UnauthenticatedSessionTable
 {
-    m_entries: [SharedSession; ALLOACTOR_CAP],
-    m_alloactor: DefaultAlloactor,
+    m_entries: [Option<SharedSession>; POOL_SIZE],
+    m_entries_pool: Pool,
 }
 
 impl UnauthenticatedSessionTable
 {
+    pub const fn new() -> Self {
+        Self {
+            m_entries: [const { None }; POOL_SIZE],
+            m_entries_pool: new_session_alloactor(),
+        }
+    }
+    fn find_entry(&self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: PeerAddress) -> Option<&SharedSession> {
+        let mut result = None;
+
+        result
+    }
+
     fn find_latest_recent_used_entry(&self) -> Option<&SharedSession> {
         let mut result = None;
         let mut oldest_time = Timestamp::MAX;
 
-        for s in &self.m_entries {
-            if EntryType::is_unique(s) {
+        for s in (&self.m_entries).into_iter().filter(|s| s.is_some()) {
+            let rc = s.as_ref().unwrap();
+            if EntryType::is_unique(rc) {
                 // we are the only owner, just borrow, no need for check
-                let session_borrow = s.borrow();
+                let session_borrow = rc.borrow();
                 let session = session_borrow.as_ref().unwrap();
                 if session.get_last_activity_time() < oldest_time {
-                    result = Some(s);
+                    result = Some(rc);
                     oldest_time = session.get_last_activity_time();
                 }
             }
@@ -260,3 +274,26 @@ impl UnauthenticatedSessionTable
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ptr;
+
+    #[test]
+    fn find_latest_recent_successfully() {
+        let mut table = UnauthenticatedSessionTable::new();
+        // create a session
+        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        assert!(session.is_ok());
+        let session = session.unwrap();
+        table.m_entries[0] = Some(session);
+        assert!(table.find_latest_recent_used_entry().is_some());
+    }
+
+    #[test]
+    fn find_latest_recent_none() {
+        let mut table = UnauthenticatedSessionTable::new();
+        assert!(table.find_latest_recent_used_entry().is_none());
+    }
+} // end of tests

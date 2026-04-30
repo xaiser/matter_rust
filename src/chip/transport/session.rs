@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::{
     chip_internal_log, chip_log_error, chip_internal_log_impl,
     chip::{
@@ -71,6 +72,10 @@ mod session_handle {
             })
         }
 
+        pub fn new_shared_session(session: Session, alloactor: * mut Alloactor) -> Result<SharedSession, ()> {
+            SharedSession::try_new_in(RefCell::new(session), alloactor)
+        }
+
         pub fn try_ref(&self) -> Result<Ref<'_, Session>, ()> {
             self.m_session.try_borrow().map_err(|_| ())
         }
@@ -85,7 +90,7 @@ mod session_handle {
         
         pub fn notify_session_released(&mut self) {
             // A holder to ensure at least one keeper for the Rc.
-            let copy = self.clone();
+            let _copy = self.clone();
 
             if let Ok(mut session) = self.m_session.try_borrow_mut() {
                 let mut current = session.holders().front_mut();
@@ -103,7 +108,7 @@ mod session_handle {
         }
 
         fn notify_session_hang(&mut self) {
-            let copy = self.clone();
+            let _copy = self.clone();
 
             if let Ok(mut session) = self.m_session.try_borrow_mut() {
                 let mut current = session.holders().front_mut();
@@ -142,7 +147,8 @@ mod session_handle {
     }
 }
 
-pub use session_handle::{Alloactor, SharedSession, SessionHandle, ALLOACTOR_CAP};
+// re-export session_handle
+pub use session_handle::*;
 
 // At the monent, the user must ensure the holder is not moved after allocated.
 mod session_holder {
@@ -266,7 +272,7 @@ mod session_holder {
             */
         }
 
-        fn grab_unchecked(&self, mut session: SessionHandle) {
+        fn grab_unchecked(&self, session: SessionHandle) {
             if let Ok(m_session) = self.m_session.try_borrow() {
                 if m_session.is_some() {
                     // should never reach here
@@ -310,7 +316,7 @@ mod session_holder {
             if session.is_none() {
                 return;
             }
-            let mut session = session.unwrap();
+            let session = session.unwrap();
             // Safety:
             // 1. There is only 1 owner will access the holder list at a time since CHIP stack
             //    is running on a single thread.
@@ -340,7 +346,7 @@ mod session_holder {
                 return m_session.take();
             } else {
                 panic!("cannot borrow mut for session released");
-                return None;
+                //return None;
             }
         }
     }
@@ -780,7 +786,7 @@ impl SessionBase for Session {
 
     fn session_id_for_logging(&self) -> u16 {
         match self {
-            Session::Unauthenticated(session) => {
+            Session::Unauthenticated(_) => {
                 0
             },
             Session::Secure(session) => {
@@ -933,16 +939,16 @@ impl SessionBase for Session {
 
     fn is_commissioning_session(&self) -> bool {
         match self {
-            Session::Unauthenticated(session) => {
+            Session::Unauthenticated(_) => {
                 false
             },
             Session::Secure(session) => {
                 session.is_commissioning_session()
             },
-            Session::IncomingGroupSession(session) => {
+            Session::IncomingGroupSession(_) => {
                 false
             },
-            Session::OutgoingGroupSession(session) => {
+            Session::OutgoingGroupSession(_) => {
                 false
             },
         }

@@ -5,7 +5,7 @@ const fn bits_per_word() -> usize {
     core::mem::size_of::<WordT>() * 8
 }
 
-const fn words(n: usize) -> usize {
+pub const fn words(n: usize) -> usize {
     (n + bits_per_word() - 1) / bits_per_word()
 }
 
