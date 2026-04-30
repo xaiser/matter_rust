@@ -262,6 +262,60 @@ impl PeerMessageCounter {
         }
     }
 
+    pub fn commit_group(&mut self, counter: u32) -> ChipErrorResult {
+        self.commit_with_rollover(counter)
+    }
+
+    pub fn verify_encrypted_unicast(&self, counter: u32) -> ChipErrorResult {
+        verify_or_return_error!(matches!(self.m_status, Status::Synced(_)), Err(chip_error_incorrect_state!()));
+
+        let pos = self.classify_without_rollover(counter).ok_or(chip_error_incorrect_state!())?;
+
+        self.verify_position_encrypted(pos, counter)
+    }
+
+    pub fn commit_encrypted_unicast(&mut self, counter: u32) -> ChipErrorResult {
+        self.commit_without_rollover(counter)
+    }
+
+    pub fn verify_uncrypted(&mut self, counter: u32) -> ChipErrorResult {
+        match self.m_status {
+            Status::NotSynced => {
+                self.set_counter(counter);
+                chip_ok!()
+            },
+            Status::Synced(_) => {
+                let pos = self.classify_with_rollover(counter).ok_or(chip_error_incorrect_state!())?;
+                self.verify_position_unencrypted(pos, counter)
+            },
+            _ => {
+                verify_or_die!(false);
+                Err(chip_error_internal!())
+            }
+        }
+    }
+
+    pub fn commit_unencrypted(&mut self, counter: u32) -> ChipErrorResult {
+        self.commit_with_rollover(counter)
+    }
+
+    pub fn set_counter(&mut self, value: u32) {
+        self.reset();
+        self.m_status = Status::new_synced_counter(value);
+    }
+
+    pub fn get_counter(&self) -> Option<u32> {
+        self.m_status.max_counter()
+    }
+
+    fn classify_without_rollover(&self, counter: u32) -> Option<Position> {
+        if counter > self.m_status.max_counter()? {
+            return Some(Position::FutureCounter);
+        }
+
+        self.classify_non_future_counter(counter)
+    }
+
     /*
      * Classify an incoming counter value's position for the cases when counters
      * are allowed to roll over.  Must be used only if mStatus is
@@ -289,7 +343,6 @@ impl PeerMessageCounter {
 
         self.classify_non_future_counter(counter)
     }
-
 
     /*
      * Classify a counter that's known to not be future counter.  This works
@@ -336,10 +389,39 @@ impl PeerMessageCounter {
             }
         }
     }
+    fn verify_position_unencrypted(&self, position: Position, counter: u32) -> ChipErrorResult {
+        match position {
+            Position::MaxCounter => {
+                Err(chip_error_duplicate_message_received!())
+            },
+            Position::InWindow => {
+                if let Some(synced) = self.m_status.synced() {
+                    let (offset, _) = synced.m_max_counter.overflowing_sub(counter);
+                    // this will return false if overflow
+                    if synced.m_window.test((offset - 1) as usize) {
+                        return Err(chip_error_duplicate_message_received!());
+                    }
+                    chip_ok!()
+                } else {
+                    Err(chip_error_incorrect_state!())
+                }
+            },
+            _ => {
+                chip_ok!()
+            }
+        }
+    }
 
-    fn set_counter(&mut self, value: u32) {
-        self.reset();
-        self.m_status = Status::new_synced_counter(value);
+    fn commit_with_rollover(&mut self, counter: u32) -> ChipErrorResult {
+        let pos = self.classify_with_rollover(counter).ok_or(chip_error_incorrect_state!())?;
+
+        self.commit_with_position(pos, counter)
+    }
+
+    fn commit_without_rollover(&mut self, counter: u32) -> ChipErrorResult {
+        let pos = self.classify_without_rollover(counter).ok_or(chip_error_incorrect_state!())?;
+
+        self.commit_with_position(pos, counter)
     }
 
     fn commit_with_position(&mut self, position: Position, counter: u32) -> ChipErrorResult {
@@ -355,7 +437,7 @@ impl PeerMessageCounter {
             _ => {
                 let synced = self.m_status.synced_mut().ok_or(chip_error_incorrect_state!())?;
                 let (shift, _) = counter.overflowing_sub(synced.m_max_counter);
-                synced.m_max_counter = shift;
+                synced.m_max_counter = counter;
                 let shift = shift as usize;
                 if shift > CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE {
                     synced.m_window.reset();
@@ -590,15 +672,38 @@ mod tests {
     }
 
     #[test]
-    fn commit_with_pos_future_successfully() {
+    fn commit_with_pos_far_future_successfully() {
         let mut counter = PeerMessageCounter::new();
         let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
         counter.sync_starting(&challenge);
         assert!(counter.is_synchronizing());
         assert!(counter.verify_challeng(1, &challenge).is_ok());
         assert!(counter.commit_with_position(Position::FutureCounter, (CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE + 2) as u32).is_ok());
-        assert!(counter.m_status.synced().is_some());
         assert!(counter.m_status.synced().is_some_and(
                 |s| s.m_max_counter == ((CHIP_CONFIG_MESSAGE_COUNTER_WINDOW_SIZE + 2) as u32) && s.m_window.none()));
+    }
+
+    #[test]
+    fn commit_with_pos_near_future_successfully() {
+        let mut counter = PeerMessageCounter::new();
+        let challenge = [0u8; PeerMessageCounter::K_CHALLENGE_SIZE];
+        counter.sync_starting(&challenge);
+        assert!(counter.is_synchronizing());
+        assert!(counter.verify_challeng(1, &challenge).is_ok());
+        assert!(counter.commit_with_position(Position::FutureCounter, 2 as u32).is_ok());
+        assert!(counter.m_status.synced().is_some_and(
+                |s| s.m_max_counter == 2 && s.m_window.test(0)));
+    }
+
+    #[test]
+    fn verify_position_unencrypt_max_counter() {
+        let mut counter = PeerMessageCounter::new();
+        assert!(counter.verify_position_unencrypted(Position::MaxCounter, 0).is_err_and(|e| e == chip_error_duplicate_message_received!()));
+    }
+
+    #[test]
+    fn verify_position_unencrypt_future() {
+        let mut counter = PeerMessageCounter::new();
+        assert!(counter.verify_position_encrypted(Position::FutureCounter, 1).is_ok());
     }
 } // end of tests
