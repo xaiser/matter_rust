@@ -248,10 +248,29 @@ impl UnauthenticatedSessionTable
             m_entries_pool: new_session_alloactor(),
         }
     }
-    fn find_entry(&self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: PeerAddress) -> Option<&SharedSession> {
-        let mut result = None;
 
-        result
+    fn alloc_entry(&mut self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress,
+        config: &ReliableMessageProtocolConfig) -> Result<&SharedSession, ChipError>
+    {
+        for slot in self.m_entries.iter_mut().filter(|s| s.is_none()) {
+            if let Ok(ss) = new_shared_session(
+                dkfj
+        }
+    }
+
+    fn find_entry(&self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress) -> Option<&SharedSession> {
+        for s in (&self.m_entries).into_iter().filter(|s| s.as_ref().is_some_and(|rc| rc.try_borrow().is_ok())) {
+            let rc = s.as_ref().unwrap();
+            // we have checked if we can borrow, just go with it
+            let session_borrow = rc.borrow();
+            let us = session_borrow.as_ref().unwrap();
+            if us.get_session_role() == session_role && us.get_ephemeral_initiator_node_id() == ephemeral_initiator_node_id &&
+                us.get_peer_address().get_transport_type() == peer_address.get_transport_type() {
+                    return Some(rc);
+            }
+        }
+
+        None
     }
 
     fn find_latest_recent_used_entry(&self) -> Option<&SharedSession> {
@@ -293,7 +312,68 @@ mod tests {
 
     #[test]
     fn find_latest_recent_none() {
-        let mut table = UnauthenticatedSessionTable::new();
+        let table = UnauthenticatedSessionTable::new();
         assert!(table.find_latest_recent_used_entry().is_none());
+    }
+
+    #[test]
+    fn find_latest_recent_none_no_unique() {
+        let mut table = UnauthenticatedSessionTable::new();
+        // create a session
+        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        assert!(session.is_ok());
+        let session = session.unwrap();
+        let _copy = session.clone();
+        table.m_entries[0] = Some(session);
+        assert!(table.find_latest_recent_used_entry().is_none());
+    }
+
+    #[test]
+    fn find_entry_successfully() {
+        let mut table = UnauthenticatedSessionTable::new();
+        // create a session
+        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        assert!(session.is_ok());
+        let session = session.unwrap();
+        let role;
+        let e_id;
+        let peer_address;
+        {
+            let session_borrow = session.borrow();
+            let us: &UnauthenticatedSession = session_borrow.as_ref().unwrap();
+            role = us.get_session_role();
+            e_id = us.get_ephemeral_initiator_node_id();
+            peer_address = us.get_peer_address().clone();
+        }
+        table.m_entries[0] = Some(session);
+        assert!(table.find_entry(role, e_id, &peer_address).is_some());
+    }
+
+    #[test]
+    fn find_entry_none_not_matched() {
+        let mut table = UnauthenticatedSessionTable::new();
+        // create a session
+        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        assert!(session.is_ok());
+        let session = session.unwrap();
+        let role;
+        let e_id;
+        let peer_address;
+        {
+            let session_borrow = session.borrow();
+            let us: &UnauthenticatedSession = session_borrow.as_ref().unwrap();
+            role = us.get_session_role();
+            e_id = us.get_ephemeral_initiator_node_id();
+            peer_address = us.get_peer_address().clone();
+        }
+        table.m_entries[0] = Some(session);
+        assert!(table.find_entry(role, e_id + 1, &peer_address).is_none());
+    }
+
+    #[test]
+    fn find_entry_none_no_entry() {
+        let table = UnauthenticatedSessionTable::new();
+        let peer_address = PeerAddress::new();
+        assert!(table.find_entry(SessionRole::Kinitiator, 0, &peer_address).is_none());
     }
 } // end of tests
