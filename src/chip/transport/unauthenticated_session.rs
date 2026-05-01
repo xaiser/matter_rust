@@ -8,7 +8,6 @@ use crate::chip::{
             data_model_types::KUNDEFINED_FABRIC_INDEX,
         },
         support::{
-            iterators::Loop,
             pool::{size_guard, ObjectPool, BitMapObjectPool},
         },
     },
@@ -17,7 +16,7 @@ use crate::chip::{
         session::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
             SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
-            Session, new_session_alloactor,
+            Session, new_session_alloactor, new_shared_session,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -27,6 +26,22 @@ use crate::chip::{
     },
     system::system_clock::{Timestamp, Seconds, Milliseconds, get_monotonic_timestamp},
     ScopedNodeId, NodeId, FabricIndex,
+};
+
+use crate::{
+    ChipErrorResult,
+    ChipError,
+    chip_ok,
+    chip_sdk_error,
+    chip_core_error,
+    chip_error_no_memory,
+    //chip_error_incorrect_state,
+    //chip_error_invalid_argument,
+    //chip_error_duplicate_message_received,
+    chip_error_internal,
+    //verify_or_die,
+    //verify_or_return_error,
+    //verify_or_return_value,
 };
 
 use core::{
@@ -43,7 +58,7 @@ pub trait AsMut {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum SessionRole {
+pub enum SessionRole {
     Kinitiator,
     Kresponder,
 }
@@ -176,6 +191,28 @@ impl UnauthenticatedSession {
         }
     }
 
+    pub fn new_with(session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress,
+        config: &ReliableMessageProtocolConfig) -> Self
+    {
+        let s = Self {
+            m_holders: new_session_holder_list(),
+            m_peer_address: peer_address.clone(),
+            m_remote_session_params: SessionParameters::new_with(config.clone()),
+            m_last_peer_activity_time: Timestamp::ZERO,
+            m_last_activity_time: get_monotonic_timestamp(),
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            //m_session_role: OnceCell::with_value(session_role),
+            m_session_role: OnceCell::new(),
+            //m_ephemeral_initiator_node_id: OnceCell::with_value(ephemeral_initiator_node_id),
+            m_ephemeral_initiator_node_id: OnceCell::new(),
+            m_peer_message_counter: PeerMessageCounter::new(),
+        };
+        let _ = s.m_session_role.set(session_role);
+        let _ = s.m_ephemeral_initiator_node_id.set(ephemeral_initiator_node_id);
+
+        s
+    }
+
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
     #[inline]
@@ -252,9 +289,46 @@ impl UnauthenticatedSessionTable
     fn alloc_entry(&mut self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress,
         config: &ReliableMessageProtocolConfig) -> Result<&SharedSession, ChipError>
     {
-        for slot in self.m_entries.iter_mut().filter(|s| s.is_none()) {
-            if let Ok(ss) = new_shared_session(
-                dkfj
+        let available_entry_index: Option<usize> = {
+            let mut result: Option<usize> = None;
+            for (index, s) in self.m_entries.iter().enumerate() {
+                if s.is_none() {
+                    result = Some(index);
+                    break;
+                }
+            }
+
+            result
+        };
+
+        if available_entry_index.is_some() && !self.m_entries_pool.exhausted() {
+            // we have avaiable entry in table and have some space in pool
+            if let Ok(ss) = new_shared_session(Session::new_unauthenticated_with(UnauthenticatedSession::new_with(
+                        session_role, ephemeral_initiator_node_id, peer_address, config)), ptr::addr_of_mut!(self.m_entries_pool)) {
+                // we are safe to do this 
+                let entry = self.m_entries.get_mut(available_entry_index.unwrap()).unwrap();
+                *entry = Some(ss);
+                return Ok(entry.as_ref().unwrap());
+            } else {
+                // should reach here
+                return Err(chip_error_internal!());
+            }
+        }
+
+        // we run out of entry, try to find least used one
+        let least_useed_entry_index = self.find_least_recent_used_entry().ok_or(chip_error_no_memory!())?;
+        let least_used_entry = self.m_entries.get_mut(least_useed_entry_index).unwrap();
+        // since this is the unique rc, this drop will trigger the release in the pool
+        *least_used_entry = None;
+
+        if let Ok(ss) = new_shared_session(Session::new_unauthenticated_with(UnauthenticatedSession::new_with(
+                    session_role, ephemeral_initiator_node_id, peer_address, config)), ptr::addr_of_mut!(self.m_entries_pool)) {
+            // we are safe to do this 
+            *least_used_entry = Some(ss);
+            return Ok(least_used_entry.as_ref().unwrap());
+        } else {
+            // should reach here
+            return Err(chip_error_internal!());
         }
     }
 
@@ -273,18 +347,18 @@ impl UnauthenticatedSessionTable
         None
     }
 
-    fn find_latest_recent_used_entry(&self) -> Option<&SharedSession> {
+    fn find_least_recent_used_entry(&self) -> Option<usize> {
         let mut result = None;
         let mut oldest_time = Timestamp::MAX;
 
-        for s in (&self.m_entries).into_iter().filter(|s| s.is_some()) {
+        for (index, s) in self.m_entries.iter().enumerate().filter(|(index, s)| s.is_some()) {
             let rc = s.as_ref().unwrap();
             if EntryType::is_unique(rc) {
                 // we are the only owner, just borrow, no need for check
                 let session_borrow = rc.borrow();
                 let session = session_borrow.as_ref().unwrap();
                 if session.get_last_activity_time() < oldest_time {
-                    result = Some(rc);
+                    result = Some(index);
                     oldest_time = session.get_last_activity_time();
                 }
             }
@@ -300,39 +374,39 @@ mod tests {
     use core::ptr;
 
     #[test]
-    fn find_latest_recent_successfully() {
+    fn find_least_recent_successfully() {
         let mut table = UnauthenticatedSessionTable::new();
         // create a session
-        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        let session = new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
         assert!(session.is_ok());
         let session = session.unwrap();
         table.m_entries[0] = Some(session);
-        assert!(table.find_latest_recent_used_entry().is_some());
+        assert!(table.find_least_recent_used_entry().is_some());
     }
 
     #[test]
-    fn find_latest_recent_none() {
+    fn find_least_recent_none() {
         let table = UnauthenticatedSessionTable::new();
-        assert!(table.find_latest_recent_used_entry().is_none());
+        assert!(table.find_least_recent_used_entry().is_none());
     }
 
     #[test]
-    fn find_latest_recent_none_no_unique() {
+    fn find_least_recent_none_no_unique() {
         let mut table = UnauthenticatedSessionTable::new();
         // create a session
-        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        let session = new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
         assert!(session.is_ok());
         let session = session.unwrap();
         let _copy = session.clone();
         table.m_entries[0] = Some(session);
-        assert!(table.find_latest_recent_used_entry().is_none());
+        assert!(table.find_least_recent_used_entry().is_none());
     }
 
     #[test]
     fn find_entry_successfully() {
         let mut table = UnauthenticatedSessionTable::new();
         // create a session
-        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        let session = new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
         assert!(session.is_ok());
         let session = session.unwrap();
         let role;
@@ -353,7 +427,7 @@ mod tests {
     fn find_entry_none_not_matched() {
         let mut table = UnauthenticatedSessionTable::new();
         // create a session
-        let session = SessionHandle::new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
+        let session = new_shared_session(Session::new_unauthenticated(), ptr::addr_of_mut!(table.m_entries_pool));
         assert!(session.is_ok());
         let session = session.unwrap();
         let role;
@@ -376,4 +450,14 @@ mod tests {
         let peer_address = PeerAddress::new();
         assert!(table.find_entry(SessionRole::Kinitiator, 0, &peer_address).is_none());
     }
+
+    #[test]
+    fn alloc_one_successfully() {
+        let mut table = UnauthenticatedSessionTable::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+        assert!(table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config).is_ok());
+    }
+
+    need more test here
 } // end of tests

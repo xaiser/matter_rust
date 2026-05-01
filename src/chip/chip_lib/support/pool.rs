@@ -41,6 +41,7 @@ pub trait ObjectPool<ElementType, Mem> {
     fn create_object(&mut self, init_value: ElementType) -> *mut ElementType;
     fn release_object(&mut self, element: *mut ElementType);
     fn releaes_all(&mut self);
+    fn exhausted(&self) -> bool;
     fn for_each_active_object<F>(&mut self, f: F) -> Loop
     where
         F: FnOnce(*mut ElementType) -> Loop + FnMut(*mut ElementType) -> Loop;
@@ -225,6 +226,10 @@ where
 
     fn releaes_all(&mut self) {}
 
+    fn exhausted(&self) -> bool {
+        return StaticAllocatorBitMap::exhausted(self);
+    }
+
     fn for_each_active_object<F>(&mut self, mut f: F) -> Loop
     where
         F: FnOnce(*mut ElementType) -> Loop + FnMut(*mut ElementType) -> Loop,
@@ -323,7 +328,8 @@ mod test {
                 _the_string: "test",
             });
             assert_eq!(false, s.is_null());
-            assert_eq!(false, object_pool.exhausted());
+            //assert_eq!(false, object_pool.exhausted());
+            assert_eq!(false, ObjectPool::exhausted(&object_pool));
             unsafe {
                 assert_eq!(1, (*s).the_int);
             }
@@ -344,7 +350,8 @@ mod test {
             });
             assert_eq!(false, s.is_null());
             assert_eq!(true, b.is_null());
-            assert_eq!(true, object_pool.exhausted());
+            //assert_eq!(true, object_pool.exhausted());
+            assert_eq!(true, ObjectPool::exhausted(&object_pool));
         }
 
         #[test]
@@ -362,7 +369,8 @@ mod test {
             });
             assert_eq!(false, s.is_null());
             assert_eq!(false, b.is_null());
-            assert_eq!(false, object_pool.exhausted());
+            //assert_eq!(false, object_pool.exhausted());
+            assert_eq!(false, ObjectPool::exhausted(&object_pool));
             assert_eq!(2, object_pool.allocated());
         }
 

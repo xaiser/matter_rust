@@ -72,10 +72,6 @@ mod session_handle {
             })
         }
 
-        pub fn new_shared_session(session: Session, alloactor: * mut Alloactor) -> Result<SharedSession, ()> {
-            SharedSession::try_new_in(RefCell::new(session), alloactor)
-        }
-
         pub fn try_ref(&self) -> Result<Ref<'_, Session>, ()> {
             self.m_session.try_borrow().map_err(|_| ())
         }
@@ -144,6 +140,10 @@ mod session_handle {
 
     pub const fn new_session_alloactor() -> Alloactor {
         Alloactor::new()
+    }
+
+    pub fn new_shared_session(session: Session, alloactor: * mut Alloactor) -> Result<SharedSession, ()> {
+        SharedSession::try_new_in(RefCell::new(session), alloactor)
     }
 }
 
@@ -980,6 +980,11 @@ impl Session {
     pub const fn new_unauthenticated() -> Session {
         Session::Unauthenticated(UnauthenticatedSession::new())
     }
+
+    pub const fn new_unauthenticated_with(us: UnauthenticatedSession) -> Session {
+        Session::Unauthenticated(us)
+    }
+
     pub const fn new_incoming_group() -> Session {
         Session::IncomingGroupSession(IncomingGroupSession::new())
     }
