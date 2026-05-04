@@ -16,7 +16,7 @@ use crate::chip::{
         session::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
             SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
-            Session, new_session_alloactor, new_shared_session,
+            Session, new_session_alloactor, new_shared_session, release_all_shared_session,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -39,7 +39,7 @@ use crate::{
     //chip_error_invalid_argument,
     //chip_error_duplicate_message_received,
     chip_error_internal,
-    //verify_or_die,
+    verify_or_die,
     //verify_or_return_error,
     //verify_or_return_value,
 };
@@ -277,6 +277,20 @@ pub struct UnauthenticatedSessionTable
     m_entries_pool: Pool,
 }
 
+impl Drop for UnauthenticatedSessionTable {
+    fn drop(&mut self) {
+        for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
+            {
+                let session_ref = session.as_ref().unwrap();
+                release_all_shared_session(session_ref);
+                verify_or_die!(SharedSession::is_unique(session_ref));
+            }
+            // drop the least one
+            *session = None;
+        }
+    }
+}
+
 impl UnauthenticatedSessionTable
 {
     pub const fn new() -> Self {
@@ -284,6 +298,41 @@ impl UnauthenticatedSessionTable
             m_entries: [const { None }; POOL_SIZE],
             m_entries_pool: new_session_alloactor(),
         }
+    }
+
+
+    /*
+     * Get a responder session with the given ephemeralInitiatorNodeID. If the session doesn't exist in the cache, allocate a new
+     * entry for it.
+     *
+     * @return the session found or allocated, or Optional::Missing if not found and allocation failed.
+     */
+
+    pub fn find_or_allocate_responder(&mut self, ephemeral_initiator_node_id: NodeId, config: &ReliableMessageProtocolConfig,
+        peer_address: &PeerAddress) -> Result<SessionHandle, ChipError>
+    {
+        if let Some(shared_session) = self.find_entry(SessionRole::Kresponder, ephemeral_initiator_node_id, peer_address) {
+            return Ok(SessionHandle::new_with(shared_session));
+        }
+
+        return Ok(SessionHandle::new_with(self.alloc_entry(SessionRole::Kresponder, ephemeral_initiator_node_id, peer_address,
+                    config)?));
+    }
+
+    pub fn find_initiator(&self, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress) -> Option<SessionHandle> {
+        Some(SessionHandle::new_with(self.find_entry(SessionRole::Kinitiator, ephemeral_initiator_node_id, peer_address)?))
+    }
+
+    pub fn alloc_initiator(&mut self, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress) -> Result<SessionHandle, ChipError> {
+        let shared_session = self.alloc_entry(SessionRole::Kinitiator, ephemeral_initiator_node_id, peer_address, config)?;
+
+        let handle = SessionHandle::new_with(shared_session);
+        let _ = handle.try_mut().map_err(|_| chip_error_internal!()).
+            and_then(|s| {
+                s.set_peer_address(peer_address);
+                chip_ok!()
+            })?;
+        return Ok(handle);
     }
 
     fn alloc_entry(&mut self, session_role: SessionRole, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress,
@@ -459,5 +508,62 @@ mod tests {
         assert!(table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config).is_ok());
     }
 
-    need more test here
+    #[test]
+    fn alloc_one_more_after_full_successfully() {
+        let mut table = UnauthenticatedSessionTable::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+        for _i in 0..POOL_SIZE {
+            assert!(table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config).is_ok());
+        }
+        // one more
+        assert!(table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config).is_ok());
+    }
+
+    #[test]
+    fn alloc_failed_on_no_unused_session() {
+        let mut table = UnauthenticatedSessionTable::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+        // hold a copy for every session allocated
+        let mut copy: [Option<SharedSession>; POOL_SIZE] = [const {None}; POOL_SIZE];
+        for i in 0..POOL_SIZE {
+            let s = table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config);
+            assert!(s.is_ok());
+            let s = s.unwrap();
+            copy[i] = Some(s.clone());
+        }
+        // one more
+        assert!(table.alloc_entry(SessionRole::Kinitiator, 0, &peer_address, &config).is_err_and(|e| e == chip_error_no_memory!()));
+    }
+
+    #[test]
+    fn found_responder() {
+        let mut table = UnauthenticatedSessionTable::new();
+
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+
+        let original = table.alloc_entry(SessionRole::Kresponder, 0, &peer_address, &config);
+        assert!(original.is_ok());
+        let original = original.unwrap();
+        let original = SessionHandle::new_with(original);
+
+        let found = table.find_or_allocate_responder(0, &config, &peer_address);
+        assert!(found.is_ok());
+        let found = found.unwrap();
+
+        assert!(SessionHandle::eq(&original, &found));
+    }
+
+    #[test]
+    fn allocate_responder() {
+        let mut table = UnauthenticatedSessionTable::new();
+
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+
+        let responder = table.find_or_allocate_responder(0, &config, &peer_address);
+        assert!(responder.is_ok());
+    }
 } // end of tests

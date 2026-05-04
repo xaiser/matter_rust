@@ -72,6 +72,12 @@ mod session_handle {
             })
         }
 
+        pub fn new_with(session: &SharedSession) -> Self {
+            Self {
+                m_session: session.clone(),
+            }
+        }
+
         pub fn try_ref(&self) -> Result<Ref<'_, Session>, ()> {
             self.m_session.try_borrow().map_err(|_| ())
         }
@@ -144,6 +150,18 @@ mod session_handle {
 
     pub fn new_shared_session(session: Session, alloactor: * mut Alloactor) -> Result<SharedSession, ()> {
         SharedSession::try_new_in(RefCell::new(session), alloactor)
+    }
+
+    pub fn release_all_shared_session(session: &SharedSession) {
+        if let Ok(mut session) = session.try_borrow_mut() {
+            let mut current = session.holders().front_mut();
+            while !current.is_null() {
+                if let Some(holder) = current.get() {
+                    let _ = holder.session_released();
+                }
+                current.move_next();
+            }
+        }
     }
 }
 
@@ -261,15 +279,6 @@ mod session_holder {
             }
 
             Err(session)
-            /*
-            if !session.is_active_session() {
-                return Err(session);
-            }
-
-            self.grab_unchecked(session);
-
-            Ok(())
-            */
         }
 
         fn grab_unchecked(&self, session: SessionHandle) {
