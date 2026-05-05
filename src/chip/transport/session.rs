@@ -404,7 +404,7 @@ mod session_holder {
             let holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
 
@@ -420,7 +420,7 @@ mod session_holder {
             let holder = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
             // make some copies used later for check
@@ -457,7 +457,7 @@ mod session_holder {
             let holder_2 = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), ptr::addr_of_mut!(session_pool));
             let session = session.unwrap();
 
             unsafe {
@@ -481,7 +481,7 @@ mod session_holder {
             let holder_2 = holder_pool.allocate(Holder::new());
 
             let mut session_pool = new_session_alloactor();
-            let session = SessionHandle::try_new_handle(Session::new_secure(), ptr::addr_of_mut!(session_pool));
+            let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), ptr::addr_of_mut!(session_pool));
             let mut session = session.unwrap();
 
             unsafe {

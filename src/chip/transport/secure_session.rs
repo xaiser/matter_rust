@@ -25,7 +25,14 @@ use crate::{
     },
 };
 
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_progress;
+use crate::chip_log_detail;
+use core::str::FromStr;
+
 use core::cell::OnceCell;
+use core::fmt;
 
 pub trait AsMut {
     fn as_mut(&mut self) -> Option<&mut SecureSession>;
@@ -36,7 +43,73 @@ pub trait AsRef {
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
-enum Type {
+#[repr(u8)]
+enum State {
+    //
+    // Denotes a secure session object that is internally
+    // reserved by the stack before and during session establishment.
+    //
+    // Although the stack can tolerate eviction of these (releasing one
+    // out from under the holder would exhibit as CHIP_ERROR_INCORRECT_STATE
+    // during CASE or PASE), intent is that we should not and would leave
+    // these untouched until CASE or PASE complete.
+    //
+    // In this state, the reference count is held by the PairingSession.
+    //
+    Kestablishing = 1,
+
+    //
+    // The session is active, ready for use. When transitioning to this state via Activate, the
+    // reference count is incremented by 1, and will subsequently be decremented
+    // by 1 when MarkForEviction is called. This ensures the session remains resident
+    // and active for future use even if there currently are no references to it.
+    //
+    Kactive = 2,
+
+    //
+    // The session is temporarily disabled due to suspicion of a loss of synchronization
+    // with the session state on the peer (e.g transport failure).
+    // In this state, no new outbound exchanges can be created. However, if we receive valid messages
+    // again on this session, we CAN mark this session as being active again.
+    //
+    // Transitioning to this state does not detach any existing SessionHolders.
+    //
+    // In addition to any existing SessionHolders holding a reference to this session, the SessionManager
+    // maintains a reference as well to the session that will only be relinquished when MarkForEviction is called.
+    //
+    Kdefunct = 3,
+
+    //
+    // The session has been marked for eviction and is pending deallocation. All SessionHolders would have already
+    // been detached in a previous call to MarkForEviction. Future SessionHolders will not be able to attach to
+    // this session.
+    //
+    // When all SessionHandles go out of scope, the session will be released automatically.
+    //
+    KpendingEviction = 4,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            State::Kestablishing => {
+                write!(f, "Kestablishing")
+            },
+            State::Kactive => {
+                write!(f, "Kactive")
+            },
+            State::Kdefunct => {
+                write!(f, "Kdefunct")
+            },
+            State::KpendingEviction => {
+                write!(f, "KpendingEviction")
+            },
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum Type {
     Kpase = 1,
     Kcase = 2,
 }
@@ -54,6 +127,8 @@ pub struct SecureSession {
     m_is_case_commissioning_session: bool,
     m_peer_cats: CATValues,
     m_crypto_context: CryptoContext,
+    m_state: State,
+    m_peer_session_id: u16,
 }
 
 impl SessionBasePrivate for SecureSession {
@@ -68,8 +143,7 @@ impl SessionBase for SecureSession {
     }
 
     fn is_active_session(&self) -> bool {
-        // TODO: this is just a stub return value
-        true
+        self.m_state == State::Kactive
     }
 
     fn get_ack_timeout(&self, is_first_message_on_exchange: bool) -> Milliseconds {
@@ -206,19 +280,74 @@ impl SecureSession {
             m_is_case_commissioning_session: false,
             m_peer_cats: CATValues::new(),
             m_crypto_context: CryptoContext::new(),
+            m_state: State::Kestablishing,
+            m_peer_session_id: 0,
         }
     }
 
-    pub fn is_establishing(&self) -> bool {
-        // TODO: this is just a stub return
-        true
+    pub fn new_with(secure_session_type: Type, local_session_id: u16) -> Self {
+        let mut s = Self {
+            m_holders: new_session_holder_list(),
+            m_peer_address: PeerAddress::new(),
+            m_remote_session_params: SessionParameters::new(),
+            m_last_peer_activity_time: Timestamp::ZERO,
+            m_local_session_id: OnceCell::new(),
+            m_peer_node_id: KUNDEFINED_NODE_ID,
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            m_local_node_id: KUNDEFINED_NODE_ID,
+            m_is_case_commissioning_session: false,
+            m_peer_cats: CATValues::new(),
+            m_crypto_context: CryptoContext::new(),
+            m_state: State::Kestablishing,
+            m_secure_session_type: secure_session_type,
+            m_peer_session_id: 0,
+        };
+
+        s.m_local_session_id.set(local_session_id);
+
+        s
     }
 
-    fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
+    fn new_with_test(secure_session_type: Type, local_session_id: u16, local_node_id: NodeId,
+        peer_node_id: NodeId, peer_cats: CATValues, peer_session_id: u16, fabric: FabricIndex,
+        config: &ReliableMessageProtocolConfig) -> Self {
+
+        let mut s = Self {
+            m_holders: new_session_holder_list(),
+            m_peer_address: PeerAddress::new(),
+            m_remote_session_params: SessionParameters::new_with(config.clone()),
+            m_last_peer_activity_time: Timestamp::ZERO,
+            m_local_session_id: OnceCell::new(),
+            m_peer_node_id: peer_node_id,
+            m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            m_local_node_id: local_node_id,
+            m_is_case_commissioning_session: false,
+            m_peer_cats: peer_cats,
+            m_crypto_context: CryptoContext::new(),
+            m_state: State::Kestablishing,
+            m_secure_session_type: secure_session_type,
+            m_peer_session_id: peer_session_id,
+        };
+
+        s.m_local_session_id.set(local_session_id);
+
+        s.move_to_state(State::Kactive);
+        s.set_fabric_index(fabric);
+
+        chip_log_detail!(Inet, "SecureSession[{:p}]: Allocated for Test Type: {} LSID: {}", &s, s.m_secure_session_type as u8, s.m_local_session_id.get().cloned().unwrap_or(0));
+
+        s
+    }
+
+    pub fn is_establishing(&self) -> bool {
+        self.m_state == State::Kestablishing
+    }
 
     pub fn get_local_session_id(&self) -> u16 {
         *(self.m_local_session_id.get_or_init(|| 0))
     }
+
+    fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
     #[inline]
     fn get_secure_session_type(&self) -> Type {
@@ -242,5 +371,14 @@ impl SecureSession {
         }
 
         false
+    }
+
+    fn move_to_state(&mut self, target_state: State) {
+        if self.m_state != target_state {
+            chip_log_progress!(SecureChannel, "SecureSession[{:p}, LSID:{}]: State change '{}' --> '{}'", self, self.m_local_session_id.get().cloned().unwrap_or(0),
+                self.m_state, target_state);
+
+            self.m_state = target_state;
+        }
     }
 }

@@ -35,7 +35,7 @@ use crate::{
     chip_sdk_error,
     chip_core_error,
     chip_error_no_memory,
-    //chip_error_incorrect_state,
+    chip_error_incorrect_state,
     //chip_error_invalid_argument,
     //chip_error_duplicate_message_received,
     chip_error_internal,
@@ -323,14 +323,19 @@ impl UnauthenticatedSessionTable
         Some(SessionHandle::new_with(self.find_entry(SessionRole::Kinitiator, ephemeral_initiator_node_id, peer_address)?))
     }
 
-    pub fn alloc_initiator(&mut self, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress) -> Result<SessionHandle, ChipError> {
+    pub fn alloc_initiator(&mut self, ephemeral_initiator_node_id: NodeId, peer_address: &PeerAddress, config: &ReliableMessageProtocolConfig) -> Result<SessionHandle, ChipError> {
         let shared_session = self.alloc_entry(SessionRole::Kinitiator, ephemeral_initiator_node_id, peer_address, config)?;
 
         let handle = SessionHandle::new_with(shared_session);
         let _ = handle.try_mut().map_err(|_| chip_error_internal!()).
-            and_then(|s| {
-                s.set_peer_address(peer_address);
-                chip_ok!()
+            and_then(|mut s| {
+                let us_mut: Option<&mut UnauthenticatedSession> = s.as_mut();
+                if let Some(us_mut) = us_mut {
+                    us_mut.set_peer_address(peer_address.clone());
+                    chip_ok!()
+                } else {
+                    Err(chip_error_incorrect_state!())
+                }
             })?;
         return Ok(handle);
     }
@@ -565,5 +570,16 @@ mod tests {
 
         let responder = table.find_or_allocate_responder(0, &config, &peer_address);
         assert!(responder.is_ok());
+    }
+
+    #[test]
+    fn allocate_initiator() {
+        let mut table = UnauthenticatedSessionTable::new();
+
+        let config = ReliableMessageProtocolConfig::new();
+        let peer_address = PeerAddress::new();
+
+        let initiator = table.alloc_initiator(0, &peer_address, &config);
+        assert!(initiator.is_ok());
     }
 } // end of tests
