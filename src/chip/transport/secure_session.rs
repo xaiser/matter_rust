@@ -25,6 +25,22 @@ use crate::{
     },
 };
 
+use crate::{
+    ChipErrorResult,
+    ChipError,
+    chip_ok,
+    chip_sdk_error,
+    chip_core_error,
+    //chip_error_no_memory,
+    //chip_error_incorrect_state,
+    chip_error_invalid_argument,
+    //chip_error_duplicate_message_received,
+    chip_error_internal,
+    verify_or_die,
+    verify_or_return_error,
+    verify_or_return_value,
+};
+
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_progress;
@@ -119,6 +135,7 @@ pub struct SecureSession {
     m_peer_address: PeerAddress,
     m_remote_session_params: SessionParameters,
     m_last_peer_activity_time: Timestamp,
+    m_last_activity_time: Timestamp,
     m_local_session_id: OnceCell<u16>,
     m_peer_node_id: NodeId,
     m_fabric_index: FabricIndex,
@@ -272,6 +289,7 @@ impl SecureSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
             m_last_peer_activity_time: Timestamp::ZERO,
+            m_last_activity_time: Timestamp::ZERO,
             m_local_session_id: OnceCell::new(),
             m_peer_node_id: KUNDEFINED_NODE_ID,
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
@@ -291,6 +309,7 @@ impl SecureSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
             m_last_peer_activity_time: Timestamp::ZERO,
+            m_last_activity_time: Timestamp::ZERO,
             m_local_session_id: OnceCell::new(),
             m_peer_node_id: KUNDEFINED_NODE_ID,
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
@@ -317,6 +336,7 @@ impl SecureSession {
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new_with(config.clone()),
             m_last_peer_activity_time: Timestamp::ZERO,
+            m_last_activity_time: Timestamp::ZERO,
             m_local_session_id: OnceCell::new(),
             m_peer_node_id: peer_node_id,
             m_fabric_index: KUNDEFINED_FABRIC_INDEX,
@@ -343,8 +363,44 @@ impl SecureSession {
         self.m_state == State::Kestablishing
     }
 
+    pub fn is_pending_eviction(&self) -> bool {
+        self.m_state == State::KpendingEviction
+    }
+
+    pub fn is_defunct(&self) -> bool {
+        self.m_state == State::Kdefunct
+    }
+
     pub fn get_local_session_id(&self) -> u16 {
         *(self.m_local_session_id.get_or_init(|| 0))
+    }
+
+    pub fn adopt_fabric_index(&mut self, index: FabricIndex) -> ChipErrorResult {
+        if self.m_secure_session_type != Type::Kpase {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        self.set_fabric_index(index);
+
+        chip_ok!()
+    }
+
+    pub fn mark_active(&mut self) {
+        self.m_last_activity_time = get_monotonic_timestamp();
+    }
+
+    pub fn mark_active_rx(&mut self) {
+        self.m_last_peer_activity_time = get_monotonic_timestamp();
+        self.mark_active();
+
+        if self.m_state == State::Kdefunct {
+            self.move_to_state(State::Kactive)
+        }
+    }
+
+    pub fn set_case_commissioning_session_status(&mut self, is_case_commissioning_session: bool) {
+        verify_or_die!(self.get_secure_session_type() == Type::Kcase);
+        self.m_is_case_commissioning_session = is_case_commissioning_session;
     }
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
