@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 use crate::{
-    verify_or_die,
     chip::{
         access::{self, subject_descriptor::SubjectDescriptor},
         ble::ble_config::BTP_ACK_TIMEOUT_MS,
@@ -13,6 +12,7 @@ use crate::{
             session::{
                 SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
             },
+            secure_session_table::SecureSessionTable,
             raw::peer_address::{self, PeerAddress},
             crypto_context::CryptoContext,
         },
@@ -48,6 +48,7 @@ use crate::chip_log_detail;
 use core::str::FromStr;
 
 use core::cell::OnceCell;
+use core::ptr::{self, NonNull};
 use core::fmt;
 
 pub trait AsMut {
@@ -146,6 +147,8 @@ pub struct SecureSession {
     m_crypto_context: CryptoContext,
     m_state: State,
     m_peer_session_id: u16,
+    // TODO: find a way to remove this
+    m_table: Option<NonNull<SecureSessionTable>>,
 }
 
 impl SessionBasePrivate for SecureSession {
@@ -300,10 +303,11 @@ impl SecureSession {
             m_crypto_context: CryptoContext::new(),
             m_state: State::Kestablishing,
             m_peer_session_id: 0,
+            m_table: None,
         }
     }
 
-    pub fn new_with(secure_session_type: Type, local_session_id: u16) -> Self {
+    pub fn new_with(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16) -> Self {
         let mut s = Self {
             m_holders: new_session_holder_list(),
             m_peer_address: PeerAddress::new(),
@@ -320,6 +324,7 @@ impl SecureSession {
             m_state: State::Kestablishing,
             m_secure_session_type: secure_session_type,
             m_peer_session_id: 0,
+            m_table: NonNull::new(table),
         };
 
         s.m_local_session_id.set(local_session_id);
@@ -327,7 +332,7 @@ impl SecureSession {
         s
     }
 
-    fn new_with_test(secure_session_type: Type, local_session_id: u16, local_node_id: NodeId,
+    fn new_with_test(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16, local_node_id: NodeId,
         peer_node_id: NodeId, peer_cats: CATValues, peer_session_id: u16, fabric: FabricIndex,
         config: &ReliableMessageProtocolConfig) -> Self {
 
@@ -347,6 +352,7 @@ impl SecureSession {
             m_state: State::Kestablishing,
             m_secure_session_type: secure_session_type,
             m_peer_session_id: peer_session_id,
+            m_table: NonNull::new(table),
         };
 
         s.m_local_session_id.set(local_session_id);
@@ -401,6 +407,49 @@ impl SecureSession {
     pub fn set_case_commissioning_session_status(&mut self, is_case_commissioning_session: bool) {
         verify_or_die!(self.get_secure_session_type() == Type::Kcase);
         self.m_is_case_commissioning_session = is_case_commissioning_session;
+    }
+
+    pub fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
+        session_parameters: &SessionParameters)
+    {
+        verify_or_die!(self.m_state == State::Kestablishing);
+        verify_or_die!(peer_node.get_fabric_index() == local_node.get_fabric_index());
+
+        // PASE sessions must always start unassociated with a Fabric!
+        verify_or_die!(!((self.m_secure_session_type == Type::Kpase) && (peer_node.get_fabric_index() != KUNDEFINED_FABRIC_INDEX)));
+        // CASE sessions must always start "associated" a given Fabric!
+        verify_or_die!(!((self.m_secure_session_type == Type::Kcase) && (peer_node.get_fabric_index() == KUNDEFINED_FABRIC_INDEX)));
+        // CASE sessions can only be activated against operational node IDs!
+        verify_or_die!(!((self.m_secure_session_type == Type::Kcase) && 
+                (!is_operational_node_id(peer_node.get_node_id()) || !is_operational_node_id(local_node.get_node_id()))));
+
+        self.m_peer_node_id = peer_node.get_node_id();
+        self.m_local_node_id = local_node.get_node_id();
+        self.m_peer_cats = peer_cats;
+        self.m_peer_session_id = peer_session_id;
+        self.m_remote_session_params = session_parameters.clone();
+        self.set_fabric_index(peer_node.get_fabric_index());
+        self.mark_active_rx();
+
+        if let Some(table_ptr) = self.m_table {
+            unsafe {
+                table_ptr.as_mut().retain();
+            }
+        } else {
+            verify_or_die!(false);
+        }
+
+        self.move_to_state(State::Kactive);
+
+        if self.m_secure_session_type == Type::Kcase {
+            if let Some(table_ptr) = self.m_table {
+                unsafe {
+                    table_ptr.as_mut().newer_session_available(self);
+                }
+            } else {
+                verify_or_die!(false);
+            }
+        }
     }
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }

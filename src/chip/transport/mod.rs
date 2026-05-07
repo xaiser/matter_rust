@@ -6,6 +6,7 @@ pub mod session;
 pub mod group_session;
 mod crypto_context;
 mod secure_session;
+mod secure_session_table;
 mod unauthenticated_session;
 pub mod peer_message_counter;
 
