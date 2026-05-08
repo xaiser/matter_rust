@@ -8,6 +8,10 @@ use crate::{
 pub struct SecureSessionTable;
 
 impl SecureSessionTable {
+    pub const fn new() -> Self {
+        SecureSessionTable
+    }
+
     pub fn retain(&mut self) {
     }
 

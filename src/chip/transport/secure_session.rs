@@ -327,7 +327,7 @@ impl SecureSession {
             m_table: NonNull::new(table),
         };
 
-        s.m_local_session_id.set(local_session_id);
+        let _ = s.m_local_session_id.set(local_session_id);
 
         s
     }
@@ -355,7 +355,7 @@ impl SecureSession {
             m_table: NonNull::new(table),
         };
 
-        s.m_local_session_id.set(local_session_id);
+        let _ = s.m_local_session_id.set(local_session_id);
 
         s.move_to_state(State::Kactive);
         s.set_fabric_index(fabric);
@@ -431,7 +431,7 @@ impl SecureSession {
         self.set_fabric_index(peer_node.get_fabric_index());
         self.mark_active_rx();
 
-        if let Some(table_ptr) = self.m_table {
+        if let Some(mut table_ptr) = self.m_table {
             unsafe {
                 table_ptr.as_mut().retain();
             }
@@ -442,7 +442,7 @@ impl SecureSession {
         self.move_to_state(State::Kactive);
 
         if self.m_secure_session_type == Type::Kcase {
-            if let Some(table_ptr) = self.m_table {
+            if let Some(mut table_ptr) = self.m_table {
                 unsafe {
                     table_ptr.as_mut().newer_session_available(self);
                 }
@@ -450,7 +450,49 @@ impl SecureSession {
                 verify_or_die!(false);
             }
         }
+
+        chip_log_detail!(Inet, "SecureSession[{:p}]: Activated - Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
     }
+
+    pub fn mark_as_defunct(&mut self) {
+        chip_log_detail!(Inet, "SecureSession[{:p}]: MarkAsDefunct Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
+        match self.m_state {
+            State::Kestablishing => {
+                //
+                // A session can only be marked as defunct from the state of Active.
+                //
+                verify_or_die!(false);
+            },
+            State::Kactive => {
+                self.move_to_state(State::Kdefunct);
+            },
+            _ => {
+                //
+                // Do nothing
+                //
+            }
+        }
+    }
+
+    /*
+    pub fn mark_for_eviction(&mut self) {
+        chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
+        match self.m_state {
+            State::Kestablishing => {
+                self.move_to_state(State::KpendingEviction);
+                // Interrupt the pairing
+            },
+            State::Kactive => {
+                self.move_to_state(State::Kdefunct);
+            },
+            _ => {
+                //
+                // Do nothing
+                //
+            }
+        }
+    }
+    */
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
@@ -485,5 +527,128 @@ impl SecureSession {
 
             self.m_state = target_state;
         }
+    }
+
+    fn get_state(&self) -> State {
+        self.m_state
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ptr;
+
+    #[test]
+    fn activate_pase_successfully() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kpase, 0);
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    fn activate_case_successfully() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kcase, 0);
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    #[should_panic]
+    fn not_same_fabric_index() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kpase, 0);
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX + 1);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    #[should_panic]
+    fn pase_with_known_fabric() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kpase, 0);
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX + 1);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX + 1);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    #[should_panic]
+    fn case_with_unknown_fabric() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kcase, 0);
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let fabric_index = KUNDEFINED_FABRIC_INDEX;
+        let local_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    #[should_panic]
+    fn case_with_no_op_node() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new_with(ptr::addr_of_mut!(table), Type::Kcase, 0);
+        let node_id = KUNDEFINED_NODE_ID;
+        let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, fabric_index);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
+    }
+
+    #[test]
+    #[should_panic]
+    fn activate_without_table() {
+        let mut table = SecureSessionTable::new();
+        let mut session = SecureSession::new();
+        let node_id = KUNDEFINED_NODE_ID + 1;
+        let local_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
+        let peer_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
+        let cat = CATValues::new();
+        let sp = SessionParameters::new();
+
+        assert!(State::Kactive != session.get_state());
+        session.activate(&local_node, &peer_node, cat, 1, &sp);
+        assert!(State::Kactive == session.get_state());
     }
 }

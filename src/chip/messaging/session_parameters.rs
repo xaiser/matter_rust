@@ -19,6 +19,7 @@ pub enum Tag {
     KMaxPathsPerInvoke        = 7,
 }
 
+#[derive(Clone)]
 pub struct SessionParameters {
     m_mrp_config: ReliableMessageProtocolConfig,
     m_data_model_revision: Option<u16>,
