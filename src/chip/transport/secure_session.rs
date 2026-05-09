@@ -131,6 +131,12 @@ pub enum Type {
     Kcase = 2,
 }
 
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum EvicationOp {
+    Knone,
+    Krelease,
+}
+
 pub struct SecureSession {
     m_holders: SessionHolderList,
     m_peer_address: PeerAddress,
@@ -433,7 +439,7 @@ impl SecureSession {
 
         if let Some(mut table_ptr) = self.m_table {
             unsafe {
-                table_ptr.as_mut().retain();
+                table_ptr.as_mut().retain(self);
             }
         } else {
             verify_or_die!(false);
@@ -474,25 +480,30 @@ impl SecureSession {
         }
     }
 
-    /*
-    pub fn mark_for_eviction(&mut self) {
+    pub fn mark_for_eviction(&mut self) -> EvicationOp {
         chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
         match self.m_state {
             State::Kestablishing => {
                 self.move_to_state(State::KpendingEviction);
                 // Interrupt the pairing
+                return EvicationOp::Krelease;
             },
-            State::Kactive => {
-                self.move_to_state(State::Kdefunct);
+            State::Kactive | State::Kdefunct => {
+                if let Some(mut table_ptr) = self.m_table {
+                    unsafe {
+                        table_ptr.as_mut().release(self);
+                    }
+                } else {
+                    verify_or_die!(false);
+                }
+                self.move_to_state(State::KpendingEviction);
+                return EvicationOp::Krelease;
             },
             _ => {
-                //
-                // Do nothing
-                //
+                return EvicationOp::Knone;
             }
         }
     }
-    */
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 

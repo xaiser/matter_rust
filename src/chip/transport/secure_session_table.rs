@@ -12,9 +12,12 @@ impl SecureSessionTable {
         SecureSessionTable
     }
 
-    pub fn retain(&mut self) {
+    pub fn retain(&mut self, _secure_session: &SecureSession) {
     }
 
-    pub fn newer_session_available(&mut self, session: &SecureSession) {
+    pub fn release(&mut self, _secure_session: &SecureSession) {
+    }
+
+    pub fn newer_session_available(&mut self, _session: &SecureSession) {
     }
 }
