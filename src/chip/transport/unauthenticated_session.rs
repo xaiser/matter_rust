@@ -16,7 +16,7 @@ use crate::chip::{
         session::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
             SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
-            Session, new_session_alloactor, new_shared_session, release_all_shared_session,
+            Session, new_session_alloactor, new_shared_session, notify_shared_session_released,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -281,8 +281,8 @@ impl Drop for UnauthenticatedSessionTable {
     fn drop(&mut self) {
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
             {
-                let session_ref = session.as_ref().unwrap();
-                release_all_shared_session(session_ref);
+                let session_ref = session.as_mut().unwrap();
+                notify_shared_session_released(session_ref);
                 verify_or_die!(SharedSession::is_unique(session_ref));
             }
             // drop the least one

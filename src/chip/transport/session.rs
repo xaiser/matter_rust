@@ -92,6 +92,8 @@ mod session_handle {
         
         pub fn notify_session_released(&mut self) {
             // A holder to ensure at least one keeper for the Rc.
+            return super::notify_shared_session_released(&self.m_session);
+            /*
             let _copy = self.clone();
 
             if let Ok(mut session) = self.m_session.try_borrow_mut() {
@@ -107,6 +109,7 @@ mod session_handle {
             } else {
                 panic!("cannot borrow session mut in notify_release");
             };
+            */
         }
 
         fn notify_session_hang(&mut self) {
@@ -151,18 +154,26 @@ mod session_handle {
     pub fn new_shared_session(session: Session, alloactor: * mut Alloactor) -> Result<SharedSession, ()> {
         SharedSession::try_new_in(RefCell::new(session), alloactor)
     }
+        
+    pub fn notify_shared_session_released(shared_session: &SharedSession) {
+        // A holder to ensure at least one keeper for the Rc.
+        let _copy = shared_session.clone();
 
-    pub fn release_all_shared_session(session: &SharedSession) {
-        if let Ok(mut session) = session.try_borrow_mut() {
+        if let Ok(mut session) = shared_session.try_borrow_mut() {
             let mut current = session.holders().front_mut();
             while !current.is_null() {
-                if let Some(holder) = current.get() {
+                if let Some(holder) = current.remove() {
                     let _ = holder.session_released();
+                } else {
+                    // sholdn't reach here
+                    break;
                 }
-                current.move_next();
             }
-        }
+        } else {
+            panic!("cannot borrow session mut in notify_release");
+        };
     }
+
 }
 
 // re-export session_handle
@@ -343,6 +354,11 @@ mod session_holder {
             } else {
                 panic!("cannot borrow session mut for releae");
             };
+        }
+
+        pub fn shift_to_session(&mut self, session: SessionHandle) {
+            self.release();
+            self.grab(session);
         }
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {

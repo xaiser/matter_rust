@@ -10,7 +10,7 @@ use crate::{
         },
         transport::{
             session::{
-                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate
+                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate, SessionHandle
             },
             secure_session_table::SecureSessionTable,
             raw::peer_address::{self, PeerAddress},
@@ -480,6 +480,7 @@ impl SecureSession {
         }
     }
 
+    /*
     pub fn mark_for_eviction(&mut self) -> EvicationOp {
         chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
         match self.m_state {
@@ -504,6 +505,7 @@ impl SecureSession {
             }
         }
     }
+    */
 
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
@@ -543,6 +545,9 @@ impl SecureSession {
     fn get_state(&self) -> State {
         self.m_state
     }
+}
+
+pub fn newer_session_available(session: SessonHandle, new_session: &SessionHandle) {
 }
 
 #[cfg(test)]
