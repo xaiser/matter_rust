@@ -292,7 +292,7 @@ mod session_holder {
             Err(session)
         }
 
-        fn grab_unchecked(&self, session: SessionHandle) {
+        pub fn grab_unchecked(&self, session: SessionHandle) {
             if let Ok(m_session) = self.m_session.try_borrow() {
                 if m_session.is_some() {
                     // should never reach here

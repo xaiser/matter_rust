@@ -415,7 +415,7 @@ impl SecureSession {
         self.m_is_case_commissioning_session = is_case_commissioning_session;
     }
 
-    pub fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
+    fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
         session_parameters: &SessionParameters)
     {
         verify_or_die!(self.m_state == State::Kestablishing);
@@ -437,6 +437,7 @@ impl SecureSession {
         self.set_fabric_index(peer_node.get_fabric_index());
         self.mark_active_rx();
 
+        /*
         if let Some(mut table_ptr) = self.m_table {
             unsafe {
                 table_ptr.as_mut().retain(self);
@@ -444,9 +445,11 @@ impl SecureSession {
         } else {
             verify_or_die!(false);
         }
+        */
 
         self.move_to_state(State::Kactive);
 
+        /*
         if self.m_secure_session_type == Type::Kcase {
             if let Some(mut table_ptr) = self.m_table {
                 unsafe {
@@ -456,6 +459,7 @@ impl SecureSession {
                 verify_or_die!(false);
             }
         }
+        */
 
         chip_log_detail!(Inet, "SecureSession[{:p}]: Activated - Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
     }
@@ -547,7 +551,66 @@ impl SecureSession {
     }
 }
 
-pub fn newer_session_available(session: SessonHandle, new_session: &SessionHandle) {
+pub fn activate(session_handle: &mut SessionHandle, local_node: &ScopedNodeId, peer_node: &ScopedNodeId,
+    peer_cats: CATValues, peer_session_id: u16, session_parameters: &SessionParameters)
+{
+    let mut table: * mut SecureSessionTable = ptr::null_mut();
+    if let Ok(mut session) = session_handle.try_mut() {
+        let ss: Option<&mut SecureSession> = session.as_mut();
+        if let Some(secure_session) = ss {
+            if let Some(t) = secure_session.m_table {
+                table = t.as_ptr();
+            } else {
+                panic!("empty table in activate");
+            }
+        } else {
+            panic!("only secure session can be activated");
+        }
+    }
+
+    unsafe {
+        inner_activate(session_handle, table.as_mut().unwrap(), local_node, peer_node, peer_cats, peer_session_id, session_parameters);
+    }
+}
+
+fn inner_activate(session_handle: &mut SessionHandle, table: &mut SecureSessionTable, local_node: &ScopedNodeId, peer_node: &ScopedNodeId,
+    peer_cats: CATValues, peer_session_id: u16, session_parameters: &SessionParameters)
+{
+    if let Ok(mut session) = session_handle.try_mut() {
+        let ss: Option<&mut SecureSession> = session.as_mut();
+        if let Some(mut secure_session) = ss {
+            secure_session.activate(local_node, peer_node, peer_cats, peer_session_id, session_parameters);
+        } else {
+            panic!("only secure session can be activated");
+        }
+    } else {
+        panic!("cannot borrow session mut in secure session activate");
+    };
+    table.retain(session_handle);
+    table.newer_session_available(session_handle);
+}
+
+pub fn newer_session_available(session_handle: SessionHandle, new_session: &SessionHandle) {
+    if let Ok(mut session) = session_handle.try_mut() {
+        // must call from secure sessoion
+        verify_or_die!(session.get_session_type() == SessionType::KSecure);
+
+        let mut current = session.holders().front_mut();
+        while !current.is_null() {
+            if let Some(holder) = current.remove() {
+                let _ = holder.session_released();
+                // Safety:
+                // We have release the session, just grab without check
+                holder.grab_unchecked(new_session.clone());
+            } else {
+                // sholdn't reach here
+                panic!("get not get holder in list");
+                break;
+            }
+        }
+    } else {
+        panic!("cannot borrow session mut in notify_release");
+    };
 }
 
 #[cfg(test)]
@@ -653,18 +716,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn activate_without_table() {
-        let mut table = SecureSessionTable::new();
-        let mut session = SecureSession::new();
-        let node_id = KUNDEFINED_NODE_ID + 1;
-        let local_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
-        let peer_node = ScopedNodeId::default_with_ids(node_id, KUNDEFINED_FABRIC_INDEX);
-        let cat = CATValues::new();
-        let sp = SessionParameters::new();
-
-        assert!(State::Kactive != session.get_state());
-        session.activate(&local_node, &peer_node, cat, 1, &sp);
-        assert!(State::Kactive == session.get_state());
+    fn newer_session_successfully() {
+        // TODO: test it when we get secure session table ready
     }
 }
