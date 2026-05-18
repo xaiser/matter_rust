@@ -135,6 +135,7 @@ pub enum Type {
 pub enum EvicationOp {
     Knone,
     Krelease,
+    Kfullrelease,
 }
 
 pub struct SecureSession {
@@ -514,7 +515,7 @@ impl SecureSession {
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
     #[inline]
-    fn get_secure_session_type(&self) -> Type {
+    pub fn get_secure_session_type(&self) -> Type {
         self.m_secure_session_type
     }
 
@@ -588,6 +589,69 @@ fn inner_activate(session_handle: &mut SessionHandle, table: &mut SecureSessionT
     };
     table.retain(session_handle);
     table.newer_session_available(session_handle);
+}
+
+pub fn mark_for_evication(session_handle: SessionHandle) {
+    let mut table: * mut SecureSessionTable = ptr::null_mut();
+    if let Ok(mut session) = session_handle.try_mut() {
+        let ss: Option<&mut SecureSession> = session.as_mut();
+        if let Some(secure_session) = ss {
+            if let Some(t) = secure_session.m_table {
+                table = t.as_ptr();
+            } else {
+                panic!("empty table in activate");
+            }
+        } else {
+            panic!("only secure session can be activated");
+        }
+    }
+
+    unsafe {
+        inner_mark_for_evication(session_handle, table.as_mut().unwrap());
+    }
+}
+
+fn inner_mark_for_evication(mut session_handle: SessionHandle, table: &mut SecureSessionTable) {
+    let op = {
+        if let Ok(mut session) = session_handle.try_mut() {
+            if let Some(secure_session) = session.as_ref() {
+                chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", secure_session, secure_session.m_secure_session_type as u8, secure_session.m_local_session_id.get().cloned().unwrap_or(0));
+
+                match secure_session.m_state {
+                    State::Kestablishing => {
+                        EvicationOp::Krelease
+                    },
+                    State::Kactive | State::Kdefunct => {
+                        EvicationOp::Kfullrelease
+                    },
+                    _ => {
+                        EvicationOp::Knone
+                    }
+                }
+            } else {
+                panic!("cannot get secure session in mark for evic");
+            }
+        } else {
+            panic!("cannot borrow session mut in mark for evic");
+        }
+    };
+
+    // Safefy:
+    // we are safe to unwrap directly here since we try in the check above
+    match op {
+        EvicationOp::Knone => {
+        },
+        EvicationOp::Krelease => {
+            session_handle.try_mut().unwrap().as_mut().unwrap().move_to_state(State::KpendingEviction);
+            // Interrupt the pairing
+            session_handle.notify_session_released();
+        },
+        EvicationOp::Kfullrelease => {
+            table.release(&mut session_handle);
+            session_handle.try_mut().unwrap().as_mut().unwrap().move_to_state(State::KpendingEviction);
+            session_handle.notify_session_released();
+        },
+    }
 }
 
 pub fn newer_session_available(session_handle: SessionHandle, new_session: &SessionHandle) {
