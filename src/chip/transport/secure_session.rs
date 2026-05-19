@@ -339,7 +339,7 @@ impl SecureSession {
         s
     }
 
-    fn new_with_test(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16, local_node_id: NodeId,
+    pub fn new_with_test(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16, local_node_id: NodeId,
         peer_node_id: NodeId, peer_cats: CATValues, peer_session_id: u16, fabric: FabricIndex,
         config: &ReliableMessageProtocolConfig) -> Self {
 
@@ -485,34 +485,12 @@ impl SecureSession {
         }
     }
 
-    /*
-    pub fn mark_for_eviction(&mut self) -> EvicationOp {
-        chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", self, self.m_secure_session_type as u8, self.m_local_session_id.get().cloned().unwrap_or(0));
-        match self.m_state {
-            State::Kestablishing => {
-                self.move_to_state(State::KpendingEviction);
-                // Interrupt the pairing
-                return EvicationOp::Krelease;
-            },
-            State::Kactive | State::Kdefunct => {
-                if let Some(mut table_ptr) = self.m_table {
-                    unsafe {
-                        table_ptr.as_mut().release(self);
-                    }
-                } else {
-                    verify_or_die!(false);
-                }
-                self.move_to_state(State::KpendingEviction);
-                return EvicationOp::Krelease;
-            },
-            _ => {
-                return EvicationOp::Knone;
-            }
-        }
-    }
-    */
-
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
+
+    #[inline]
+    pub fn get_peer_cats(&self) -> &CATValues {
+        &self.m_peer_cats
+    }
 
     #[inline]
     pub fn get_secure_session_type(&self) -> Type {

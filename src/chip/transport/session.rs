@@ -1002,6 +1002,10 @@ impl Session {
         Session::Secure(SecureSession::new())
     }
 
+    pub const fn new_secure_with(ss: SecureSession) -> Session {
+        Session::Secure(ss)
+    }
+
     pub const fn new_unauthenticated() -> Session {
         Session::Unauthenticated(UnauthenticatedSession::new())
     }

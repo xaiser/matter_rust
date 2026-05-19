@@ -4,6 +4,7 @@ use crate::{
             core::{
                 node_id::KUNDEFINED_NODE_ID,
                 data_model_types::KUNDEFINED_FABRIC_INDEX,
+                case_auth_tag::CATValues,
             },
             support::{
                 pool::{size_guard, ObjectPool, BitMapObjectPool},
@@ -17,9 +18,13 @@ use crate::{
             },
             secure_session::{self, SecureSession, AsMut, AsRef},
         },
+        messaging::reliable_message_protocol_config::ReliableMessageProtocolConfig,
+        NodeId, FabricIndex, ScopeNodeid,
     },
     verify_or_die,
 };
+
+use core::ptr;
 
 const K_MAX_SESSION_ID: u16 = u16::MAX;
 const K_UNSECURED_SESSION_ID: u16 = 0;
@@ -59,6 +64,38 @@ impl SecureSessionTable {
         self.m_next_session_id = crate::chip::crypto::get_rand_u16();
     }
 
+    pub fn create_new_secure_session_for_test(&mut self, secure_session_type: secure_session::Type, local_session_id: u16, local_node_id: NodeId,
+        peer_node_id: NodeId, peer_cats: CATValues, peer_session_id: u16, fabric_index: FabricIndex, config: &ReliableMessageProtocolConfig) -> Option<SharedSession>
+    {
+        match secure_session_type {
+            secure_session::Type::Kcase => {
+                if (fabric_index == KUNDEFINED_FABRIC_INDEX) || (local_node_id == KUNDEFINED_NODE_ID) || (peer_node_id == KUNDEFINED_NODE_ID) {
+                    return None;
+                }
+            },
+            secure_session::Type::Kpase => {
+                if (fabric_index != KUNDEFINED_FABRIC_INDEX) || (local_node_id != KUNDEFINED_NODE_ID) || (peer_node_id != KUNDEFINED_NODE_ID) {
+                    verify_or_die!(false);
+                    return None;
+                }
+            },
+        }
+
+        let shared_session = new_shared_session(Session::new_secure_with(SecureSession::new_with_test(ptr::addr_of_mut!(*self), secure_session_type,
+            local_session_id, local_node_id, peer_node_id, peer_cats, peer_session_id, fabric_index, config)), ptr::addr_of_mut!(self.m_entries_pool)).ok()?;
+
+        for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
+            *session = Some(shared_session.clone());
+            break;
+        }
+
+        Some(shared_session)
+    }
+
+    pub fn create_new_secure_session(&mut self, secure_session_type: secure_session::Type, session_eviction_hint: ScopeNodeid) -> Option<SharedSession>
+    {
+    }
+
     pub fn for_each_session<F>(&mut self, mut f: F)
         where
             F: FnOnce(&SharedSession) + FnMut(&SharedSession)
@@ -86,38 +123,72 @@ impl SecureSessionTable {
             }
 
             let is_renew = {
+                let is_renew: bool;
                 if let Ok(old_session) = old_session_handle.try_ref() {
                     if let Some(old_secure_session) = old_session.as_ref() {
                         if let Ok(target_session) = target_session_handle.try_ref() {
                             if let Some(target_secure_session) = target_session.as_ref() {
                                 if old_secure_session.get_secure_session_type() == secure_session::Type::Kcase && old_secure_session.get_peer() == target_secure_session.get_peer() &&
-                                    old_secure_session.get_peer_cats() == target_secure_session.get_peer_cats()
+                                    *old_secure_session.get_peer_cats() == *target_secure_session.get_peer_cats()
                                 {
-                                    true;
+                                    is_renew = true;
                                 } else {
-                                    false;
+                                    is_renew = false;
                                 }
                             } else {
-                                false;
+                                is_renew = false;
                             }
                         } else {
-                            false;
+                            is_renew = false;
                         }
                     } else {
-                        false;
+                        is_renew = false;
                     }
                 } else {
-                    false;
+                    is_renew = false;
                 }
+
+                is_renew
             };
             // This will give all SessionHolders pointing to oldSession a chance to switch to the provided session
             //
             // See documentation for SessionDelegate::GetNewSessionHandlingPolicy about how session auto-shifting works, and how
             // to disable it for a specific SessionHolder in a specific scenario.
             if is_renew {
-                let handle = SessionHandle::new_with(old_session_handle);
-                secure_session::newer_session_available(handle, target_session_handle);
+                secure_session::newer_session_available(old_session_handle, target_session_handle);
             }
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_one_session_successfully() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 0, KUNDEFINED_NODE_ID + 1, KUNDEFINED_NODE_ID + 1,
+                cat, 1, KUNDEFINED_FABRIC_INDEX + 1, &config).is_some());
+    }
+
+    #[test]
+    fn new_two_session_successfully() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 0, KUNDEFINED_NODE_ID + 1, KUNDEFINED_NODE_ID + 1,
+                cat, 1, KUNDEFINED_FABRIC_INDEX + 1, &config).is_some());
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 1, KUNDEFINED_NODE_ID + 2, KUNDEFINED_NODE_ID + 2,
+                cat, 3, KUNDEFINED_FABRIC_INDEX + 2, &config).is_some());
+    }
+} // end of tests
