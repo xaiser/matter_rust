@@ -7,6 +7,7 @@ use crate::{
                 case_auth_tag::CATValues,
             },
             support::{
+                iterators::Loop,
                 pool::{size_guard, ObjectPool, BitMapObjectPool},
             },
         },
@@ -19,7 +20,7 @@ use crate::{
             secure_session::{self, SecureSession, AsMut, AsRef},
         },
         messaging::reliable_message_protocol_config::ReliableMessageProtocolConfig,
-        NodeId, FabricIndex, ScopeNodeid,
+        NodeId, FabricIndex, ScopedNodeId,
     },
     verify_or_die,
 };
@@ -92,20 +93,24 @@ impl SecureSessionTable {
         Some(shared_session)
     }
 
+    /*
     pub fn create_new_secure_session(&mut self, secure_session_type: secure_session::Type, session_eviction_hint: ScopeNodeid) -> Option<SharedSession>
     {
     }
+    */
 
-    pub fn for_each_session<F>(&mut self, mut f: F)
+    pub fn for_each_session<F>(&mut self, mut f: F) -> Loop
         where
-            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
     {
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
-            {
-                let session_ref = session.as_mut().unwrap();
-                f(session_ref);
+            let session_ref = session.as_mut().unwrap();
+            if f(session_ref) == Loop::Break {
+                return Loop::Break;
             }
         }
+
+        Loop::Finish
     }
 
     pub fn retain(&mut self, _session_handle: &SessionHandle) {
@@ -158,6 +163,39 @@ impl SecureSessionTable {
                 secure_session::newer_session_available(old_session_handle, target_session_handle);
             }
         }
+    }
+
+    fn find_unused_session_id(&self) -> Option<u16> {
+        let mut candidate_base = 0u16;
+        let mut candidate_mask = 0u64;
+
+        for i in (0..=K_MAX_SESSION_ID).step_by(64) {
+            // candidate_base is the base session ID we are searching from.
+            // We have a 64-bit mask anchored at this ID and iterate over the
+            // whole session table, setting bits in the mask for in-use IDs.
+            // If we can iterate through the entire session table and have
+            // any bits clear in the mask, we have available session IDs.
+            candidate_base = (i as u32 + self.m_next_session_id as u32) as u16;
+            candidate_mask = 0;
+            let shift = (K_UNSECURED_SESSION_ID - candidate_base) as u16;
+            if shift <= 63 {
+                candidate_mask |= (1 << shift);
+            }
+
+            self.for_each_session(|session| {
+                let shift = (session.get_local_session_id() - candidate_base) as u16;
+                if shift <= 63 {
+                    candidate_mask |= (1 << shift);
+                }
+                if candidate_mask == u64::MAX {
+                    return Loop::Break;
+                }
+                
+                Loop::Continue
+            });
+        }
+
+        None
     }
 }
 
