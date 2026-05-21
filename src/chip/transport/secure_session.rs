@@ -27,7 +27,7 @@ use crate::{
 
 use crate::{
     ChipErrorResult,
-    ChipError,
+    //ChipError,
     chip_ok,
     chip_sdk_error,
     chip_core_error,
@@ -35,10 +35,10 @@ use crate::{
     //chip_error_incorrect_state,
     chip_error_invalid_argument,
     //chip_error_duplicate_message_received,
-    chip_error_internal,
+    //chip_error_internal,
     verify_or_die,
-    verify_or_return_error,
-    verify_or_return_value,
+    //verify_or_return_error,
+    //verify_or_return_value,
 };
 
 use crate::chip_internal_log;
@@ -315,7 +315,7 @@ impl SecureSession {
     }
 
     pub fn new_with(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16) -> Self {
-        let mut s = Self {
+        let s = Self {
             m_holders: new_session_holder_list(),
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
@@ -557,7 +557,7 @@ fn inner_activate(session_handle: &mut SessionHandle, table: &mut SecureSessionT
 {
     if let Ok(mut session) = session_handle.try_mut() {
         let ss: Option<&mut SecureSession> = session.as_mut();
-        if let Some(mut secure_session) = ss {
+        if let Some(secure_session) = ss {
             secure_session.activate(local_node, peer_node, peer_cats, peer_session_id, session_parameters);
         } else {
             panic!("only secure session can be activated");
@@ -591,7 +591,7 @@ pub fn mark_for_evication(session_handle: SessionHandle) {
 
 fn inner_mark_for_evication(mut session_handle: SessionHandle, table: &mut SecureSessionTable) {
     let op = {
-        if let Ok(mut session) = session_handle.try_mut() {
+        if let Ok(session) = session_handle.try_mut() {
             if let Some(secure_session) = session.as_ref() {
                 chip_log_detail!(Inet, "SecureSession[{:p}]: MarkForEviction Type: {} LSID:{}", secure_session, secure_session.m_secure_session_type as u8, secure_session.m_local_session_id.get().cloned().unwrap_or(0));
 
@@ -647,7 +647,6 @@ pub fn newer_session_available(session_handle: SessionHandle, new_session: &Sess
             } else {
                 // sholdn't reach here
                 panic!("get not get holder in list");
-                break;
             }
         }
     } else {

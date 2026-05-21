@@ -46,7 +46,9 @@ impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
 
     #[inline]
     unsafe fn from_raw(&self, raw: *const T) -> UnsafeRef<T> {
-        UnsafeRef::from_raw(raw as *mut T)
+        unsafe {
+            UnsafeRef::from_raw(raw as *mut T)
+        }
     }
 
     #[inline]
@@ -141,7 +143,7 @@ where
     }
 
     let holder = PointerGuard {
-        pointer: ManuallyDrop::new(pointer_ops.from_raw(ptr)),
+        pointer: unsafe { ManuallyDrop::new(pointer_ops.from_raw(ptr)) },
         pointer_ops,
     };
     holder.pointer.deref().clone()

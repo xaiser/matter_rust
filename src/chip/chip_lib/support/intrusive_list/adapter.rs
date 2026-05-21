@@ -96,7 +96,9 @@ pub mod linked_list {
                 // the assumption is the link is always the first element in the value. So just
                 // convert the pointer directly
 
-                core::ptr::NonNull::new_unchecked(value as * mut _)
+                unsafe {
+                    core::ptr::NonNull::new_unchecked(value as * mut _)
+                }
             }
 
             #[inline]
@@ -163,7 +165,9 @@ pub mod linked_list {
                 // the assumption is the link is always the first element in the value. So just
                 // convert the pointer directly
 
-                core::ptr::NonNull::new_unchecked(value as * mut _)
+                unsafe {
+                    core::ptr::NonNull::new_unchecked(value as * mut _)
+                }
             }
 
             #[inline]

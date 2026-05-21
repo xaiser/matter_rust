@@ -8,7 +8,7 @@ use crate::chip::{
             data_model_types::KUNDEFINED_FABRIC_INDEX,
         },
         support::{
-            pool::{size_guard, ObjectPool, BitMapObjectPool},
+            pool::ObjectPool,
         },
     },
     transport::{
@@ -29,7 +29,6 @@ use crate::chip::{
 };
 
 use crate::{
-    ChipErrorResult,
     ChipError,
     chip_ok,
     chip_sdk_error,
@@ -45,7 +44,7 @@ use crate::{
 };
 
 use core::{
-    ptr::{self, NonNull},
+    ptr,
     cell::OnceCell,
 };
 

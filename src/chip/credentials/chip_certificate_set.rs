@@ -131,7 +131,7 @@ mod chip_certificate_set {
         fn clear(&mut self) {
             for cert in self.m_certs_internal_storage.iter_mut() {
                 //cert.clear();
-                if let Some(ref mut c) = cert {
+                if let Some(c) = cert {
                     c.clear();
                 }
                 *cert = None;

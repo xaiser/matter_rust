@@ -3,14 +3,6 @@ use crate::{
     chip_internal_log, chip_log_error, chip_internal_log_impl,
     chip::{
         access::subject_descriptor::SubjectDescriptor,
-        chip_lib::{
-            support::{
-                intrusive_list::{
-                    unsafe_ref::UnsafeRef,
-                    linked_list::LinkedList,
-                }
-            },
-        },
         messaging::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
             session_parameters::SessionParameters,

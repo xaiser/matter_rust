@@ -113,6 +113,20 @@ impl SecureSessionTable {
         Loop::Finish
     }
 
+    pub fn for_each_session_const<F>(&self, mut f: F) -> Loop
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        for session in self.m_entries.iter().filter(|s| s.is_some()) {
+            let session_ref = session.as_ref().unwrap();
+            if f(session_ref) == Loop::Break {
+                return Loop::Break;
+            }
+        }
+
+        Loop::Finish
+    }
+
     pub fn retain(&mut self, _session_handle: &SessionHandle) {
     }
 
@@ -179,19 +193,27 @@ impl SecureSessionTable {
             candidate_mask = 0;
             let shift = (K_UNSECURED_SESSION_ID - candidate_base) as u16;
             if shift <= 63 {
-                candidate_mask |= (1 << shift);
+                candidate_mask |= 1 << shift;
             }
 
-            self.for_each_session(|session| {
-                let shift = (session.get_local_session_id() - candidate_base) as u16;
-                if shift <= 63 {
-                    candidate_mask |= (1 << shift);
-                }
-                if candidate_mask == u64::MAX {
+            self.for_each_session_const(|session| {
+                if let Ok(s_ref) = session.try_borrow() &&
+                  let Some(ss) = s_ref.as_ref() 
+                {
+                    //let shift = (session.get_local_session_id() - candidate_base) as u16;
+                    let shift = (ss.get_local_session_id() - candidate_base) as u16;
+                    if shift <= 63 {
+                        candidate_mask |= 1 << shift;
+                    }
+                    if candidate_mask == u64::MAX {
+                        return Loop::Break;
+                    }
+                    
+                    Loop::Continue
+                } else {
+                    verify_or_die!(false);
                     return Loop::Break;
                 }
-                
-                Loop::Continue
             });
         }
 

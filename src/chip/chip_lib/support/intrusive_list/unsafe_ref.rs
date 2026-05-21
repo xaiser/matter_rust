@@ -8,8 +8,10 @@ pub struct UnsafeRef<T: ?Sized> {
 
 impl<T: ?Sized> UnsafeRef<T> {
     pub unsafe fn from_raw(val: * const T) -> Self {
-        UnsafeRef {
-            ptr: NonNull::new_unchecked(val as * mut _)
+        unsafe {
+            UnsafeRef {
+                    ptr: NonNull::new_unchecked(val as * mut _)
+            }
         }
     }
 

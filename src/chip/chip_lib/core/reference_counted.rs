@@ -270,7 +270,9 @@ pub mod rc {
 
         #[inline]
         unsafe fn from_ptr_in(ptr: * mut RcInner<T>, alloc: * mut A) -> Self {
-            Self { ptr: NonNull::new_unchecked(ptr), alloc, _phantom: PhantomData }
+            unsafe {
+                Self { ptr: NonNull::new_unchecked(ptr), alloc, _phantom: PhantomData }
+            }
         }
 
         #[inline(always)]

@@ -54,34 +54,46 @@ unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
-        if ptr.as_ref().is_linked() {
-            false
-        } else {
-            ptr.as_ref().next.set(None);
-            true
+        unsafe {
+            if ptr.as_ref().is_linked() {
+                false
+            } else {
+                ptr.as_ref().next.set(None);
+                true
+            }
         }
     }
 
     unsafe fn release_link(&mut self, ptr: Self::LinkPtr) {
-        ptr.as_ref().next.set(UNLINKED_MARKER)
+        unsafe {
+            ptr.as_ref().next.set(UNLINKED_MARKER)
+        }
     }
 }
 
 unsafe impl LinkedListOps for LinkOps {
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        ptr.as_ref().next.get()
+        unsafe {
+            ptr.as_ref().next.get()
+        }
     }
 
     unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        ptr.as_ref().prev.get()
+        unsafe {
+            ptr.as_ref().prev.get()
+        }
     }
 
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        ptr.as_ref().next.set(next)
+        unsafe {
+            ptr.as_ref().next.set(next)
+        }
     }
 
     unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
-        ptr.as_ref().prev.set(prev)
+        unsafe {
+            ptr.as_ref().prev.set(prev)
+        }
     }
 }
 
@@ -120,47 +132,57 @@ unsafe fn link_between<T: LinkedListOps>(
     prev: Option<T::LinkPtr>,
     next: Option<T::LinkPtr>,
 ) {
-    if let Some(p) = prev {
-        link_ops.set_next(p, Some(ptr));
-    }
-    if let Some(n) = next {
-        link_ops.set_prev(n, Some(ptr));
-    }
+    unsafe {
+        if let Some(p) = prev {
+            link_ops.set_next(p, Some(ptr));
+        }
+        if let Some(n) = next {
+            link_ops.set_prev(n, Some(ptr));
+        }
 
-    link_ops.set_next(ptr, next);
-    link_ops.set_prev(ptr, prev);
+        link_ops.set_next(ptr, next);
+        link_ops.set_prev(ptr, prev);
+    }
 }
 
 #[inline]
 unsafe fn link_after<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, prev: T::LinkPtr) {
-    link_between(link_ops, ptr, Some(prev), link_ops.next(prev));
+    unsafe {
+        link_between(link_ops, ptr, Some(prev), link_ops.next(prev));
+    }
 }
 
 #[inline]
 unsafe fn link_before<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, next: T::LinkPtr) {
-    link_between(link_ops, ptr, link_ops.prev(next), Some(next));
+    unsafe {
+        link_between(link_ops, ptr, link_ops.prev(next), Some(next));
+    }
 }
 
 #[inline]
 unsafe fn replace_with<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, new: T::LinkPtr) {
-    link_between(link_ops, new, link_ops.prev(ptr), link_ops.next(ptr));
+    unsafe {
+        link_between(link_ops, new, link_ops.prev(ptr), link_ops.next(ptr));
 
-    link_ops.release_link(ptr);
+        link_ops.release_link(ptr);
+    }
 }
 
 #[inline]
 unsafe fn remove<T: LinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr) {
-    let prev = link_ops.prev(ptr);
-    let next = link_ops.next(ptr);
+    unsafe {
+        let prev = link_ops.prev(ptr);
+        let next = link_ops.next(ptr);
 
-    if let Some(p) = prev {
-        link_ops.set_next(p, next);
-    }
-    if let Some(n) = next {
-        link_ops.set_prev(n, prev);
-    }
+        if let Some(p) = prev {
+            link_ops.set_next(p, next);
+        }
+        if let Some(n) = next {
+            link_ops.set_prev(n, prev);
+        }
 
-    link_ops.release_link(ptr);
+        link_ops.release_link(ptr);
+    }
 }
 
 #[inline]
@@ -171,13 +193,15 @@ unsafe fn splice<T: LinkedListOps>(
     prev: Option<T::LinkPtr>,
     next: Option<T::LinkPtr>,
 ) {
-    link_ops.set_prev(start, prev);
-    link_ops.set_next(end, next);
-    if let Some(prev) = prev {
-        link_ops.set_next(prev, Some(start));
-    }
-    if let Some(next) = next {
-        link_ops.set_prev(next, Some(end));
+    unsafe {
+        link_ops.set_prev(start, prev);
+        link_ops.set_next(end, next);
+        if let Some(prev) = prev {
+            link_ops.set_next(prev, Some(start));
+        }
+        if let Some(next) = next {
+            link_ops.set_prev(next, Some(end));
+        }
     }
 }
 
@@ -754,9 +778,11 @@ where
         &self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
     ) -> Cursor<'_, A> {
-        Cursor {
-            current: Some(self.adapter.get_link(ptr)),
-            list: self,
+        unsafe {
+            Cursor {
+                current: Some(self.adapter.get_link(ptr)),
+                list: self,
+            }
         }
     }
 
@@ -770,9 +796,11 @@ where
         &mut self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
     ) -> CursorMut<'_, A> {
-        CursorMut {
-            current: Some(self.adapter.get_link(ptr)),
-            list: self,
+        unsafe {
+            CursorMut {
+                current: Some(self.adapter.get_link(ptr)),
+                list: self,
+            }
         }
     }
 
