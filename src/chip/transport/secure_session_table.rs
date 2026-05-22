@@ -23,12 +23,44 @@ use crate::{
         NodeId, FabricIndex, ScopedNodeId,
     },
     verify_or_die,
+    chip_static_assert,
 };
 
 use core::ptr;
 
 const K_MAX_SESSION_ID: u16 = u16::MAX;
 const K_UNSECURED_SESSION_ID: u16 = 0;
+
+struct SortableSession {
+    m_session: SessionHandle,
+    m_num_matching_on_fabric: u16,
+    m_num_matching_on_peer: u16,
+}
+
+impl SortableSession {
+    const fn new(session: SessionHandle) -> Self {
+        chip_static_assert!(POOL_SIZE <= u16::MAX as usize);
+        Self {
+            m_session: session,
+            m_num_matching_on_fabric: 0,
+            m_num_matching_on_peer: 0,
+        }
+    }
+}
+
+struct EvictionPoilcyContext<'a> {
+    m_session_list: &'a mut [SortableSession],
+    m_session_eviction_hint: ScopedNodeId,
+}
+
+impl<'a> EvictionPoilcyContext<'a> {
+    const fn new(session_list: &'a mut [SortableSession], session_eviction_hint: ScopedNodeId) -> Self {
+        Self {
+            m_session_list: session_list,
+            m_session_eviction_hint: session_eviction_hint,
+        }
+    }
+}
 
 pub struct SecureSessionTable {
     m_running_eviction_logic: bool,
@@ -191,7 +223,7 @@ impl SecureSessionTable {
             // any bits clear in the mask, we have available session IDs.
             candidate_base = (i as u32 + self.m_next_session_id as u32) as u16;
             candidate_mask = 0;
-            let shift = (K_UNSECURED_SESSION_ID - candidate_base) as u16;
+            let shift = K_UNSECURED_SESSION_ID.wrapping_sub(candidate_base);
             if shift <= 63 {
                 candidate_mask |= 1 << shift;
             }
@@ -201,7 +233,7 @@ impl SecureSessionTable {
                   let Some(ss) = s_ref.as_ref() 
                 {
                     //let shift = (session.get_local_session_id() - candidate_base) as u16;
-                    let shift = (ss.get_local_session_id() - candidate_base) as u16;
+                    let shift = ss.get_local_session_id().wrapping_sub(candidate_base);
                     if shift <= 63 {
                         candidate_mask |= 1 << shift;
                     }
@@ -215,6 +247,20 @@ impl SecureSessionTable {
                     return Loop::Break;
                 }
             });
+
+            if u64::from(candidate_base) != u64::MAX {
+                break;
+            }
+        }
+
+        if u64::from(candidate_mask) != u64::MAX {
+            let mut offset = 0u16;
+            while 1 == (candidate_mask & 1) {
+                candidate_mask >>= 1;
+                offset += 1;
+            }
+
+            return Some(candidate_base.wrapping_add(offset));
         }
 
         None
@@ -250,5 +296,46 @@ mod tests {
 
         assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 1, KUNDEFINED_NODE_ID + 2, KUNDEFINED_NODE_ID + 2,
                 cat, 3, KUNDEFINED_FABRIC_INDEX + 2, &config).is_some());
+    }
+
+    #[test]
+    fn next_unused_session_id_from_0() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+        table.m_next_session_id = K_UNSECURED_SESSION_ID;
+
+        assert!(table.find_unused_session_id().is_some_and(|id| id == K_UNSECURED_SESSION_ID + 1));
+    }
+
+    #[test]
+    fn next_unused_session_id_from_1() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+
+        // to simulate a session with id = 65535
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 1, KUNDEFINED_NODE_ID + 1, KUNDEFINED_NODE_ID + 1,
+                cat, 1, KUNDEFINED_FABRIC_INDEX + 1, &config).is_some());
+        table.m_next_session_id = 1;
+
+        assert!(table.find_unused_session_id().is_some_and(|id| id == 2));
+    }
+
+    #[test]
+    fn next_unused_session_id_from_max() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+
+        // to simulate a session with id = 65535
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, u16::MAX, KUNDEFINED_NODE_ID + 1, KUNDEFINED_NODE_ID + 1,
+                cat, 1, KUNDEFINED_FABRIC_INDEX + 1, &config).is_some());
+        table.m_next_session_id = u16::MAX;
+
+        assert!(table.find_unused_session_id().is_some_and(|id| id == K_UNSECURED_SESSION_ID + 1));
     }
 } // end of tests
