@@ -26,7 +26,14 @@ use crate::{
     chip_static_assert,
 };
 
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_error;
+use crate::chip_log_progress;
+use core::str::FromStr;
+
 use core::ptr;
+use core::cell::Cell;
 
 const K_MAX_SESSION_ID: u16 = u16::MAX;
 const K_UNSECURED_SESSION_ID: u16 = 0;
@@ -46,6 +53,14 @@ impl SortableSession {
             m_num_matching_on_peer: 0,
         }
     }
+
+    fn get_num_matching_on_fabric(&self) -> u16 {
+        self.m_num_matching_on_fabric
+    }
+
+    fn get_num_matching_on_peer(&self) -> u16 {
+        self.m_num_matching_on_peer
+    }
 }
 
 struct EvictionPoilcyContext<'a> {
@@ -63,7 +78,7 @@ impl<'a> EvictionPoilcyContext<'a> {
 }
 
 pub struct SecureSessionTable {
-    m_running_eviction_logic: bool,
+    m_running_eviction_logic: Cell<bool>,
     m_entries: [Option<SharedSession>; POOL_SIZE],
     m_entries_pool: Pool,
     m_next_session_id: u16,
@@ -86,7 +101,7 @@ impl Drop for SecureSessionTable {
 impl SecureSessionTable {
     pub const fn new() -> Self {
         SecureSessionTable {
-            m_running_eviction_logic: false,
+            m_running_eviction_logic: Cell::new(false),
             m_entries: [const { None }; POOL_SIZE],
             m_entries_pool: new_session_alloactor(),
             m_next_session_id: K_UNSECURED_SESSION_ID,
@@ -209,6 +224,69 @@ impl SecureSessionTable {
                 secure_session::newer_session_available(old_session_handle, target_session_handle);
             }
         }
+    }
+
+    fn default_eviction_policy(a: &SortableSession, b: &SortableSession) -> core::cmp::Ordering {
+        if let Ok(a_borrow) = a.m_session.try_ref() &&
+            let Ok(b_borrow) = b.m_session.try_ref() &&
+                let Some(a_secure) = a_borrow.as_ref() &&
+                let Some(b_secure) = b_borrow.as_ref()
+        {
+            if a.m_num_matching_on_fabric != b.m_num_matching_on_fabric {
+                return a.m_num_matching_on_fabric.cmp(&b.m_num_matching_on_fabric);
+            }
+
+            core::cmp::Ordering::Equal
+        } else {
+            core::cmp::Ordering::Equal
+        }
+    }
+
+    fn evict_and_allocate(&mut self, local_session_id: u16, secure_session_type: secure_session::Type, session_eviction_hint: &ScopedNodeId) -> Option<SharedSession> {
+        // TODO: add verify_or_die_with_msg
+        // TODO: ensure no re-enter from more high level
+        chip_log_progress!(SecureChannel, "evicting a slot for session with LSID {}, type {}", local_session_id, secure_session_type as u8);
+
+        // TODO why do we need this?
+        //verify_or_die!(self.allocated() <= POOL_SIZE);
+
+        let mut sortable_sessions: [Option<SortableSession>; POOL_SIZE] = [const { None }; POOL_SIZE];
+        let mut index = 0usize;
+
+        self.for_each_session_const(|session| {
+            let mut sortable_session = SortableSession::new(SessionHandle::new_with(session));
+
+            self.for_each_session_const(|other_session| {
+                if !SharedSession::ptr_eq(session, other_session) {
+                    if let Ok(a_borrow) = session.try_borrow() &&
+                        let Ok(b_borrow) = other_session.try_borrow() &&
+                            let Some(a_s) = a_borrow.as_ref() &&
+                            let Some(b_s) = b_borrow.as_ref()
+                    {
+                        if a_s.get_fabric_index() == b_s.get_fabric_index() {
+                            sortable_session.m_num_matching_on_fabric += 1;
+                            if a_s.get_peer_node_id() == b_s.get_peer_node_id() {
+                                sortable_session.m_num_matching_on_peer += 1;
+                            }
+                        }
+                    }
+                }
+                Loop::Continue
+            });
+            sortable_sessions[index] = Some(sortable_session);
+            index += 1;
+            Loop::Continue
+        });
+
+        None
+    }
+
+    fn allocated(&self) -> usize {
+        let mut count = 0usize;
+
+        self.for_each_session_const(|session| { count += 1; Loop::Continue } );
+
+        count
     }
 
     fn find_unused_session_id(&self) -> Option<u16> {

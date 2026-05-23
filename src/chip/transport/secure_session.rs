@@ -416,6 +416,10 @@ impl SecureSession {
         self.m_is_case_commissioning_session = is_case_commissioning_session;
     }
 
+    pub fn get_peer_node_id(&self) -> NodeId {
+        self.m_peer_node_id
+    }
+
     fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
         session_parameters: &SessionParameters)
     {
