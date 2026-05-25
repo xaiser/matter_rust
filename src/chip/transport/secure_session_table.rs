@@ -75,6 +75,10 @@ impl<'a> EvictionPoilcyContext<'a> {
             m_session_eviction_hint: session_eviction_hint,
         }
     }
+
+    fn get_session_eviction_hint(&self) -> &ScopedNodeId {
+        &self.m_session_eviction_hint
+    }
 }
 
 pub struct SecureSessionTable {
@@ -226,22 +230,6 @@ impl SecureSessionTable {
         }
     }
 
-    fn default_eviction_policy(a: &SortableSession, b: &SortableSession) -> core::cmp::Ordering {
-        if let Ok(a_borrow) = a.m_session.try_ref() &&
-            let Ok(b_borrow) = b.m_session.try_ref() &&
-                let Some(a_secure) = a_borrow.as_ref() &&
-                let Some(b_secure) = b_borrow.as_ref()
-        {
-            if a.m_num_matching_on_fabric != b.m_num_matching_on_fabric {
-                return a.m_num_matching_on_fabric.cmp(&b.m_num_matching_on_fabric);
-            }
-
-            core::cmp::Ordering::Equal
-        } else {
-            core::cmp::Ordering::Equal
-        }
-    }
-
     fn evict_and_allocate(&mut self, local_session_id: u16, secure_session_type: secure_session::Type, session_eviction_hint: &ScopedNodeId) -> Option<SharedSession> {
         // TODO: add verify_or_die_with_msg
         // TODO: ensure no re-enter from more high level
@@ -277,6 +265,8 @@ impl SecureSessionTable {
             index += 1;
             Loop::Continue
         });
+
+        //let policy_context = EvictionPoilcyContext::new(&mut sortable_sessions[..index], session_eviction_hint);
 
         None
     }
@@ -342,6 +332,92 @@ impl SecureSessionTable {
         }
 
         None
+    }
+
+    fn default_eviction_policy(eviction_context: &mut EvictionPoilcyContext) {
+        let eviction_hint_index = eviction_context.get_session_eviction_hint().get_fabric_index();
+        eviction_context.m_session_list.sort_by(|a, b| {
+            if let Ok(session_a) = a.m_session.try_ref() &&
+                let Ok(session_b) = b.m_session.try_ref() &&
+                    let Some(sa) = session_a.as_ref() &&
+                    let Some(sb) = session_b.as_ref()
+            {
+                //
+                // Sorting on Key1
+                //
+                if a.m_num_matching_on_fabric != b.m_num_matching_on_fabric {
+                    //return a.m_num_matching_on_fabric.cmp(&b.m_num_matching_on_fabric);
+                    return b.m_num_matching_on_fabric.cmp(&a.m_num_matching_on_fabric);
+                }
+
+                let does_a_match_session_hint_fabric = sa.get_peer().get_fabric_index() == eviction_hint_index;
+                let does_b_match_session_hint_fabric = sb.get_peer().get_fabric_index() == eviction_hint_index;
+
+
+                //
+                // Sorting on Key2
+                //
+                if does_a_match_session_hint_fabric != does_b_match_session_hint_fabric {
+                    return does_a_match_session_hint_fabric.cmp(&does_b_match_session_hint_fabric);
+                }
+
+                // We have an evicton hint in two cases:
+                //
+                // 1) When we just established CASE as a responder, the hint is the node
+                //    we just established CASE to.
+                // 2) When starting to establish CASE as an initiator, the hint is the
+                //    node we are going to establish CASE to.
+                //
+                // In case 2, we should not end up here if there is an active session to
+                // the peer at all (because that session should have been used instead
+                // of establishing a new one).
+                //
+                // In case 1, we know we have a session matching the hint, but we don't
+                // want to pick that one for eviction, because we just established it.
+                // So we should not consider a session as matching a hint if it's active
+                // and is the only session to our peer.
+                //
+                // Checking for the "active" state in addition to the "only session to
+                // peer" state allows us to prioritize evicting defuct sessions that
+                // match the hint against other defunct sessions.
+                let mut a_state_score = 0u32;
+                let mut b_state_score = 0u32;
+
+                //
+                // Sorting on Key4
+                //
+                fn assign_state_score(score: &mut u32, session: &SecureSession) {
+                    if session.is_defunct() {
+                        *score = 2;
+                    } else if session.is_active_session() {
+                        *score = 1;
+                    } else {
+                        *score = 0;
+                    }
+                }
+
+                assign_state_score(&mut a_state_score, sa);
+                assign_state_score(&mut b_state_score, sb);
+
+                //
+                // Sorting on Key5
+                //
+                if a_state_score != b_state_score {
+                    return a_state_score.cmp(&b_state_score);
+                }
+
+                //
+                // Sorting on Key6
+                //
+                sa.get_last_activity_time().cmp(&sb.get_last_activity_time())
+            } else {
+                // should not reach here
+                chip_log_error!(SecureChannel, "cannot convert to secure session");
+                verify_or_die!(false);
+
+                core::cmp::Ordering::Equal
+            }
+        });
     }
 }
 
@@ -415,5 +491,42 @@ mod tests {
         table.m_next_session_id = u16::MAX;
 
         assert!(table.find_unused_session_id().is_some_and(|id| id == K_UNSECURED_SESSION_ID + 1));
+    }
+
+    #[test]
+    fn sort_session_with_key_1() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let a_fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+        let b_fabric_index = KUNDEFINED_FABRIC_INDEX + 2;
+
+        let a = table.create_new_secure_session_for_test(secure_session::Type::Kcase, u16::MAX, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 1, cat, 1, a_fabric_index, &config);
+        assert!(a.is_some());
+        let a = a.unwrap();
+
+        let a_copy = SessionHandle::new_with(&a);
+
+        let b = table.create_new_secure_session_for_test(secure_session::Type::Kcase, u16::MAX, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 1, cat, 1, b_fabric_index, &config);
+        assert!(b.is_some());
+        let b = b.unwrap();
+
+        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+        // to simulate different number of matching fabric
+        sort_b.m_num_matching_on_fabric += 1;
+
+        let mut sortable_sessions = [sort_a, sort_b];
+
+        let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
+
+        SecureSessionTable::default_eviction_policy(&mut eviction_context);
+
+        // a matches less fabric, so it got swappwd
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
     }
 } // end of tests

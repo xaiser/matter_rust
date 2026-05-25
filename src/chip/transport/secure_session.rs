@@ -489,7 +489,8 @@ impl SecureSession {
         }
     }
 
-    fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
+    pub fn get_last_activity_time(&self) -> Timestamp { self.m_last_activity_time }
+    pub fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
     #[inline]
     pub fn get_peer_cats(&self) -> &CATValues {
