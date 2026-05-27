@@ -337,17 +337,24 @@ impl SecureSessionTable {
     fn default_eviction_policy(eviction_context: &mut EvictionPoilcyContext) {
         let eviction_hint_index = eviction_context.get_session_eviction_hint().get_fabric_index();
         let eviction_hint_id = eviction_context.get_session_eviction_hint().clone();
+        /*
+        for s in &mut *eviction_context.m_session_list {
+            if let Ok(session_a) = s.m_session.try_ref() &&
+                let Some(sa) = session_a.as_ref() 
+            {
+                chip_log_error!(SecureChannel, "{:?}({}) ", sa.get_peer(), sa.get_local_session_id());
+            }
+        }
+        */
         eviction_context.m_session_list.sort_by(|a, b| {
             if let Ok(session_a) = a.m_session.try_ref() &&
                 let Ok(session_b) = b.m_session.try_ref() &&
                     let Some(sa) = session_a.as_ref() &&
                     let Some(sb) = session_b.as_ref()
             {
-                //
                 // Sorting on Key1
                 //
                 if a.m_num_matching_on_fabric != b.m_num_matching_on_fabric {
-                    //return a.m_num_matching_on_fabric.cmp(&b.m_num_matching_on_fabric);
                     return b.m_num_matching_on_fabric.cmp(&a.m_num_matching_on_fabric);
                 }
 
@@ -359,7 +366,7 @@ impl SecureSessionTable {
                 // Sorting on Key2
                 //
                 if does_a_match_session_hint_fabric != does_b_match_session_hint_fabric {
-                    return does_a_match_session_hint_fabric.cmp(&does_b_match_session_hint_fabric);
+                    return does_b_match_session_hint_fabric.cmp(&does_a_match_session_hint_fabric);
                 }
 
                 //
@@ -389,19 +396,15 @@ impl SecureSessionTable {
                 // peer" state allows us to prioritize evicting defuct sessions that
                 // match the hint against other defunct sessions.
 
-                /*
                 fn session_matches_eviction_hint(hint: &ScopedNodeId, session: &SecureSession, matching_on_peer: u16) -> bool {
-                    chip_log_error!(SecureChannel, "{:?}({}) !=? {:?}", session.get_peer(), session.get_local_session_id(), *hint);
                     if session.get_peer() != *hint {
                         return false;
                     }
                     let is_only_active_session_to_peer = session.is_active_session() && matching_on_peer == 0;
                     return !is_only_active_session_to_peer;
                 }
-                //let does_a_match_session_hint = session_matches_eviction_hint(&eviction_hint_id, sa, a.m_num_matching_on_peer);
-                let does_a_match_session_hint = true;
+                let does_a_match_session_hint = session_matches_eviction_hint(&eviction_hint_id, sa, a.m_num_matching_on_peer);
                 let does_b_match_session_hint = session_matches_eviction_hint(&eviction_hint_id, sb, b.m_num_matching_on_peer);
-                chip_log_error!(SecureChannel, "a {}, b {}", does_a_match_session_hint, does_b_match_session_hint);
 
                 //
                 // Sorting on Key4
@@ -409,7 +412,6 @@ impl SecureSessionTable {
                 if does_a_match_session_hint != does_b_match_session_hint {
                     return does_b_match_session_hint.cmp(&does_a_match_session_hint);
                 }
-                */
 
 
                 let mut a_state_score = 0u32;
@@ -431,7 +433,7 @@ impl SecureSessionTable {
                 // Sorting on Key5
                 //
                 if a_state_score != b_state_score {
-                    return a_state_score.cmp(&b_state_score);
+                    return b_state_score.cmp(&a_state_score);
                 }
 
                 //
@@ -590,8 +592,8 @@ mod tests {
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
-        // "a" is important, therefore got swapped
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+        // "a" is prefer to evict
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].m_session));
     }
 
     #[test]
@@ -666,8 +668,49 @@ mod tests {
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
-        // "a" is important than "b"
+        // "a" is prefered to evit
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].m_session));
+    }
+
+    #[test]
+    fn sort_session_with_key_4_score() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let a_fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+        let b_fabric_index = KUNDEFINED_FABRIC_INDEX + 2;
+
+        let a = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 10, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 2, cat, 1, a_fabric_index, &config);
+        assert!(a.is_some());
+        let a = a.unwrap();
+
+        let a_copy = SessionHandle::new_with(&a);
+
+        let b = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 20, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 3, cat, 1, b_fabric_index, &config);
+        assert!(b.is_some());
+        let b = b.unwrap();
+        // mark b as defunct so a will have higher score
+        if let Ok(mut mb) = b.try_borrow_mut() &&
+            let Some(smb) = mb.as_mut() {
+                smb.mark_as_defunct();
+        } else {
+            assert!(false);
+        }
+
+
+        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+
+        let mut sortable_sessions = [sort_a, sort_b];
+
+        let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
+
+        SecureSessionTable::default_eviction_policy(&mut eviction_context);
+
         assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
-        assert!(false);
     }
 } // end of tests
