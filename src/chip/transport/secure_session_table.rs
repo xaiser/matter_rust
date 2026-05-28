@@ -30,6 +30,7 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_error;
 use crate::chip_log_progress;
+use crate::chip_log_detail;
 use core::str::FromStr;
 
 use core::ptr;
@@ -266,7 +267,28 @@ impl SecureSessionTable {
             Loop::Continue
         });
 
-        //let policy_context = EvictionPoilcyContext::new(&mut sortable_sessions[..index], session_eviction_hint);
+        let mut policy_context = EvictionPoilcyContext::new(&mut sortable_sessions[..index], session_eviction_hint.clone());
+        Self::default_eviction_policy(&mut policy_context);
+        chip_log_progress!(SecureChannel, "Sorted sessions for eviction...");
+
+        {
+            chip_log_detail!(SecureChannel, "Sorted Eviction Candidates (ranked from best candidate to worst):");
+            for (index, ss) in sortable_sessions.iter().enumerate().filter(|(_, s)| s.is_some()) {
+                if let Some(sort_session) = ss &&
+                    let Ok(session) = sort_session.m_session.try_ref() &&
+                        let Some(secure_session) = session.as_ref()
+                {
+                    chip_log_detail!(SecureChannel, "\t {}: [{:p}] -- Peer: [{}:{}] State: '{}', NumMatchingOnFabric {} NumMatchingOnPeer: {} ActivityTime: {}",
+                        index, sort_session, secure_session.get_peer().get_fabric_index(), secure_session.get_peer().get_node_id(),
+                        secure_session.get_state(), sort_session.m_num_matching_on_fabric, sort_session.m_num_matching_on_peer,
+                        secure_session.get_last_activity_time().as_millis()
+                    );
+                }
+            }
+
+        }
+
+        let num_sessions = self.allocated();
 
         None
     }
@@ -454,6 +476,7 @@ impl SecureSessionTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chip::system::system_clock::{set_monotonic_timestamp, Timestamp, get_monotonic_timestamp};
 
     #[test]
     fn new_one_session_successfully() {
@@ -673,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    fn sort_session_with_key_4_score() {
+    fn sort_session_with_key_5() {
         let mut table = SecureSessionTable::new();
         table.init();
 
@@ -697,6 +720,50 @@ mod tests {
         if let Ok(mut mb) = b.try_borrow_mut() &&
             let Some(smb) = mb.as_mut() {
                 smb.mark_as_defunct();
+        } else {
+            assert!(false);
+        }
+
+
+        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+
+        let mut sortable_sessions = [sort_a, sort_b];
+
+        let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
+
+        SecureSessionTable::default_eviction_policy(&mut eviction_context);
+
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+    }
+
+    #[test]
+    fn sort_session_with_key_6() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let a_fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+        let b_fabric_index = KUNDEFINED_FABRIC_INDEX + 2;
+
+        let a = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 10, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 2, cat, 1, a_fabric_index, &config);
+        assert!(a.is_some());
+        let a = a.unwrap();
+
+        let a_copy = SessionHandle::new_with(&a);
+
+        let b = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 20, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 3, cat, 1, b_fabric_index, &config);
+        assert!(b.is_some());
+        let b = b.unwrap();
+
+        // mark a as later activated
+        let _ = set_monotonic_timestamp(Timestamp::from_secs(2));
+        if let Ok(mut ma) = a.try_borrow_mut() &&
+            let Some(sma) = ma.as_mut() {
+                sma.mark_active();
         } else {
             assert!(false);
         }

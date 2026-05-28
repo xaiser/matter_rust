@@ -47,6 +47,12 @@ mod internal {
             Duration::from_millis(ms)
         }
 
+        pub fn set_monotonic_timestamp(a_new_cur_time: Timestamp) -> ChipErrorResult {
+            CLOCK.m_system_time.store(a_new_cur_time.as_millis() as u64, Ordering::Relaxed);
+
+            chip_ok!()
+        }
+
         pub fn get_clock_realtime() -> Result<Micsoseconds, ChipError> {
             let ms = CLOCK.m_real_time.load(Ordering::Relaxed);
 
@@ -60,7 +66,7 @@ mod internal {
         }
     }
 
-    pub use no_op::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime};
+    pub use no_op::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime, set_monotonic_timestamp};
 }// end of internal
 
-pub use internal::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime};
+pub use internal::{init, get_monotonic_timestamp, get_clock_realtime, set_clock_realtime, set_monotonic_timestamp};

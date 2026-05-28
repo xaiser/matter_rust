@@ -61,7 +61,7 @@ pub trait AsRef {
 
 #[derive(PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
-enum State {
+pub enum State {
     //
     // Denotes a secure session object that is internally
     // reserved by the stack before and during session establishment.
@@ -530,7 +530,7 @@ impl SecureSession {
         }
     }
 
-    fn get_state(&self) -> State {
+    pub fn get_state(&self) -> State {
         self.m_state
     }
 }
