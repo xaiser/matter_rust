@@ -78,6 +78,10 @@ mod session_handle {
             self.m_session.try_borrow_mut().map_err(|_| ())
         }
 
+        pub fn is_unique(&self) -> bool {
+            SharedSession::is_unique(&self.m_session)
+        }
+
         pub fn eq(a: &SessionHandle, b: &SessionHandle) -> bool {
             SharedSession::ptr_eq(&a.m_session, &b.m_session)
         }

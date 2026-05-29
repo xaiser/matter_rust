@@ -590,11 +590,12 @@ pub fn mark_for_evication(session_handle: SessionHandle) {
     }
 
     unsafe {
-        inner_mark_for_evication(session_handle, table.as_mut().unwrap());
+        inner_mark_for_evication(session_handle, table.as_mut());
     }
 }
 
-fn inner_mark_for_evication(mut session_handle: SessionHandle, table: &mut SecureSessionTable) {
+// public this function to secrue table
+pub(super) fn inner_mark_for_evication(mut session_handle: SessionHandle, table: Option<&mut SecureSessionTable>) {
     let op = {
         if let Ok(session) = session_handle.try_mut() {
             if let Some(secure_session) = session.as_ref() {
@@ -630,7 +631,9 @@ fn inner_mark_for_evication(mut session_handle: SessionHandle, table: &mut Secur
             session_handle.notify_session_released();
         },
         EvicationOp::Kfullrelease => {
-            table.release(&mut session_handle);
+            if let Some(t) = table {
+                t.release(&mut session_handle);
+            }
             session_handle.try_mut().unwrap().as_mut().unwrap().move_to_state(State::KpendingEviction);
             session_handle.notify_session_released();
         },

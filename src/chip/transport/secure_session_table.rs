@@ -65,12 +65,12 @@ impl SortableSession {
 }
 
 struct EvictionPoilcyContext<'a> {
-    m_session_list: &'a mut [SortableSession],
+    m_session_list: &'a mut [Option<SortableSession>],
     m_session_eviction_hint: ScopedNodeId,
 }
 
 impl<'a> EvictionPoilcyContext<'a> {
-    const fn new(session_list: &'a mut [SortableSession], session_eviction_hint: ScopedNodeId) -> Self {
+    const fn new(session_list: &'a mut [Option<SortableSession>], session_eviction_hint: ScopedNodeId) -> Self {
         Self {
             m_session_list: session_list,
             m_session_eviction_hint: session_eviction_hint,
@@ -182,7 +182,14 @@ impl SecureSessionTable {
     pub fn retain(&mut self, _session_handle: &SessionHandle) {
     }
 
-    pub fn release(&mut self, _secure_session: &SessionHandle) {
+    pub fn release(&mut self, secure_session: &SessionHandle) {
+        for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
+            let handle = SessionHandle::new_with(session.as_ref().unwrap());
+            if SessionHandle::eq(&handle, secure_session) {
+                *session = None;
+                break;
+            }
+        }
     }
 
     pub fn newer_session_available(&mut self, target_session_handle: &mut SessionHandle) {
@@ -271,6 +278,8 @@ impl SecureSessionTable {
         Self::default_eviction_policy(&mut policy_context);
         chip_log_progress!(SecureChannel, "Sorted sessions for eviction...");
 
+        let num_sessions = self.allocated();
+
         {
             chip_log_detail!(SecureChannel, "Sorted Eviction Candidates (ranked from best candidate to worst):");
             for (index, ss) in sortable_sessions.iter().enumerate().filter(|(_, s)| s.is_some()) {
@@ -288,8 +297,56 @@ impl SecureSessionTable {
 
         }
 
-        let num_sessions = self.allocated();
+        for option_ss in &mut sortable_sessions[..index] {
+            if let Some(ss) = option_ss.as_ref() &&
+                let Ok(mut session) = ss.m_session.try_ref() &&
+                    let Some(secure_session) = session.as_ref()
+            {
+                if secure_session.is_pending_eviction() {
+                    continue;
+                }
 
+                chip_log_progress!(SecureChannel, "Candidate Session {:p} - Attempting to evict...", secure_session);
+
+                let prev_count = self.allocated();
+
+                secure_session::inner_mark_for_evication(ss.m_session.clone(), None);
+
+
+                self.release(&ss.m_session);
+            }
+
+            // now this should be very last one handle that hold the to-be-deleted session
+            let sortable_session = option_ss.take();
+            verify_or_die!(sortable_session.is_some_and(|ss| ss.m_session.is_unique()));
+
+            breakhere
+
+                /*
+                let new_count = self.allocated();
+
+                if new_count < prev_count {
+                    chip_log_progress!(SecureChannel, "Successfully evicted a session!");
+
+                    let shared_session = new_shared_session(Session::new_secure_with(SecureSession::new_with(ptr::addr_of_mut!(*self), secure_session_type,
+                        secure_session_type, local_session_id), ptr::addr_of_mut!(self.m_entries_pool)));
+
+                    verify_or_die!(shared_session.is_ok());
+
+                    let shared_session = shared_session.unwrap();
+
+                    for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
+                        *session = Some(shared_session.clone());
+                        break;
+                    }
+
+                    return Some(shared_session);
+                }
+                */
+        }
+
+        chip_log_error!(SecureChannel, "We couldn't find any session to evict at all, something's wrong!");
+        verify_or_die!(false);
         None
     }
 
@@ -359,17 +416,14 @@ impl SecureSessionTable {
     fn default_eviction_policy(eviction_context: &mut EvictionPoilcyContext) {
         let eviction_hint_index = eviction_context.get_session_eviction_hint().get_fabric_index();
         let eviction_hint_id = eviction_context.get_session_eviction_hint().clone();
-        /*
-        for s in &mut *eviction_context.m_session_list {
-            if let Ok(session_a) = s.m_session.try_ref() &&
-                let Some(sa) = session_a.as_ref() 
-            {
-                chip_log_error!(SecureChannel, "{:?}({}) ", sa.get_peer(), sa.get_local_session_id());
+        eviction_context.m_session_list.sort_by(|option_a, option_b| {
+            if option_a.is_none() || option_b.is_none() {
+                chip_log_error!(SecureChannel, "invalid sortable session");
+                verify_or_die!(false);
             }
-        }
-        */
-        eviction_context.m_session_list.sort_by(|a, b| {
-            if let Ok(session_a) = a.m_session.try_ref() &&
+            if let Some(a) = option_a.as_ref() &&
+                let Some(b) = option_b.as_ref() &&
+                let Ok(session_a) = a.m_session.try_ref() &&
                 let Ok(session_b) = b.m_session.try_ref() &&
                     let Some(sa) = session_a.as_ref() &&
                     let Some(sb) = session_b.as_ref()
