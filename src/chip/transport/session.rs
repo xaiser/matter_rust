@@ -137,7 +137,7 @@ mod session_handle {
             };
         }
 
-        // a functino mostly added for test
+        // a function mostly added for test
         pub(super) fn get(&self) -> &SharedSession {
             &self.m_session
         }

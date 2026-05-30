@@ -39,6 +39,7 @@ use core::cell::Cell;
 const K_MAX_SESSION_ID: u16 = u16::MAX;
 const K_UNSECURED_SESSION_ID: u16 = 0;
 
+#[derive(Clone)]
 struct SortableSession {
     m_session: SessionHandle,
     m_num_matching_on_fabric: u16,
@@ -280,6 +281,7 @@ impl SecureSessionTable {
 
         let num_sessions = self.allocated();
 
+        #[cfg(feature = "chip_detail_logging")]
         {
             chip_log_detail!(SecureChannel, "Sorted Eviction Candidates (ranked from best candidate to worst):");
             for (index, ss) in sortable_sessions.iter().enumerate().filter(|(_, s)| s.is_some()) {
@@ -294,10 +296,11 @@ impl SecureSessionTable {
                     );
                 }
             }
-
         }
 
         for option_ss in &mut sortable_sessions[..index] {
+            let prev_count = self.allocated();
+
             if let Some(ss) = option_ss.as_ref() &&
                 let Ok(mut session) = ss.m_session.try_ref() &&
                     let Some(secure_session) = session.as_ref()
@@ -307,43 +310,40 @@ impl SecureSessionTable {
                 }
 
                 chip_log_progress!(SecureChannel, "Candidate Session {:p} - Attempting to evict...", secure_session);
-
-                let prev_count = self.allocated();
-
-                secure_session::inner_mark_for_evication(ss.m_session.clone(), None);
-
-
-                self.release(&ss.m_session);
+            } else {
+                continue;
             }
 
+            let sortable_session = option_ss.take().unwrap();
+
+            secure_session::inner_mark_for_evication(sortable_session.m_session.clone(), None);
+            self.release(&sortable_session.m_session);
+
             // now this should be very last one handle that hold the to-be-deleted session
-            let sortable_session = option_ss.take();
-            verify_or_die!(sortable_session.is_some_and(|ss| ss.m_session.is_unique()));
+            // consume the session with check
+            verify_or_die!(sortable_session.m_session.is_unique());
+            drop(sortable_session);
 
-            breakhere
+            let new_count = self.allocated();
 
-                /*
-                let new_count = self.allocated();
+            if new_count < prev_count {
+                chip_log_progress!(SecureChannel, "Successfully evicted a session!");
 
-                if new_count < prev_count {
-                    chip_log_progress!(SecureChannel, "Successfully evicted a session!");
+                let shared_session = new_shared_session(Session::new_secure_with(SecureSession::new_with(ptr::addr_of_mut!(*self), secure_session_type,
+                    local_session_id)), ptr::addr_of_mut!(self.m_entries_pool));
 
-                    let shared_session = new_shared_session(Session::new_secure_with(SecureSession::new_with(ptr::addr_of_mut!(*self), secure_session_type,
-                        secure_session_type, local_session_id), ptr::addr_of_mut!(self.m_entries_pool)));
+                verify_or_die!(shared_session.is_ok());
 
-                    verify_or_die!(shared_session.is_ok());
+                let shared_session = shared_session.unwrap();
 
-                    let shared_session = shared_session.unwrap();
-
-                    for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
-                        *session = Some(shared_session.clone());
-                        break;
-                    }
-
-                    return Some(shared_session);
+                for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
+                    *session = Some(shared_session.clone());
+                    break;
                 }
-                */
-        }
+
+                return Some(shared_session);
+            }
+        } // end of sortable sessions walk
 
         chip_log_error!(SecureChannel, "We couldn't find any session to evict at all, something's wrong!");
         verify_or_die!(false);
@@ -622,19 +622,19 @@ mod tests {
         assert!(b.is_some());
         let b = b.unwrap();
 
-        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let sort_a = SortableSession::new(SessionHandle::new_with(&a));
         let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
         // to simulate different number of matching fabric
         sort_b.m_num_matching_on_fabric += 1;
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
         // "a" matches less fabric, so it got swappwd
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].as_ref().unwrap().m_session));
     }
 
     #[test]
@@ -659,10 +659,10 @@ mod tests {
         assert!(b.is_some());
         let b = b.unwrap();
 
-        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
-        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+        let sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let sort_b = SortableSession::new(SessionHandle::new_with(&b));
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         // "a" is the hint
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default_with_ids(KUNDEFINED_NODE_ID + 1, a_fabric_index));
@@ -670,7 +670,7 @@ mod tests {
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
         // "a" is prefer to evict
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].as_ref().unwrap().m_session));
     }
 
     #[test]
@@ -695,19 +695,19 @@ mod tests {
         assert!(b.is_some());
         let b = b.unwrap();
 
-        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let sort_a = SortableSession::new(SessionHandle::new_with(&a));
         let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
         // to simulate different number of matching fabric
         sort_b.m_num_matching_on_peer += 1;
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
         // "a" has less peer thus got swapped
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].as_ref().unwrap().m_session));
     }
 
     #[test]
@@ -738,7 +738,7 @@ mod tests {
         sort_a.m_num_matching_on_peer += 1;
         sort_b.m_num_matching_on_peer += 1;
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         // "a" match hint id
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default_with_ids(KUNDEFINED_NODE_ID + 2, a_fabric_index));
@@ -746,7 +746,7 @@ mod tests {
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
         // "a" is prefered to evit
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[0].as_ref().unwrap().m_session));
     }
 
     #[test]
@@ -779,16 +779,16 @@ mod tests {
         }
 
 
-        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
-        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+        let sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let sort_b = SortableSession::new(SessionHandle::new_with(&b));
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].as_ref().unwrap().m_session));
     }
 
     #[test]
@@ -823,15 +823,69 @@ mod tests {
         }
 
 
-        let mut sort_a = SortableSession::new(SessionHandle::new_with(&a));
-        let mut sort_b = SortableSession::new(SessionHandle::new_with(&b));
+        let sort_a = SortableSession::new(SessionHandle::new_with(&a));
+        let sort_b = SortableSession::new(SessionHandle::new_with(&b));
 
-        let mut sortable_sessions = [sort_a, sort_b];
+        let mut sortable_sessions = [Some(sort_a), Some(sort_b)];
 
         let mut eviction_context = EvictionPoilcyContext::new(&mut sortable_sessions[..], ScopedNodeId::default());
 
         SecureSessionTable::default_eviction_policy(&mut eviction_context);
 
-        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].m_session));
+        assert!(SessionHandle::eq(&a_copy, &sortable_sessions[1].as_ref().unwrap().m_session));
+    }
+
+    #[test]
+    fn evict_one() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let a_fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 10, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 2, cat, 1, a_fabric_index, &config).is_some());
+
+        assert_eq!(1, table.allocated());
+        let hint = ScopedNodeId::default();
+
+        assert!(table.evict_and_allocate(11, secure_session::Type::Kcase, &hint).is_some());
+        assert_eq!(1, table.allocated());
+    }
+
+    #[test]
+    fn evict_twice() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let a_fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 10, KUNDEFINED_NODE_ID + 1,
+            KUNDEFINED_NODE_ID + 2, cat, 1, a_fabric_index, &config).is_some());
+
+        assert!(table.create_new_secure_session_for_test(secure_session::Type::Kcase, 11, KUNDEFINED_NODE_ID + 2,
+            KUNDEFINED_NODE_ID + 3, cat, 2, a_fabric_index + 1, &config).is_some());
+
+        assert_eq!(2, table.allocated());
+        let hint = ScopedNodeId::default();
+
+        assert!(table.evict_and_allocate(13, secure_session::Type::Kcase, &hint).is_some());
+        assert_eq!(2, table.allocated());
+        assert!(table.evict_and_allocate(14, secure_session::Type::Kcase, &hint).is_some());
+        assert_eq!(2, table.allocated());
+    }
+
+    #[test]
+    #[should_panic]
+    fn evict_none() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        let hint = ScopedNodeId::default();
+
+        assert!(table.evict_and_allocate(11, secure_session::Type::Kcase, &hint).is_none());
     }
 } // end of tests
