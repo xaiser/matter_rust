@@ -14,7 +14,7 @@ use crate::{
         transport::{
             session::{
                 SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
-                SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
+                SharedSession, WeakSharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
                 Session, new_session_alloactor, new_shared_session, notify_shared_session_released,
             },
             secure_session::{self, SecureSession, AsMut, AsRef},
@@ -85,6 +85,7 @@ impl<'a> EvictionPoilcyContext<'a> {
 
 pub struct SecureSessionTable {
     m_running_eviction_logic: Cell<bool>,
+    m_weak_entries: [Option<WeakSharedSession>; POOL_SIZE],
     m_entries: [Option<SharedSession>; POOL_SIZE],
     m_entries_pool: Pool,
     m_next_session_id: u16,
@@ -108,6 +109,7 @@ impl SecureSessionTable {
     pub const fn new() -> Self {
         SecureSessionTable {
             m_running_eviction_logic: Cell::new(false),
+            m_weak_entries: [const { None }; POOL_SIZE],
             m_entries: [const { None }; POOL_SIZE],
             m_entries_pool: new_session_alloactor(),
             m_next_session_id: K_UNSECURED_SESSION_ID,
@@ -138,19 +140,34 @@ impl SecureSessionTable {
         let shared_session = new_shared_session(Session::new_secure_with(SecureSession::new_with_test(ptr::addr_of_mut!(*self), secure_session_type,
             local_session_id, local_node_id, peer_node_id, peer_cats, peer_session_id, fabric_index, config)), ptr::addr_of_mut!(self.m_entries_pool)).ok()?;
 
-        for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
-            *session = Some(shared_session.clone());
-            break;
-        }
+        self.inner_retain(&shared_session);
 
         Some(shared_session)
     }
 
-    /*
-    pub fn create_new_secure_session(&mut self, secure_session_type: secure_session::Type, session_eviction_hint: ScopeNodeid) -> Option<SharedSession>
+    pub fn create_new_secure_session(&mut self, secure_session_type: secure_session::Type, session_eviction_hint: ScopedNodeId) -> Option<SessionHandle>
     {
+        let session_id = self.find_unused_session_id()?;
+
+        let shared_session = if self.allocated() < POOL_SIZE {
+            let ss = new_shared_session(Session::new_secure_with(SecureSession::new_with(ptr::addr_of_mut!(*self), secure_session_type,
+            session_id)), ptr::addr_of_mut!(self.m_entries_pool)).ok()?;
+
+            self.inner_retain(&ss);
+
+            ss
+        } else {
+            self.evict_and_allocate(session_id, secure_session_type, &session_eviction_hint)?
+        };
+
+        self.m_next_session_id = if session_id == K_MAX_SESSION_ID {
+            (K_UNSECURED_SESSION_ID + 1) as u16
+        } else {
+            session_id + 1
+        };
+
+        Some(SessionHandle::new_with(&shared_session))
     }
-    */
 
     pub fn for_each_session<F>(&mut self, mut f: F) -> Loop
         where
@@ -170,6 +187,7 @@ impl SecureSessionTable {
         where
             F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
     {
+        /*
         for session in self.m_entries.iter().filter(|s| s.is_some()) {
             let session_ref = session.as_ref().unwrap();
             if f(session_ref) == Loop::Break {
@@ -178,12 +196,65 @@ impl SecureSessionTable {
         }
 
         Loop::Finish
+        */
+        for session in self.m_weak_entries.iter().filter(|s| s.as_ref().is_some_and(|weak| weak.upgrade().is_some())) {
+            // break use weak
+            let session_ref = session.as_ref().unwrap().upgrade().unwrap();
+            if f(&session_ref) == Loop::Break {
+                return Loop::Break;
+            }
+        }
+
+        Loop::Finish
+    }
+
+    pub fn find_secure_session_by_local_key(&self, local_session_id: u16) -> Option<SessionHandle> {
+        let mut result: Option<SessionHandle> = None;
+        self.for_each_session_const(|s| {
+            if let Ok(borrow) = s.try_borrow() {
+                if let Some(ss) = borrow.as_ref() {
+                    if ss.get_local_session_id() == local_session_id {
+                        result = Some(SessionHandle::new_with(s));
+                        Loop::Break;
+                    }
+                }
+            }
+            Loop::Continue
+        });
+
+        result
     }
 
     pub fn retain(&mut self, _session_handle: &SessionHandle) {
+        /*
+        for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
+            let handle = SessionHandle::new_with(session.as_ref().unwrap());
+            if SessionHandle::eq(&handle, secure_session) {
+                *session = None;
+                break;
+            }
+        }
+        */
     }
 
     pub fn release(&mut self, secure_session: &SessionHandle) {
+        for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
+            let handle = SessionHandle::new_with(session.as_ref().unwrap());
+            if SessionHandle::eq(&handle, secure_session) {
+                *session = None;
+                break;
+            }
+        }
+    }
+
+    fn inner_retain(&mut self, ss: &SharedSession) {
+        for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
+            *session = Some(ss.clone());
+            break;
+        }
+    }
+
+    fn inner_release(&mut self, secure_session: &SessionHandle) {
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
             let handle = SessionHandle::new_with(session.as_ref().unwrap());
             if SessionHandle::eq(&handle, secure_session) {
@@ -317,7 +388,7 @@ impl SecureSessionTable {
             let sortable_session = option_ss.take().unwrap();
 
             secure_session::inner_mark_for_evication(sortable_session.m_session.clone(), None);
-            self.release(&sortable_session.m_session);
+            self.inner_release(&sortable_session.m_session);
 
             // now this should be very last one handle that hold the to-be-deleted session
             // consume the session with check
@@ -335,11 +406,7 @@ impl SecureSessionTable {
                 verify_or_die!(shared_session.is_ok());
 
                 let shared_session = shared_session.unwrap();
-
-                for session in self.m_entries.iter_mut().filter(|s| s.is_none()) {
-                    *session = Some(shared_session.clone());
-                    break;
-                }
+                self.inner_retain(&shared_session);
 
                 return Some(shared_session);
             }
@@ -887,5 +954,33 @@ mod tests {
         let hint = ScopedNodeId::default();
 
         assert!(table.evict_and_allocate(11, secure_session::Type::Kcase, &hint).is_none());
+    }
+
+    #[test]
+    fn create_one_session() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        assert!(table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default()).is_some());
+    }
+
+    #[test]
+    fn create_two_session() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        assert!(table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default()).is_some());
+
+        assert!(table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default()).is_some());
+    }
+
+    #[test]
+    fn create_more_than_pool_size() {
+        let mut table = SecureSessionTable::new();
+        table.init();
+
+        for _i in 0..=POOL_SIZE {
+            assert!(table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default()).is_some());
+        }
     }
 } // end of tests

@@ -32,7 +32,7 @@ pub enum SessionType {
 mod session_handle {
     use crate::{
         chip::chip_lib::{
-            core::reference_counted::rc::{DefaultAlloactor, Rc},
+            core::reference_counted::rc::{DefaultAlloactor, Rc, Weak},
         }
     };
 
@@ -44,6 +44,7 @@ mod session_handle {
     pub const ALLOACTOR_CAP: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_SECURE_SESSION_POOL_SIZE;
     pub type Alloactor = DefaultAlloactor<RefCell<Session>, ALLOACTOR_CAP>;
     pub type SharedSession = Rc<RefCell<Session>, Alloactor>;
+    pub type WeakSharedSession = Weak<RefCell<Session>, Alloactor>;
 
     pub struct SessionHandle {
         m_session: SharedSession,
@@ -354,7 +355,7 @@ mod session_holder {
 
         pub fn shift_to_session(&mut self, session: SessionHandle) {
             self.release();
-            self.grab(session);
+            let _ = self.grab(session);
         }
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
