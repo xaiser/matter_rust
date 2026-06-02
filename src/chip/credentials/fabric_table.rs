@@ -1281,13 +1281,6 @@ mod fabric_table {
     //#[double]
     use super::fabric_info::FabricInfo;
 
-    /*
-    type ValidationContext<'a> = crate::chip::credentials::chip_certificate_set::ValidationContext<
-        'a,
-        IgnoreCertificateValidityPeriodPolicy,
-    >;
-    */
-
     bitflags! {
         #[derive(Clone, Copy)]
         struct StateFlags: u16 {

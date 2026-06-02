@@ -152,6 +152,14 @@ impl DefaultStorageKeyAllocator {
     pub fn last_known_good_time_key() -> StorageKeyName {
         StorageKeyName::formatted(format_args!("g/lkgt"))
     }
+
+    pub fn group_data_counter() -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("g/gdc"))
+    }
+
+    pub fn group_control_counter() -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("g/gcc"))
+    }
 }
 
 #[cfg(test)]

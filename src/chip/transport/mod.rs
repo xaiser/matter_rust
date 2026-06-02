@@ -9,5 +9,6 @@ mod secure_session;
 mod secure_session_table;
 mod unauthenticated_session;
 pub mod peer_message_counter;
+mod group_peer_message_counter;
 
 pub use raw::peer_address::PeerAddress;
