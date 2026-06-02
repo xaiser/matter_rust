@@ -85,7 +85,6 @@ impl<'a> EvictionPoilcyContext<'a> {
 
 pub struct SecureSessionTable {
     m_running_eviction_logic: Cell<bool>,
-    m_weak_entries: [Option<WeakSharedSession>; POOL_SIZE],
     m_entries: [Option<SharedSession>; POOL_SIZE],
     m_entries_pool: Pool,
     m_next_session_id: u16,
@@ -109,7 +108,6 @@ impl SecureSessionTable {
     pub const fn new() -> Self {
         SecureSessionTable {
             m_running_eviction_logic: Cell::new(false),
-            m_weak_entries: [const { None }; POOL_SIZE],
             m_entries: [const { None }; POOL_SIZE],
             m_entries_pool: new_session_alloactor(),
             m_next_session_id: K_UNSECURED_SESSION_ID,
@@ -187,20 +185,9 @@ impl SecureSessionTable {
         where
             F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
     {
-        /*
         for session in self.m_entries.iter().filter(|s| s.is_some()) {
             let session_ref = session.as_ref().unwrap();
             if f(session_ref) == Loop::Break {
-                return Loop::Break;
-            }
-        }
-
-        Loop::Finish
-        */
-        for session in self.m_weak_entries.iter().filter(|s| s.as_ref().is_some_and(|weak| weak.upgrade().is_some())) {
-            // break use weak
-            let session_ref = session.as_ref().unwrap().upgrade().unwrap();
-            if f(&session_ref) == Loop::Break {
                 return Loop::Break;
             }
         }
@@ -226,6 +213,7 @@ impl SecureSessionTable {
     }
 
     pub fn retain(&mut self, _session_handle: &SessionHandle) {
+        // TODO: find a way to implement this
         /*
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
             let handle = SessionHandle::new_with(session.as_ref().unwrap());
@@ -238,6 +226,8 @@ impl SecureSessionTable {
     }
 
     pub fn release(&mut self, secure_session: &SessionHandle) {
+        // TODO: find a way to implement this
+        /*
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
             let handle = SessionHandle::new_with(session.as_ref().unwrap());
             if SessionHandle::eq(&handle, secure_session) {
@@ -245,6 +235,7 @@ impl SecureSessionTable {
                 break;
             }
         }
+        */
     }
 
     fn inner_retain(&mut self, ss: &SharedSession) {
