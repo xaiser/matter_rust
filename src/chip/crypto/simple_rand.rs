@@ -81,6 +81,16 @@ pub fn get_rand_u16() -> u16 {
     }
 }
 
+pub fn get_rand_u32() -> u32 {
+    static mut SIMPLE_GLOBAL_RNG: SimpleRng = SimpleRng {
+        state: 3,
+    };
+
+    unsafe {
+        SIMPLE_GLOBAL_RNG.next_u32()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

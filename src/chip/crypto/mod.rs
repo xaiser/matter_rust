@@ -11,4 +11,4 @@ pub use operational_keystore::OperationalKeystore;
 
 pub use crypto_pal::*;
 
-pub use simple_rand::{get_rand_u8, get_rand_u16};
+pub use simple_rand::{get_rand_u8, get_rand_u16, get_rand_u32};
