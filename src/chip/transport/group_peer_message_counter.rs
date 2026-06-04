@@ -139,6 +139,61 @@ impl GroupPeerTable {
         Err(chip_error_too_many_peer_nodes!())
     }
 
+    fn remove_specific_peer(list: &mut [GroupSender], node_id: NodeId) -> bool {
+        let mut removed = false;
+
+        for sender in list.iter_mut() {
+            if sender.m_node_id == node_id {
+                sender.m_node_id = KUNDEFINED_NODE_ID;
+                sender.msg_counter.reset();
+                removed = true;
+                break;
+            }
+        }
+
+        if removed {
+            Self::compact_peers(list);
+        }
+
+        removed
+    }
+
+    fn compact_peers(list: &mut [GroupSender]) {
+        if list.is_empty() {
+            return;
+        }
+
+        let size = list.len();
+        for peer_index in 0..size {
+            if list[peer_index].m_node_id != KUNDEFINED_NODE_ID {
+                continue;
+            }
+            for i in ((peer_index+1)..=(size-1)).rev() {
+                if list[i].m_node_id != KUNDEFINED_NODE_ID {
+                    list.swap(peer_index, i);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn remove_and_compact_fabric(table: &mut [GroupFabric], table_index: usize) {
+        if let Some(fabric) = table.get_mut(table_index) {
+            *fabric = GroupFabric::new();
+        } else {
+            return;
+        }
+
+        // To maintain logic integrity Fabric array cannot have empty slot in between data
+        // Find the last non empty element
+        for i in ((table_index + 1)..CHIP_CONFIG_MAX_FABRICS).rev() {
+            if table[i].m_fabric_index != KUNDEFINED_FABRIC_INDEX {
+                table.swap(i, table_index);
+                break;
+            }
+        }
+    }
+
     fn get_counter(&self, index: usize, is_control: bool) -> Option<u8> {
         if is_control {
             Some(self.m_group_fabrics.get(index)?.m_control_peer_count)
@@ -465,6 +520,74 @@ mod tests {
                 assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + i as u64, false).is_ok());
             }
             assert!(!table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + CHIP_CONFIG_MAX_GROUP_DATA_PEERS  as u64 + 1, false).is_ok());
+        }
+
+        #[test]
+        fn compact_list() {
+            const SIZE: usize = 3;
+            let mut list = [const { GroupSender::new() }; SIZE];
+            list[0].m_node_id = 1;
+            list[2].m_node_id = 2;
+            
+            GroupPeerTable::compact_peers(&mut list);
+
+            assert_eq!(list[2].m_node_id, KUNDEFINED_NODE_ID);
+        }
+
+        #[test]
+        fn remove_specific_peer() {
+            const SIZE: usize = 5;
+            let mut list = [const { GroupSender::new() }; SIZE];
+            list[0].m_node_id = 1;
+            list[2].m_node_id = 2;
+            list[4].m_node_id = 3;
+
+            assert_eq!(3,
+                list.iter().filter(
+                    |s| s.m_node_id != KUNDEFINED_NODE_ID).count());
+            
+            GroupPeerTable::remove_specific_peer(&mut list, 2);
+
+            for i in 0..2 {
+                assert_ne!(2, list[i].m_node_id);
+            }
+
+            for i in 2..5 {
+                assert_eq!(KUNDEFINED_NODE_ID, list[i].m_node_id);
+            }
+        }
+
+        #[test]
+        fn remove_specific_fabric() {
+            const SIZE: usize = CHIP_CONFIG_MAX_FABRICS;
+            let mut list = [const { GroupFabric::new() }; SIZE];
+            list[0].m_fabric_index = 1;
+            list[1].m_fabric_index = 2;
+            list[2].m_fabric_index = 3;
+            
+            GroupPeerTable::remove_and_compact_fabric(&mut list, 1);
+
+            assert_eq!(1, list[0].m_fabric_index);
+            assert_eq!(3, list[1].m_fabric_index);
+
+            for i in 2..CHIP_CONFIG_MAX_FABRICS {
+                assert_eq!(KUNDEFINED_FABRIC_INDEX, list[i].m_fabric_index);
+            }
+        }
+
+        #[test]
+        fn remove_specific_fabric_out_of_boundary() {
+            const SIZE: usize = CHIP_CONFIG_MAX_FABRICS;
+            let mut list = [const { GroupFabric::new() }; SIZE];
+            list[0].m_fabric_index = 1;
+            list[1].m_fabric_index = 2;
+            list[2].m_fabric_index = 3;
+            
+            GroupPeerTable::remove_and_compact_fabric(&mut list, CHIP_CONFIG_MAX_FABRICS + 1);
+
+            assert_eq!(1, list[0].m_fabric_index);
+            assert_eq!(2, list[1].m_fabric_index);
+            assert_eq!(3, list[2].m_fabric_index);
         }
     } // end of mod group_peer_rable
 }// end of tess
