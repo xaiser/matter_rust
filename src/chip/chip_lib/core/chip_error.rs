@@ -282,6 +282,13 @@ macro_rules! chip_error_message_too_long {
 }
 
 #[macro_export]
+macro_rules! chip_error_too_many_peer_nodes {
+    () => {
+        chip_core_error!(0x09)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_key_not_found {
     () => {
         chip_core_error!(0x10)

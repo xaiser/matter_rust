@@ -25,6 +25,7 @@ use crate::{
     chip_error_invalid_argument,
     chip_error_internal,
     chip_error_persisted_storage_value_not_found,
+    chip_error_too_many_peer_nodes,
     //verify_or_return_error,
     //verify_or_return_value,
     ChipError,
@@ -76,6 +77,73 @@ impl GroupPeerTable {
     pub const fn new() -> Self {
         Self {
             m_group_fabrics: [ const { GroupFabric::new() }; CHIP_CONFIG_MAX_FABRICS],
+        }
+    }
+
+    pub fn find_or_add_peer(&mut self, fabric_index: FabricIndex, node_id: NodeId, is_control: bool) -> Result<&mut PeerMessageCounter, ChipError> {
+        if fabric_index == KUNDEFINED_FABRIC_INDEX || node_id == KUNDEFINED_NODE_ID {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        for group_fabric in &mut self.m_group_fabrics {
+            if group_fabric.m_fabric_index == KUNDEFINED_FABRIC_INDEX {
+                // Already iterated through all known fabricIndex
+                // Add the new peer to save some processing time
+                group_fabric.m_fabric_index = fabric_index;
+                if is_control {
+                    group_fabric.m_control_group_senders[0].m_node_id = node_id;
+                    group_fabric.m_control_peer_count += 1;
+                    return Ok(&mut group_fabric.m_control_group_senders[0].msg_counter);
+                } else {
+                    group_fabric.m_data_group_senders[0].m_node_id = node_id;
+                    group_fabric.m_data_peer_count += 1;
+                    return Ok(&mut group_fabric.m_data_group_senders[0].msg_counter);
+                }
+            }
+
+            if fabric_index == group_fabric.m_fabric_index {
+                if is_control {
+                    for node in &mut group_fabric.m_control_group_senders {
+                        if node.m_node_id == KUNDEFINED_NODE_ID {
+                            // Already iterated through all known NodeIds
+                            // Add the new peer to save some processing time
+                            node.m_node_id = node_id;
+                            group_fabric.m_control_peer_count += 1;
+                            return Ok(&mut node.msg_counter);
+                        }
+
+                        if node.m_node_id == node_id {
+                            return Ok(&mut node.msg_counter);
+                        }
+                    }
+                } else {
+                    for node in &mut group_fabric.m_data_group_senders {
+                        if node.m_node_id == KUNDEFINED_NODE_ID {
+                            // Already iterated through all known NodeIds
+                            // Add the new peer to save some processing time
+                            node.m_node_id = node_id;
+                            group_fabric.m_data_peer_count += 1;
+                            return Ok(&mut node.msg_counter);
+                        }
+
+                        if node.m_node_id == node_id {
+                            return Ok(&mut node.msg_counter);
+                        }
+                    }
+                }
+
+                return Err(chip_error_too_many_peer_nodes!());
+            }
+        }
+
+        Err(chip_error_too_many_peer_nodes!())
+    }
+
+    fn get_counter(&self, index: usize, is_control: bool) -> Option<u8> {
+        if is_control {
+            Some(self.m_group_fabrics.get(index)?.m_control_peer_count)
+        } else {
+            Some(self.m_group_fabrics.get(index)?.m_data_peer_count)
         }
     }
 }
@@ -171,7 +239,7 @@ where
     }
 
     pub fn increment_counter(&mut self, is_control: bool) -> ChipErrorResult {
-        let key, value;
+        let (key, value);
         const SIZE: usize = core::mem::size_of::<u32>();
 
         if is_control {
@@ -187,52 +255,217 @@ where
         unsafe {
             storage = self.m_storage.as_mut().ok_or(chip_error_persisted_storage_value_not_found!())?.as_mut();
         }
+
+        let mut temp = [0u8; SIZE];
+
+        match storage.sync_get_key_value(key.key_name_str(), &mut temp) {
+            Ok(read_size) => {
+                if read_size <= SIZE {
+                    let mut temp = u32::from_le_bytes(temp[..read_size].try_into().map_err(|_| chip_error_internal!())?);
+                    if temp == value {
+                        temp = value + Self::GROUP_MSG_COUNTER_MIN_INCREMENT;
+                        return storage.sync_set_key_value(key.key_name_str(), temp.to_le_bytes().as_slice());
+                    }
+
+                    return chip_ok!();
+                } else {
+                    return Err(chip_error_internal!());
+                }
+            },
+            Err(e) => {
+                return Err(e);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        chip::{
-            chip_lib::{
-                support::test_persistent_storage::TestPersistentStorage,
+
+    mod group_outgoing_counters {
+        use super::super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::test_persistent_storage::TestPersistentStorage,
+                },
             },
-        },
-    };
+        };
 
-    #[test]
-    fn init_successfully() {
-        let mut pa = TestPersistentStorage::default();
-        let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+        #[test]
+        fn init_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
 
-        assert!(gc.init().is_ok());
-    }
+            assert!(gc.init().is_ok());
+        }
 
-    #[test]
-    fn init_failed_on_control_counter() {
-        let mut pa = TestPersistentStorage::default();
-        let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+        #[test]
+        fn init_failed_on_control_counter() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
 
-        // inject posion key to corrupt the storage
-        pa.add_posion_key(
-            DefaultStorageKeyAllocator::group_control_counter().key_name_str(),
-        );
+            // inject posion key to corrupt the storage
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::group_control_counter().key_name_str(),
+            );
 
-        assert!(gc.init().is_err());
-    }
+            assert!(gc.init().is_err());
+        }
 
-    #[test]
-    fn init_failed_on_data_counter() {
-        let mut pa = TestPersistentStorage::default();
-        let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+        #[test]
+        fn init_failed_on_data_counter() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
 
-        // inject posion key to corrupt the storage
-        pa.add_posion_key(
-            DefaultStorageKeyAllocator::group_data_counter().key_name_str(),
-        );
+            // inject posion key to corrupt the storage
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::group_data_counter().key_name_str(),
+            );
 
-        assert!(gc.init().is_err());
-    }
+            assert!(gc.init().is_err());
+        }
+
+        #[test]
+        fn increase_correctly() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+
+            assert!(gc.init().is_ok());
+
+            let init_value = gc.get_counter(true);
+
+            assert!(gc.increment_counter(true).is_ok());
+
+            assert_eq!(init_value + 1, gc.get_counter(true));
+        }
+
+        #[test]
+        fn increase_no_storage() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+
+            assert!(gc.increment_counter(true).is_err());
+        }
+
+        #[test]
+        fn increase_corrupt_key() {
+            let mut pa = TestPersistentStorage::default();
+            let mut gc = GroupOutgoingCounters::new_with(NonNull::new(core::ptr::addr_of_mut!(pa)));
+
+            assert!(gc.init().is_ok());
+
+            // inject posion key to corrupt the storage
+            pa.add_posion_key(
+                DefaultStorageKeyAllocator::group_control_counter().key_name_str(),
+            );
+
+            assert!(gc.increment_counter(true).is_err());
+        }
+    } // end of mod group_outgoing_counters
+
+    mod group_peer_table {
+        use super::super::*;
+        use crate::{
+            chip::{
+            },
+        };
+
+        #[test]
+        fn add_control_peer_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn find_with_invalid_fabric_index() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(!table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX, KUNDEFINED_NODE_ID + 1, true).is_ok());
+        }
+
+        #[test]
+        fn find_with_invalid_node_id() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(!table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID, true).is_ok());
+        }
+
+        #[test]
+        fn add_control_peer_with_same_fabric_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 1));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 2, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 2));
+        }
+
+        #[test]
+        fn find_control_peer_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 1));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn too_many_control_peer() {
+            let mut table = GroupPeerTable::new();
+
+            for i in 0..CHIP_CONFIG_MAX_GROUP_CONTROL_PEERS {
+                assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + i as u64, true).is_ok());
+            }
+            assert!(!table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + CHIP_CONFIG_MAX_GROUP_CONTROL_PEERS  as u64 + 1, true).is_ok());
+        }
+
+        #[test]
+        fn add_data_peer_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn add_data_peer_with_same_fabric_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 2, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 2));
+        }
+
+        #[test]
+        fn find_data_peer_successfully() {
+            let mut table = GroupPeerTable::new();
+
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 0));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+            assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn too_many_data_peer() {
+            let mut table = GroupPeerTable::new();
+
+            for i in 0..CHIP_CONFIG_MAX_GROUP_DATA_PEERS {
+                assert!(table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + i as u64, false).is_ok());
+            }
+            assert!(!table.find_or_add_peer(KUNDEFINED_FABRIC_INDEX + 1, KUNDEFINED_NODE_ID + 1 + CHIP_CONFIG_MAX_GROUP_DATA_PEERS  as u64 + 1, false).is_ok());
+        }
+    } // end of mod group_peer_rable
 }// end of tess
 
