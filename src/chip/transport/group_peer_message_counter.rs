@@ -26,6 +26,7 @@ use crate::{
     chip_error_internal,
     chip_error_persisted_storage_value_not_found,
     chip_error_too_many_peer_nodes,
+    chip_error_not_found,
     //verify_or_return_error,
     //verify_or_return_value,
     ChipError,
@@ -137,6 +138,59 @@ impl GroupPeerTable {
         }
 
         Err(chip_error_too_many_peer_nodes!())
+    }
+
+    // Used in case of MCSP failure
+    pub fn remove_peers(&mut self, fabric_index: FabricIndex, node_id: NodeId, is_control: bool) -> ChipErrorResult {
+        let mut err: ChipErrorResult = Err(chip_error_not_found!());
+        let mut fabric_it: Option<usize> = None;
+
+        if fabric_index == KUNDEFINED_FABRIC_INDEX || node_id == KUNDEFINED_NODE_ID {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        for it in 0..CHIP_CONFIG_MAX_FABRICS {
+            if fabric_index == self.m_group_fabrics[it].m_fabric_index {
+                if is_control {
+                    if Self::remove_specific_peer(&mut self.m_group_fabrics[it].m_control_group_senders, node_id) {
+                        fabric_it = Some(it);
+                        self.m_group_fabrics[it].m_control_peer_count -= 1;
+                        err = chip_ok!();
+                    }
+                } else {
+                    if Self::remove_specific_peer(&mut self.m_group_fabrics[it].m_data_group_senders, node_id) {
+                        fabric_it = Some(it);
+                        self.m_group_fabrics[it].m_data_peer_count -= 1;
+                        err = chip_ok!();
+                    }
+                }
+                break;
+            }
+        }
+
+        // Remove Fabric entry from PeerTable if empty
+        if let Some(it) = fabric_it {
+            if self.m_group_fabrics[it].m_data_peer_count == 0 && self.m_group_fabrics[it].m_control_peer_count == 0 {
+                Self::remove_and_compact_fabric(&mut self.m_group_fabrics, it);
+            }
+        }
+        
+        err
+    }
+
+    pub fn fabric_removed(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        if fabric_index == KUNDEFINED_FABRIC_INDEX {
+            return Err(chip_error_invalid_argument!());
+        }
+
+        for it in 0..CHIP_CONFIG_MAX_FABRICS {
+            if fabric_index == self.m_group_fabrics[it].m_fabric_index {
+                Self::remove_and_compact_fabric(&mut self.m_group_fabrics, it);
+                return chip_ok!();
+            }
+        }
+
+        Err(chip_error_not_found!())
     }
 
     fn remove_specific_peer(list: &mut [GroupSender], node_id: NodeId) -> bool {
@@ -588,6 +642,140 @@ mod tests {
             assert_eq!(1, list[0].m_fabric_index);
             assert_eq!(2, list[1].m_fabric_index);
             assert_eq!(3, list[2].m_fabric_index);
+        }
+
+        #[test]
+        fn remove_data_peers() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    false).is_ok());
+            assert!(table.remove_peers(fabric_index, node_id, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 0));
+        }
+
+        #[test]
+        fn remove_data_peers_invalid_fabric_index() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    false).is_ok());
+            assert!(!table.remove_peers(KUNDEFINED_FABRIC_INDEX, node_id, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn remove_data_peers_invalid_node_id() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    false).is_ok());
+            assert!(!table.remove_peers(fabric_index, KUNDEFINED_NODE_ID, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn remove_data_peers_no_fabric_removed() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    false).is_ok());
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id + 1, 
+                    false).is_ok());
+            assert!(table.remove_peers(fabric_index, node_id, false).is_ok());
+            assert!(table.get_counter(0, false).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn remove_control_peers() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    true).is_ok());
+            assert!(table.remove_peers(fabric_index, node_id, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 0));
+        }
+
+        #[test]
+        fn remove_control_peers_no_fabric_removed() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    true).is_ok());
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id + 1, 
+                    true).is_ok());
+            assert!(table.remove_peers(fabric_index, node_id, true).is_ok());
+            assert!(table.get_counter(0, true).is_some_and(|c| c == 1));
+        }
+
+        #[test]
+        fn remove_fabric() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    true).is_ok());
+
+            assert!(table.fabric_removed(fabric_index).is_ok());
+        }
+
+        #[test]
+        fn remove_fabric_invalid_index() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    true).is_ok());
+
+            assert!(!table.fabric_removed(KUNDEFINED_FABRIC_INDEX).is_ok());
+        }
+
+        #[test]
+        fn remove_fabric_not_found() {
+            let mut table = GroupPeerTable::new();
+
+            let fabric_index = KUNDEFINED_FABRIC_INDEX + 1;
+            let node_id = KUNDEFINED_NODE_ID + 1;
+
+            assert!(table.find_or_add_peer(
+                    fabric_index, node_id, 
+                    true).is_ok());
+
+            assert!(!table.fabric_removed(fabric_index + 1).is_ok());
         }
     } // end of mod group_peer_rable
 }// end of tess
