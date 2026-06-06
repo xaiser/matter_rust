@@ -23,7 +23,7 @@ pub trait MessageCounterBase {
     fn advance_and_consume(&mut self) -> Result<u32, ChipError>;
 }
 
-struct GlobalUnencrypted {
+pub struct GlobalUnencrypted {
     m_last_used_value: u32,
 }
 
@@ -35,7 +35,7 @@ impl GlobalUnencrypted {
     }
 }
 
-struct Session {
+pub struct Session {
     m_last_used_value: u32,
 }
 

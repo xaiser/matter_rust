@@ -8,16 +8,16 @@ use crate::{
             },
             support::{
                 iterators::Loop,
-                pool::{size_guard, ObjectPool, BitMapObjectPool},
+                //pool::{size_guard, ObjectPool, BitMapObjectPool},
             },
         },
         transport::{
             session::{
-                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
-                SharedSession, WeakSharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
+                SessionBase,
+                SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
                 Session, new_session_alloactor, new_shared_session, notify_shared_session_released,
             },
-            secure_session::{self, SecureSession, AsMut, AsRef},
+            secure_session::{self, SecureSession, AsRef},
         },
         messaging::reliable_message_protocol_config::ReliableMessageProtocolConfig,
         NodeId, FabricIndex, ScopedNodeId,
@@ -34,7 +34,7 @@ use crate::chip_log_detail;
 use core::str::FromStr;
 
 use core::ptr;
-use core::cell::Cell;
+//use core::cell::Cell;
 
 const K_MAX_SESSION_ID: u16 = u16::MAX;
 const K_UNSECURED_SESSION_ID: u16 = 0;
@@ -56,10 +56,12 @@ impl SortableSession {
         }
     }
 
+    #[allow(dead_code)]
     fn get_num_matching_on_fabric(&self) -> u16 {
         self.m_num_matching_on_fabric
     }
 
+    #[allow(dead_code)]
     fn get_num_matching_on_peer(&self) -> u16 {
         self.m_num_matching_on_peer
     }
@@ -84,7 +86,7 @@ impl<'a> EvictionPoilcyContext<'a> {
 }
 
 pub struct SecureSessionTable {
-    m_running_eviction_logic: Cell<bool>,
+    //m_running_eviction_logic: Cell<bool>,
     m_entries: [Option<SharedSession>; POOL_SIZE],
     m_entries_pool: Pool,
     m_next_session_id: u16,
@@ -107,7 +109,7 @@ impl Drop for SecureSessionTable {
 impl SecureSessionTable {
     pub const fn new() -> Self {
         SecureSessionTable {
-            m_running_eviction_logic: Cell::new(false),
+            //m_running_eviction_logic: Cell::new(false),
             m_entries: [const { None }; POOL_SIZE],
             m_entries_pool: new_session_alloactor(),
             m_next_session_id: K_UNSECURED_SESSION_ID,
@@ -202,7 +204,7 @@ impl SecureSessionTable {
                 if let Some(ss) = borrow.as_ref() {
                     if ss.get_local_session_id() == local_session_id {
                         result = Some(SessionHandle::new_with(s));
-                        Loop::Break;
+                        return Loop::Break;
                     }
                 }
             }
@@ -225,7 +227,7 @@ impl SecureSessionTable {
         */
     }
 
-    pub fn release(&mut self, secure_session: &SessionHandle) {
+    pub fn release(&mut self, _secure_session: &SessionHandle) {
         // TODO: find a way to implement this
         /*
         for session in self.m_entries.iter_mut().filter(|s| s.is_some()) {
@@ -341,10 +343,9 @@ impl SecureSessionTable {
         Self::default_eviction_policy(&mut policy_context);
         chip_log_progress!(SecureChannel, "Sorted sessions for eviction...");
 
-        let num_sessions = self.allocated();
-
         #[cfg(feature = "chip_detail_logging")]
         {
+            //let num_sessions = self.allocated();
             chip_log_detail!(SecureChannel, "Sorted Eviction Candidates (ranked from best candidate to worst):");
             for (index, ss) in sortable_sessions.iter().enumerate().filter(|(_, s)| s.is_some()) {
                 if let Some(sort_session) = ss &&
@@ -364,7 +365,7 @@ impl SecureSessionTable {
             let prev_count = self.allocated();
 
             if let Some(ss) = option_ss.as_ref() &&
-                let Ok(mut session) = ss.m_session.try_ref() &&
+                let Ok(session) = ss.m_session.try_ref() &&
                     let Some(secure_session) = session.as_ref()
             {
                 if secure_session.is_pending_eviction() {
@@ -411,7 +412,7 @@ impl SecureSessionTable {
     fn allocated(&self) -> usize {
         let mut count = 0usize;
 
-        self.for_each_session_const(|session| { count += 1; Loop::Continue } );
+        self.for_each_session_const(|_| { count += 1; Loop::Continue } );
 
         count
     }

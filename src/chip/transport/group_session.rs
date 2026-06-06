@@ -131,7 +131,7 @@ pub mod outgoing {
         chip::{
             access::subject_descriptor::SubjectDescriptor,
             chip_lib::core::{
-                node_id::KUNDEFINED_NODE_ID,
+                //node_id::KUNDEFINED_NODE_ID,
                 data_model_types::KUNDEFINED_FABRIC_INDEX,
             },
             transport::session::{

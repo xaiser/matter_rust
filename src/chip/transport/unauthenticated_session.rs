@@ -404,7 +404,7 @@ impl UnauthenticatedSessionTable
         let mut result = None;
         let mut oldest_time = Timestamp::MAX;
 
-        for (index, s) in self.m_entries.iter().enumerate().filter(|(index, s)| s.is_some()) {
+        for (index, s) in self.m_entries.iter().enumerate().filter(|(_index, s)| s.is_some()) {
             let rc = s.as_ref().unwrap();
             if EntryType::is_unique(rc) {
                 // we are the only owner, just borrow, no need for check

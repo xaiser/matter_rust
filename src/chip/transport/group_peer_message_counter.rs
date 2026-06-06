@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::chip::{
     chip_lib::{
         core::{
