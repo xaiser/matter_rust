@@ -3,8 +3,7 @@ use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip::transport::PeerAddress;
 use crate::ChipErrorResult;
 
-pub trait TransportMgrBase<'a> {
-    //type RawDelegateType: RawTransportDelegate;
+pub trait TransportMgrBase {
     type TransportType: Base;
     type TransportMgrDelegateType;
 

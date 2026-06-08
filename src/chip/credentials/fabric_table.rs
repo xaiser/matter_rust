@@ -8365,3 +8365,5 @@ mod fabric_table {
         }
     } // end of mod tests
 } // end of mod fabric_table
+
+pub use fabric_table::FabricTable;

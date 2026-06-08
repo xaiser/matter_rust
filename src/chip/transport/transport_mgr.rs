@@ -125,7 +125,7 @@ macro_rules! impl_default_for_transport_mgr {
 
 macro_rules! impl_transport_mgr_base_for_transport_mgr {
     ($($type:ident),+) => {
-        impl<'a, SessionMgrType, $($type,)+> TransportMgrBase<'a> for TransportMgr<($($type,)+), SessionMgrType>
+        impl<SessionMgrType, $($type,)+> TransportMgrBase for TransportMgr<($($type,)+), SessionMgrType>
             where
                 SessionMgrType: TransportMgrDelegate,
                 $($type: Init + Base,)+

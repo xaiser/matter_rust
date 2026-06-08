@@ -590,6 +590,7 @@ impl SecureSessionTable {
 mod tests {
     use super::*;
     use crate::chip::system::system_clock::{set_monotonic_timestamp, Timestamp, get_monotonic_timestamp};
+    use crate::chip::transport::secure_session::AsMut;
 
     #[test]
     fn new_one_session_successfully() {
