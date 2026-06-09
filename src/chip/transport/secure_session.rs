@@ -503,7 +503,7 @@ impl SecureSession {
     }
 
     #[inline]
-    fn is_case_session(&self) -> bool {
+    pub fn is_case_session(&self) -> bool {
         self.get_secure_session_type() == Type::Kcase
     }
 

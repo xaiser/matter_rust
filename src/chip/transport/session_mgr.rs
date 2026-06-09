@@ -1,12 +1,18 @@
 use crate::{
     chip::{
         chip_lib::{
-            core::chip_persistent_storage_delegate::PersistentStorageDelegate,
+            core::{
+                chip_persistent_storage_delegate::PersistentStorageDelegate,
+                data_model_types::KUNDEFINED_FABRIC_INDEX,
+            },
+            support::{
+                iterators::Loop,
+            },
         },
         credentials::{
-            self, fabric_table::FabricTable,
+            self, fabric_table::{FabricTable, FabricInfo},
         },
-        crypto::{self, session_keystore::SessionKeystore},
+        crypto::{self, session_keystore::SessionKeystore, P256PublicKey},
         transport::{
             secure_session_table::SecureSessionTable,
             unauthenticated_session::UnauthenticatedSessionTable,
@@ -15,8 +21,18 @@ use crate::{
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::MessageCounter,
+            session::{SharedSession, SessionBase},
+            secure_session::{SecureSession, AsRef},
         },
+        ScopedNodeId, FabricIndex,
     },
+    ChipError,
+    ChipErrorResult,
+    chip_ok,
+    chip_sdk_error,
+    chip_core_error,
+    chip_error_invalid_fabric_index,
+    verify_or_die,
 };
 
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
@@ -158,5 +174,106 @@ where
 
     pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
         self.m_cb = Some(cb);
+    }
+
+    pub fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        self.m_secure_sessions.for_each_session(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn for_each_matching_session_const<F>(&self, node: &ScopedNodeId, mut f: F)
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn for_each_matching_fabric_index_session<F>(&mut self, fabric_index: FabricIndex, mut f: F)
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        self.m_secure_sessions.for_each_session(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn for_each_matching_fabric_index_session_const<F>(&self, fabric_index: FabricIndex, mut f: F)
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn for_each_matching_session_on_logical_fabric<F>(&mut self, node: &ScopedNodeId, mut f: F) -> ChipErrorResult
+        where
+            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+    {
+        let (target_pub_key, target_fabric) = self.get_fabric_and_pub_key(node.get_fabric_index())?;
+        self.m_secure_sessions.for_each_session(|session| {
+            if let Ok(session_ref) = session.try_borrow() {
+                let is_case_session = {
+                    let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    if let Some(ss) = secure_session {
+                        ss.is_case_session()
+                    } else {
+                        false
+                    }
+                };
+
+                //
+                // It's entirely possible to either come across a PASE session OR, a CASE session
+                // that has yet to be activated (i.e a CASEServer holding onto a SecureSession object
+                // waiting for a Sigma1 message to arrive). Let's skip those.
+                //
+                if !is_case_session || (session_ref.get_fabric_index() == KUNDEFINED_FABRIC_INDEX) {
+                    return Loop::Continue;
+                }
+
+                let compare_fabric = unsafe { self.m_fabric_table.as_ref().ok_or(chip_error_invalid_fabric_index!())?.as_ref().
+                    find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?
+                };
+                let target_pub_key = target_fabric.fetch_root_pubkey()?;
+
+            }
+
+            Loop::Continue
+        });
+
+
+        chip_ok!()
+    }
+
+
+    fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, &FabricInfo<'_>), ChipError> {
+        let target_fabric = unsafe { self.m_fabric_table.as_ref().ok_or(chip_error_invalid_fabric_index!())?.as_ref().
+            find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?
+        };
+        let target_pub_key = target_fabric.fetch_root_pubkey()?;
+
+        Ok((target_pub_key, target_fabric))
     }
 }
