@@ -133,7 +133,7 @@ impl EncryptedPacketBufferHandle {
     }
 }
 
-pub struct SessionManager<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate,
     OK: crypto::OperationalKeystore,
@@ -144,7 +144,7 @@ where
     MCMI: MessageCounterManagerInterface,
 {
     m_system_layer: Option<NonNull<LayerImpl>>,
-    m_fabric_table: Option<NonNull<FabricTable<'a, PSD, OK, OCS>>>,
+    m_fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>,
     m_session_key_storage: Option<NonNull<SKS>>,
     m_unauthenticated_sessions: UnauthenticatedSessionTable,
     m_secure_sessions: SecureSessionTable,
@@ -155,10 +155,10 @@ where
     m_message_counter_manager: Option<NonNull<MCMI>>,
     m_global_unencrypted_message_counter: MessageCounter,
     // TODO: use linkedlist
-    m_next_table_delegate: Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>>,
+    m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>,
 }
 
-impl<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate,
     OK: crypto::OperationalKeystore,
@@ -185,16 +185,14 @@ where
         }
     }
 
-    pub fn init(&'a mut self, system_layer: NonNull<LayerImpl>, transport_mgr: NonNull<TMB>, message_counter_manager: NonNull<MCMI>,
-        storage_delegate: NonNull<PSD>, mut fabric_table: NonNull<FabricTable<'a, PSD, OK, OCS>>, session_keystore: NonNull<SKS>) -> ChipErrorResult
+    pub fn init(&mut self, system_layer: NonNull<LayerImpl>, transport_mgr: NonNull<TMB>, message_counter_manager: NonNull<MCMI>,
+        storage_delegate: NonNull<PSD>, mut fabric_table: NonNull<FabricTable<'d, PSD, OK, OCS>>, session_keystore: NonNull<SKS>) -> ChipErrorResult
     {
         verify_or_return_error!(self.m_state == State::KnotReady, Err(chip_error_incorrect_state!()));
 
-        /*
         unsafe {
             fabric_table.as_mut().add_fabric_delegate(Some(ptr::addr_of_mut!(*self)))?;
         }
-        */
 
         chip_ok!()
     }
@@ -477,7 +475,7 @@ where
     }
 }
 
-impl<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI> fabric_table::Delegate<PSD, OK, OCS> for SessionManager<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> fabric_table::Delegate<'d, PSD, OK, OCS> for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate,
     OK: crypto::OperationalKeystore,
@@ -511,7 +509,7 @@ where
         _fabric_index: FabricIndex,
     ) {}
 
-    fn next(&self) -> Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>> {
+    fn next(&self) -> Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)> {
         return self.m_next_table_delegate.clone();
     }
 
@@ -519,7 +517,7 @@ where
         self.m_next_table_delegate = None;
     }
 
-    fn set_next(&mut self, next: Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>>) {
+    fn set_next(&mut self, next: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>) {
         self.m_next_table_delegate = next;
     }
 }
