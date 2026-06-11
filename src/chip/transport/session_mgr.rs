@@ -160,13 +160,13 @@ where
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate,
-    OK: crypto::OperationalKeystore,
-    OCS: credentials::OperationalCertificateStore,
-    SKS: SessionKeystore,
-    SMD: SessionMessageDelegate,
-    TMB: TransportMgrBase,
-    MCMI: MessageCounterManagerInterface,
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
 {
     pub const fn new() -> Self {
         Self {
@@ -193,6 +193,11 @@ where
         unsafe {
             fabric_table.as_mut().add_fabric_delegate(Some(ptr::addr_of_mut!(*self)))?;
         }
+
+        self.m_state = State::Kinitialized;
+        self.m_system_layer = Some(system_layer);
+        self.m_transport_mgr = Some(transport_mgr);
+        self.m_message_counter_manager = Some(message_counter_manager);
 
         chip_ok!()
     }

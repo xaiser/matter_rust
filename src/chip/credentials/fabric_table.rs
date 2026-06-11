@@ -1088,8 +1088,7 @@ pub mod fabric_info {
 
             assert_eq!(
                 true,
-                //info.set_operational_keypair(ptr::addr_of!(keypair)).is_ok()
-                info.set_operational_keypair(&keypair).is_ok()
+                info.set_operational_keypair(NonNull::from_ref(&keypair)).is_ok()
             );
             assert_eq!(true, info.m_operation_key.is_some());
             match info.m_operation_key.as_ref() {
@@ -4086,7 +4085,7 @@ mod fabric_table {
         use crate::ChipError;
         use crate::ChipErrorResult;
 
-        use core::ptr;
+        use core::ptr::{self, NonNull};
         use mockall::*;
         use static_cell::StaticCell;
 
@@ -4098,7 +4097,7 @@ mod fabric_table {
 
         type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
         type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
-        type TestFabricTable = FabricTable<TestPersistentStorage, OK, OCS>;
+        type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
         type MockStorageTestFabricTable<'a> = FabricTable<'a,
             TestPersistentStorage,
@@ -4167,7 +4166,7 @@ mod fabric_table {
             }
         }
 
-        fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo<'static> {
+        fn get_stub_fabric_info_with_index(fabric_index: FabricIndex) -> FabricInfo {
             let mut init_pas = fabric_info::InitParams::default();
             init_pas.m_fabric_index = fabric_index;
             init_pas.m_fabric_id = KUNDEFINED_FABRIC_ID + 1;
@@ -4332,7 +4331,7 @@ mod fabric_table {
             pa: *mut PSD,
             ks: *mut OK,
             pos: *mut OCS,
-        ) -> FabricTable<PSD, OK, OCS>
+        ) -> FabricTable<'static, PSD, OK, OCS>
         where
             PSD: PersistentStorageDelegate,
             OK: crypto::OperationalKeystore,
@@ -8274,7 +8273,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
                 assert_eq!(1, table.fabric_count());
                 assert!(table.commit_pending_fabric_data().is_ok());
             }
@@ -8311,7 +8310,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
                 assert_eq!(1, table.fabric_count());
                 assert!(table.commit_pending_fabric_data().is_ok());
             }
