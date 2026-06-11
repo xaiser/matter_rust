@@ -11,7 +11,7 @@ use crate::{
             },
         },
         credentials::{
-            self, fabric_table::FabricTable,
+            self, fabric_table::{self , FabricTable},
         },
         crypto::{
             self, session_keystore::SessionKeystore, P256PublicKey, crypto_pal::ECPKey,
@@ -39,14 +39,17 @@ use crate::{
     chip_sdk_error,
     chip_core_error,
     chip_error_invalid_fabric_index,
+    chip_error_incorrect_state,
+    verify_or_return_error,
+    verify_or_return_value,
     //verify_or_die,
 };
 
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip::system::LayerImpl;
-use crate::chip::transport::raw::message_header::PacketHeader;
+use crate::chip::transport::raw::message_header::{PacketHeader, PayloadHeader};
 
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
@@ -151,6 +154,8 @@ where
     m_transport_mgr: Option<NonNull<TMB>>,
     m_message_counter_manager: Option<NonNull<MCMI>>,
     m_global_unencrypted_message_counter: MessageCounter,
+    // TODO: use linkedlist
+    m_next_table_delegate: Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>>,
 }
 
 impl<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
@@ -176,7 +181,22 @@ where
             m_transport_mgr: None,
             m_message_counter_manager: None,
             m_global_unencrypted_message_counter: MessageCounter::new_global_unencrypted(),
+            m_next_table_delegate: None,
         }
+    }
+
+    pub fn init(&'a mut self, system_layer: NonNull<LayerImpl>, transport_mgr: NonNull<TMB>, message_counter_manager: NonNull<MCMI>,
+        storage_delegate: NonNull<PSD>, mut fabric_table: NonNull<FabricTable<'a, PSD, OK, OCS>>, session_keystore: NonNull<SKS>) -> ChipErrorResult
+    {
+        verify_or_return_error!(self.m_state == State::KnotReady, Err(chip_error_incorrect_state!()));
+
+        /*
+        unsafe {
+            fabric_table.as_mut().add_fabric_delegate(Some(ptr::addr_of_mut!(*self)))?;
+        }
+        */
+
+        chip_ok!()
     }
 
     pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
@@ -442,7 +462,6 @@ where
         return self.m_unauthenticated_sessions.alloc_initiator(ephemeral_initiator_node_id, peer_address, config).ok();
     }
 
-
     fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, FabricId), ChipError> {
         let target_fabric = unsafe { self.m_fabric_table.as_ref().ok_or(chip_error_invalid_fabric_index!())?.as_ref().
             find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?
@@ -450,5 +469,57 @@ where
         let target_pub_key = target_fabric.fetch_root_pubkey()?;
 
         Ok((target_pub_key, target_fabric.get_fabric_id()))
+    }
+
+    fn is_control_message(payload_header: &PayloadHeader) -> bool {
+        payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncReq.into()) ||
+        payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncRsp.into())
+    }
+}
+
+impl<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI> fabric_table::Delegate<PSD, OK, OCS> for SessionManager<'a, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+    SKS: SessionKeystore,
+    SMD: SessionMessageDelegate,
+    TMB: TransportMgrBase,
+    MCMI: MessageCounterManagerInterface,
+{
+    fn fabric_will_be_removed(
+        &mut self,
+        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_index: FabricIndex,
+    ) {}
+
+    fn on_fabric_removed(
+        &mut self,
+        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_index: FabricIndex,
+    ) {}
+
+    fn on_fabric_updated(
+        &mut self,
+        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_index: FabricIndex,
+    ) {}
+
+    fn on_fabric_commit(
+        &mut self,
+        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_index: FabricIndex,
+    ) {}
+
+    fn next(&self) -> Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>> {
+        return self.m_next_table_delegate.clone();
+    }
+
+    fn remove_next(&mut self) {
+        self.m_next_table_delegate = None;
+    }
+
+    fn set_next(&mut self, next: Option<*mut dyn fabric_table::Delegate<PSD, OK, OCS>>) {
+        self.m_next_table_delegate = next;
     }
 }
