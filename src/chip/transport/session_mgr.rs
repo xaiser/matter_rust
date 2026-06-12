@@ -20,16 +20,20 @@ use crate::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
         },
         transport::{
-            raw::peer_address::PeerAddress,
+            raw::{
+                peer_address::PeerAddress,
+                base::MessageTransportContext,
+            },
             secure_session_table::SecureSessionTable,
             unauthenticated_session::UnauthenticatedSessionTable,
             group_peer_message_counter::GroupOutgoingCounters,
             session_message_delegate::SessionMessageDelegate,
+            transport_mgr::TransportMgrDelegate,
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::MessageCounter,
             session::{SharedSession, SessionHandle, SessionBase},
-            secure_session::{SecureSession, AsRef},
+            secure_session::{SecureSession, AsRef, mark_for_evication},
         },
         ScopedNodeId, FabricIndex, FabricId, NodeId,
     },
@@ -158,6 +162,21 @@ where
     m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>,
 }
 
+impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+where
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
+{
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd,
@@ -198,8 +217,49 @@ where
         self.m_system_layer = Some(system_layer);
         self.m_transport_mgr = Some(transport_mgr);
         self.m_message_counter_manager = Some(message_counter_manager);
+        self.m_fabric_table = Some(fabric_table);
+        self.m_session_key_storage = Some(session_keystore);
+
+        unsafe {
+            self.m_secure_sessions.init();
+        }
+
+        self.m_global_unencrypted_message_counter.init();
+
+        self.m_group_clinent_counter = GroupOutgoingCounters::new_with(Some(storage_delegate));
+        self.m_group_clinent_counter.init()?;
+
+        unsafe {
+            self.m_transport_mgr.as_mut().unwrap().as_mut().set_session_manager(ptr::addr_of_mut!(*self) as _);
+        }
 
         chip_ok!()
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Some(mut table) = self.m_fabric_table.take() {
+            unsafe {
+                table.as_mut().remove_fabric_delegate(Some(ptr::addr_of_mut!(*self)));
+            }
+        }
+
+        self.m_state = State::KnotReady;
+
+        // Just in case some consumer forgot to do it, expire all our secure
+        // sessions.  Note that this stands a good chance of crashing with a
+        // null-deref if there are in fact any secure sessions left, since they will
+        // try to notify their exchanges, which will then try to operate on
+        // partially-shut-down objects.
+        self.expire_all_secure_sessions();
+
+        // We don't have a safe way to check or affect the state of our
+        // mUnauthenticatedSessions.  We can only hope they got shut down properly.
+        
+        self.m_message_counter_manager = None;
+
+        self.m_system_layer = None;
+        self.m_transport_mgr = None;
+        self.m_cb = None;
     }
 
     pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
@@ -474,6 +534,15 @@ where
         Ok((target_pub_key, target_fabric.get_fabric_id()))
     }
 
+    fn expire_all_secure_sessions(&mut self) {
+        self.m_secure_sessions.for_each_session(|shared_session| {
+            let handle = SessionHandle::new_with(shared_session);
+            mark_for_evication(handle);
+
+            Loop::Continue
+        });
+    }
+
     fn is_control_message(payload_header: &PayloadHeader) -> bool {
         payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncReq.into()) ||
         payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncRsp.into())
@@ -524,5 +593,26 @@ where
 
     fn set_next(&mut self, next: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>) {
         self.m_next_table_delegate = next;
+    }
+}
+
+impl<PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'_, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+where
+    PSD: PersistentStorageDelegate,
+    OK: crypto::OperationalKeystore,
+    OCS: credentials::OperationalCertificateStore,
+    SKS: SessionKeystore,
+    SMD: SessionMessageDelegate,
+    TMB: TransportMgrBase,
+    MCMI: MessageCounterManagerInterface,
+{
+    fn on_message_received(
+        &mut self,
+        _source: PeerAddress,
+        _msg_buf: PacketBufferHandle,
+        _ctext: *const MessageTransportContext,
+    )
+    {
+        // TODO
     }
 }

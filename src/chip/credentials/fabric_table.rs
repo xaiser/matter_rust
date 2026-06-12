@@ -6173,7 +6173,6 @@ mod fabric_table {
                 let _ = keypair.initialize(ECPKeyTarget::Ecdh);
                 keypair
             });
-            //init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
             init_pas.m_operation_key = Some(NonNull::from_ref(&keypair));
             init_pas.m_has_externally_owned_operation_key = true;
 
