@@ -6174,7 +6174,7 @@ mod fabric_table {
                 keypair
             });
             //init_pas.m_operation_key = ptr::addr_of_mut!(keypair);
-            init_pas.m_operation_key = Some(&keypair);
+            init_pas.m_operation_key = Some(NonNull::from_ref(&keypair));
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
@@ -6269,7 +6269,7 @@ mod fabric_table {
                 let _ = keypair.initialize(ECPKeyTarget::Ecdh);
                 keypair
             });
-            init_pas.m_operation_key = Some(&keypair);
+            init_pas.m_operation_key = Some(NonNull::from_ref(&keypair));
             init_pas.m_has_externally_owned_operation_key = true;
 
             // to initialize the fabric with op key
@@ -7072,7 +7072,7 @@ mod fabric_table {
             );
 
             assert!(
-                table.add_or_update_inner(fabric_index, is_addition, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+                table.add_or_update_inner(fabric_index, is_addition, Some(NonNull::from_ref(&noc_keypair)), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
             assert_eq!(1, table.fabric_count());
 
         }
@@ -7141,7 +7141,7 @@ mod fabric_table {
             );
 
             assert!(
-                !table.add_or_update_inner(fabric_index, is_addition, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+                !table.add_or_update_inner(fabric_index, is_addition, Some(NonNull::from_ref(&noc_keypair)), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
 
         }
 
@@ -7178,7 +7178,7 @@ mod fabric_table {
             );
 
             assert!(
-                !table.add_or_update_inner(fabric_index, is_addition, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+                !table.add_or_update_inner(fabric_index, is_addition, Some(NonNull::from_ref(&noc_keypair)), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
 
         }
 
@@ -7214,9 +7214,9 @@ mod fabric_table {
             );
 
             assert!(
-                table.add_or_update_inner(fabric_index, is_addition, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+                table.add_or_update_inner(fabric_index, is_addition, Some(NonNull::from_ref(&noc_keypair)), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
             assert!(
-                table.add_or_update_inner(fabric_index, false, Some(&noc_keypair), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
+                table.add_or_update_inner(fabric_index, false, Some(NonNull::from_ref(&noc_keypair)), true, 0x01u16, AdvertiseIdentity::Yes).is_ok());
 
         }
 
@@ -7276,7 +7276,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
 
         }
@@ -7298,7 +7298,7 @@ mod fabric_table {
             );
 
             assert!(
-                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7349,7 +7349,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
 
             let mut table2 = create_table_with_param(
@@ -7361,7 +7361,7 @@ mod fabric_table {
             table2.m_state_flag.insert(StateFlags::KisTrustedRootPending);
 
             assert!(
-                !table2.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table2.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7385,7 +7385,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7433,7 +7433,7 @@ mod fabric_table {
 
 
             assert!(
-                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7509,9 +7509,9 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert!(
-                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
 
         }
 
@@ -7559,7 +7559,7 @@ mod fabric_table {
             let _ = table.m_states[0].init(&init_pas);
 
             assert!(
-                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7607,7 +7607,7 @@ mod fabric_table {
 
 
             assert!(
-                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                !table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
         }
 
         #[test]
@@ -7630,7 +7630,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
         }
@@ -7657,11 +7657,11 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert!(
-                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert!(table.commit_pending_fabric_data().is_ok());
         }
 
@@ -7685,7 +7685,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             // Simulate an update is pending
             table.m_state_flag.insert(StateFlags::KisUpdatePending);
@@ -7712,7 +7712,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             // Simulate no root
             table.m_state_flag.remove(StateFlags::KisTrustedRootPending);
@@ -7739,7 +7739,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             // Simulate an update without valid pending fabric
@@ -7768,7 +7768,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             // Remove pending op certs
             pos.revert_pending_op_certs();
@@ -7797,7 +7797,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             // Remove keypair in pendinf fabric
             let mut init_pas = fabric_info::InitParams::default();
@@ -7834,11 +7834,11 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert!(
-                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             table.m_states[0].reset();
             assert!(table.commit_pending_fabric_data().is_ok());
         }
@@ -7866,11 +7866,11 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert!(
-                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             table.m_pending_fabric.reset();
             assert!(table.commit_pending_fabric_data().is_ok());
         }
@@ -7897,11 +7897,11 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert!(
-                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.update_pending_fabric_common(fabric_index, noc_buf.const_bytes(), icac_buf.const_bytes(), Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             pa.add_posion_key(DefaultStorageKeyAllocator::fabric_metadata(fabric_index).key_name_str());
             assert!(!table.commit_pending_fabric_data().is_ok());
         }
@@ -7987,7 +7987,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             pa.add_posion_key(DefaultStorageKeyAllocator::fabric_noc(fabric_index).key_name_str());
             assert!(!table.commit_pending_fabric_data().is_ok());
@@ -8013,7 +8013,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             pa.add_posion_key(DefaultStorageKeyAllocator::fabric_index_info().key_name_str());
             assert!(!table.commit_pending_fabric_data().is_ok());
@@ -8044,7 +8044,7 @@ mod fabric_table {
             assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
             assert!(
-                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             assert_eq!(1, table.fabric_count());
             assert!(table.commit_pending_fabric_data().is_ok());
             assert_eq!(fabric_index, table.m_states[0].get_fabric_index());
@@ -8074,7 +8074,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
                 assert_eq!(1, table.fabric_count());
                 assert!(table.commit_pending_fabric_data().is_ok());
             }
@@ -8138,7 +8138,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
                 assert_eq!(1, table.fabric_count());
                 assert!(table.commit_pending_fabric_data().is_ok());
             }
@@ -8201,7 +8201,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), &[], vendor_id, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
             }
 
             // vvsc && vvs
@@ -8236,7 +8236,7 @@ mod fabric_table {
                 assert!(table.add_new_pending_trusted_root_cert(rcac_buf.const_bytes()).is_ok());
 
                 assert!(
-                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(&noc_keypair), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
+                    table.add_new_pending_fabric_common(noc_buf.const_bytes(), icac_buf.const_bytes(), 0x1u16, Some(NonNull::from_ref(&noc_keypair)), true, AdvertiseIdentity::Yes).inspect_err(|e| println!("err {}", e)).is_ok());
                 assert_eq!(1, table.fabric_count());
                 assert!(table.commit_pending_fabric_data().is_ok());
             }
