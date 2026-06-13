@@ -24,7 +24,7 @@ pub trait TransportMgrDelegate {
     );
 }
 
-struct TransportMgrReceiver<SessionMgrType>
+pub struct TransportMgrReceiver<SessionMgrType>
 where
     SessionMgrType: TransportMgrDelegate,
 {

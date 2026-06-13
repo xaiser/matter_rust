@@ -139,13 +139,13 @@ impl EncryptedPacketBufferHandle {
 
 pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate,
-    OK: crypto::OperationalKeystore,
-    OCS: credentials::OperationalCertificateStore,
-    SKS: SessionKeystore,
-    SMD: SessionMessageDelegate,
-    TMB: TransportMgrBase,
-    MCMI: MessageCounterManagerInterface,
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
 {
     m_system_layer: Option<NonNull<LayerImpl>>,
     m_fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>,
@@ -551,13 +551,13 @@ where
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> fabric_table::Delegate<'d, PSD, OK, OCS> for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate,
-    OK: crypto::OperationalKeystore,
-    OCS: credentials::OperationalCertificateStore,
-    SKS: SessionKeystore,
-    SMD: SessionMessageDelegate,
-    TMB: TransportMgrBase,
-    MCMI: MessageCounterManagerInterface,
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
 {
     fn fabric_will_be_removed(
         &mut self,
@@ -596,15 +596,15 @@ where
     }
 }
 
-impl<PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'_, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate,
-    OK: crypto::OperationalKeystore,
-    OCS: credentials::OperationalCertificateStore,
-    SKS: SessionKeystore,
-    SMD: SessionMessageDelegate,
-    TMB: TransportMgrBase,
-    MCMI: MessageCounterManagerInterface,
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
 {
     fn on_message_received(
         &mut self,
@@ -616,3 +616,112 @@ where
         // TODO
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        chip::{
+            chip_lib::{
+                support::{
+                    test_persistent_storage::TestPersistentStorage,
+                },
+            },
+            credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+            crypto::{
+                raw_session_keystore::RawKeySessionKeystore,
+                persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+            },
+            inet::test_end_point::TestEndPointManager,
+            transport::{
+                raw::{
+                    test::{Test, TestListenParameter},
+                },
+                transport_mgr::{TransportMgrReceiver, TransportMgr},
+                session_message_delegate::DuplicateMessage,
+            },
+            platform::global::system_layer,
+        },
+    };
+
+    type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
+    type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
+
+    struct TestSessionMessageDelegate(bool);
+
+    impl TestSessionMessageDelegate {
+        pub const fn new() -> Self {
+            TestSessionMessageDelegate(false)
+        }
+
+        pub fn reset(&mut self) {
+            self.0 = false;
+        }
+    }
+
+    impl SessionMessageDelegate for TestSessionMessageDelegate {
+        fn on_message_received(&mut self, _packet_header: &PacketHeader, _payload_header: &PayloadHeader,
+            _session: &SessionHandle, _is_duplicate: DuplicateMessage, _msg_buf: &mut PacketBufferHandle) {
+            self.0 = true;
+        }
+    }
+
+    struct SessionMgrOp<'a> {
+        session_mgr: * mut TestSessionManager<'a>,
+    }
+
+    impl TransportMgrDelegate for SessionMgrOp<'_>{
+        fn on_message_received(
+            &mut self,
+            source: PeerAddress,
+            msg_buf: PacketBufferHandle,
+            ctext: *const MessageTransportContext,
+        )
+        {
+            unsafe {
+                self.session_mgr.as_mut().unwrap().on_message_received(source, msg_buf, ctext);
+            }
+        }
+    }
+
+    type TestTransportMgr<'a> = TransportMgr<
+        (
+            Test<TransportMgrReceiver<SessionMgrOp<'a>>>,
+        ),
+        SessionMgrOp<'a>,
+    >;
+
+    struct TestMessageCounterMgr;
+
+    impl MessageCounterManagerInterface for TestMessageCounterMgr {
+        fn start_sync(&mut self, _session: &SessionHandle, _state: &mut SessionHandle) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+
+        fn queue_received_message_and_start_sync(&mut self, packet_header: &PacketHeader, session: &SessionHandle, state: &mut SessionHandle,
+            peer_address: &PeerAddress) -> Result<PacketBufferHandle, ChipError>
+        {
+            Ok(PacketBufferHandle::default())
+        }
+    }
+
+    type TestSessionManager<'a> = SessionManager<'a, TestPersistentStorage, OK, OCS, RawKeySessionKeystore,
+       TestSessionMessageDelegate, TestTransportMgr<'a>, TestMessageCounterMgr>;
+
+    type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
+
+    #[test]
+    fn init() {
+        let system = system_layer();
+        (*sl).init();
+        // init transport mgr
+        let mut end_point_mgr = TestEndPointManager::default();
+        end_point_mgr.init(sl);
+        let mut transport_mgr = TestTransportMgr::default();
+        let message_counter_manager = TestMessageCounterMgr::new();
+        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
+
+        let mut sm = TestSessionManager::new();
+    }
+} // end of mod tests

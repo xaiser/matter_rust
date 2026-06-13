@@ -18,6 +18,6 @@ pub enum DuplicateMessage {
 }
 
 pub trait SessionMessageDelegate {
-    fn on_message_received(packet_header: &PacketHeader, payload_header: &PayloadHeader,
+    fn on_message_received(&mut self, packet_header: &PacketHeader, payload_header: &PayloadHeader,
         session: &SessionHandle, is_duplicate: DuplicateMessage, msg_buf: &mut PacketBufferHandle);
 }
