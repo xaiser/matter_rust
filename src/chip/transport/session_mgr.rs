@@ -26,7 +26,7 @@ use crate::{
             },
             secure_session_table::SecureSessionTable,
             unauthenticated_session::UnauthenticatedSessionTable,
-            group_peer_message_counter::GroupOutgoingCounters,
+            group_peer_message_counter::{GroupOutgoingCounters, GroupPeerTable},
             session_message_delegate::SessionMessageDelegate,
             transport_mgr::TransportMgrDelegate,
             transport_mgr_base::TransportMgrBase,
@@ -60,6 +60,14 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_error;
 use core::str::FromStr;
+
+fn group_peer_table() -> NonNull<GroupPeerTable> {
+    static mut G_GROUP_PEER_TABLE: GroupPeerTable = GroupPeerTable::new();
+
+    unsafe {
+        return NonNull::new_unchecked(ptr::addr_of_mut!(G_GROUP_PEER_TABLE));
+    }
+}
 
 /*
  *    The State of a secure transport object.
@@ -227,9 +235,7 @@ where
         self.m_fabric_table = fabric_table;
         self.m_session_key_storage = session_keystore;
 
-        unsafe {
-            self.m_secure_sessions.init();
-        }
+        self.m_secure_sessions.init();
 
         self.m_global_unencrypted_message_counter.init();
 
@@ -271,6 +277,12 @@ where
 
     pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
         self.m_cb = Some(cb);
+    }
+
+    pub fn fabric_removed(&mut self, fabric_index: FabricIndex) {
+        unsafe {
+            let _ = group_peer_table().as_mut().fabric_removed(fabric_index);
+        }
     }
 
     pub fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
