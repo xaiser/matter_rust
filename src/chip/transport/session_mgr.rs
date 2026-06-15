@@ -44,6 +44,7 @@ use crate::{
     chip_core_error,
     chip_error_invalid_fabric_index,
     chip_error_incorrect_state,
+    chip_error_invalid_argument,
     verify_or_return_error,
     verify_or_return_value,
     //verify_or_die,
@@ -204,21 +205,27 @@ where
         }
     }
 
-    pub fn init(&mut self, system_layer: NonNull<LayerImpl>, transport_mgr: NonNull<TMB>, message_counter_manager: NonNull<MCMI>,
-        storage_delegate: NonNull<PSD>, mut fabric_table: NonNull<FabricTable<'d, PSD, OK, OCS>>, session_keystore: NonNull<SKS>) -> ChipErrorResult
+    pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<TMB>>, 
+        message_counter_manager: Option<NonNull<MCMI>>,
+        storage_delegate: Option<NonNull<PSD>>, mut fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>, 
+        session_keystore: Option<NonNull<SKS>>) -> ChipErrorResult
     {
         verify_or_return_error!(self.m_state == State::KnotReady, Err(chip_error_incorrect_state!()));
 
-        unsafe {
-            fabric_table.as_mut().add_fabric_delegate(Some(ptr::addr_of_mut!(*self)))?;
+        if let Some(table) = fabric_table.as_mut() {
+            unsafe {
+                table.as_mut().add_fabric_delegate(Some(ptr::addr_of_mut!(*self)))?;
+            }
+        } else {
+            return Err(chip_error_invalid_argument!());
         }
 
         self.m_state = State::Kinitialized;
-        self.m_system_layer = Some(system_layer);
-        self.m_transport_mgr = Some(transport_mgr);
-        self.m_message_counter_manager = Some(message_counter_manager);
-        self.m_fabric_table = Some(fabric_table);
-        self.m_session_key_storage = Some(session_keystore);
+        self.m_system_layer = system_layer;
+        self.m_transport_mgr = transport_mgr;
+        self.m_message_counter_manager = message_counter_manager;
+        self.m_fabric_table = fabric_table;
+        self.m_session_key_storage = session_keystore;
 
         unsafe {
             self.m_secure_sessions.init();
@@ -226,7 +233,7 @@ where
 
         self.m_global_unencrypted_message_counter.init();
 
-        self.m_group_clinent_counter = GroupOutgoingCounters::new_with(Some(storage_delegate));
+        self.m_group_clinent_counter = GroupOutgoingCounters::new_with(storage_delegate);
         self.m_group_clinent_counter.init()?;
 
         unsafe {
@@ -632,7 +639,10 @@ mod tests {
                 raw_session_keystore::RawKeySessionKeystore,
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
             },
-            inet::test_end_point::TestEndPointManager,
+            inet::{
+                inet_layer::EndPointManager,
+                test_end_point::TestEndPointManager,
+            },
             transport::{
                 raw::{
                     test::{Test, TestListenParameter},
@@ -641,6 +651,7 @@ mod tests {
                 session_message_delegate::DuplicateMessage,
             },
             platform::global::system_layer,
+            system::system_layer::Layer,
         },
     };
 
@@ -693,6 +704,12 @@ mod tests {
 
     struct TestMessageCounterMgr;
 
+    impl TestMessageCounterMgr {
+        pub const fn new() -> Self {
+            TestMessageCounterMgr
+        }
+    }
+
     impl MessageCounterManagerInterface for TestMessageCounterMgr {
         fn start_sync(&mut self, _session: &SessionHandle, _state: &mut SessionHandle) -> ChipErrorResult {
             chip_ok!()
@@ -711,17 +728,83 @@ mod tests {
 
     type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
-    #[test]
-    fn init() {
+    fn setup<'a>() -> Result<(*mut crate::chip::system::LayerImpl, TestEndPointManager, TestTransportMgr<'a>, TestMessageCounterMgr,
+        TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestSessionManager<'a>), ChipError>
+    {
         let system = system_layer();
-        (*sl).init();
+        unsafe {
+            (*system).init();
+        }
         // init transport mgr
         let mut end_point_mgr = TestEndPointManager::default();
-        end_point_mgr.init(sl);
+        end_point_mgr.init(system);
         let mut transport_mgr = TestTransportMgr::default();
-        let message_counter_manager = TestMessageCounterMgr::new();
+        let mut message_counter_manager = TestMessageCounterMgr::new();
         //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
+        
+        let mut pa = TestPersistentStorage::default();
+        let mut table = TestFabricTable::default();
+        let mut session_key_store = RawKeySessionKeystore::new();
 
         let mut sm = TestSessionManager::new();
+
+        sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           NonNull::new(ptr::addr_of_mut!(pa)), NonNull::new(ptr::addr_of_mut!(table)), 
+           NonNull::new(ptr::addr_of_mut!(session_key_store)))?;
+
+        return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, sm));
+    }
+
+    #[test]
+    fn init() {
+        assert!(setup().is_ok());
+    }
+
+    #[test]
+    fn init_no_table() {
+        let system = system_layer();
+        unsafe {
+            (*system).init();
+        }
+        // init transport mgr
+        let mut end_point_mgr = TestEndPointManager::default();
+        end_point_mgr.init(system);
+        let mut transport_mgr = TestTransportMgr::default();
+        let mut message_counter_manager = TestMessageCounterMgr::new();
+        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
+        
+        let mut pa = TestPersistentStorage::default();
+        //let mut table = TestFabricTable::default();
+        let mut session_key_store = RawKeySessionKeystore::new();
+
+        let mut sm = TestSessionManager::new();
+
+        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           NonNull::new(ptr::addr_of_mut!(pa)), None,
+           NonNull::new(ptr::addr_of_mut!(session_key_store))).is_ok());
+    }
+
+    #[test]
+    fn init_no_storage() {
+        let system = system_layer();
+        unsafe {
+            (*system).init();
+        }
+        // init transport mgr
+        let mut end_point_mgr = TestEndPointManager::default();
+        end_point_mgr.init(system);
+        let mut transport_mgr = TestTransportMgr::default();
+        let mut message_counter_manager = TestMessageCounterMgr::new();
+        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
+        
+        //let mut pa = TestPersistentStorage::default();
+        let mut table = TestFabricTable::default();
+        let mut session_key_store = RawKeySessionKeystore::new();
+
+        let mut sm = TestSessionManager::new();
+
+        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           None, NonNull::new(ptr::addr_of_mut!(table)), 
+           NonNull::new(ptr::addr_of_mut!(session_key_store))).is_ok());
     }
 } // end of mod tests
