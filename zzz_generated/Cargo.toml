@@ -1,0 +1,9 @@
+[package]
+name = "zzz_generated"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+zap_generated = true
+
+
