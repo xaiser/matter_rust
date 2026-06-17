@@ -1,3 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["matter", "matter_proc_macro"]
+members = ["matter", "matter_proc_macro", "zzz_generated"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+lto = false
+panic = "abort"

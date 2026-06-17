@@ -16,11 +16,15 @@ impl<const N: usize> Default for DefaultString<N> {
 }
 
 impl<const N: usize> DefaultString<N> {
-    pub const fn const_default() -> Self {
+    pub const fn new() -> Self {
         Self {
             m_buf: [0; N],
             len: 0,
         }
+    }
+
+    pub const fn const_default() -> Self {
+        Self::new()
     }
 
     pub fn len(&self) -> usize {

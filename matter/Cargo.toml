@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bitflags = { version = "2.9.0", default-features = false }
 matter_proc_macro = { path = "../matter_proc_macro" }
+zzz_generated = { path = "../zzz_generated" }
 ecdsa = { version = "0.13.4", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 generic-array = "0.14"
@@ -25,12 +26,6 @@ ctr = { version = "0.9.0", default-features = false }
 
 [dev-dependencies]
 mockall = "0.13"
-
-[profile.dev]
-opt-level = 0
-debug = true
-lto = false
-panic = "abort"
 
 [features]
 default = ["chip_error_logging", "chip_progress_logging", "chip_detail_logging", "chip_automation_logging", "chip_with_fault_injection", "chip_config_sha256_context_align_8"]
