@@ -2,6 +2,7 @@ pub type FabricId = u64;
 pub type CompressedFabricId = u64;
 pub type FabricIndex = u8;
 pub type KeysetId = u16;
+pub type EndpointId = u16;
 
 pub const KUNDEFINED_FABRIC_ID: FabricId = 0;
 pub const KMIN_VALID_FABRIC_INDEX: FabricIndex = 1;

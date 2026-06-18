@@ -2,14 +2,18 @@ use crate::{
     chip::{
         chip_lib::{
             core::{
-                data_model_types::KeysetId,
-                chip_config::CHIP_CONFIG_MAX_GROUP_NAME_LENGTH,
+                data_model_types::{KeysetId, EndpointId},
+                chip_config::{CHIP_CONFIG_MAX_GROUP_NAME_LENGTH, CHIP_CONFIG_MAX_GROUPS_PER_FABRIC, CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC},
                 group_id::KUNDEFINED_GROUP_ID,
             },
             support::default_string::DefaultString,
         },
-        GroupId,
+        GroupId, FabricIndex,
     },
+    ChipError,
+    ChipErrorResult,
+    verify_or_return_error,
+    verify_or_return_value,
 };
 
 use zzz_generated::cluster_enums;
@@ -98,28 +102,171 @@ impl PartialEq for GroupKey {
 pub struct GroupEndpoint {
     // Identifies group within the scope of the given Fabric
     pub group_id: GroupId,
-    // Set of group keys that generate operational group keys for use with this group
-    pub keyset_id: EndpointsetId,
+    // Endpoint on the Node to which messages to this group may be forwarded
+    pub endpoint_id: EndpointId,
 }
 
 impl GroupEndpoint {
     pub const fn new() -> Self {
         Self {
             group_id: KUNDEFINED_GROUP_ID,
-            keyset_id: 0,
+            endpoint_id: 0,
         }
     }
 
-    pub const fn new_with(group_id: GroupId, keyset_id: EndpointsetId) -> Self {
+    pub const fn new_with(group_id: GroupId, endpoint_id: EndpointId) -> Self {
         Self {
             group_id,
-            keyset_id,
+            endpoint_id,
         }
     }
 }
 
 impl PartialEq for GroupEndpoint {
     fn eq(&self, other: &Self) -> bool {
-        self.group_id == other.group_id && self.keyset_id == self.keyset_id
+        self.group_id == other.group_id && self.endpoint_id == self.endpoint_id
     }
+}
+
+mod epoch_key {
+    pub const KLENGTH_BYTES: usize = crate::chip::crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES;
+}
+
+/// EpochKey
+// An EpochKey is a single key usable to determine an operational group key
+pub struct EpochKey {
+    // Validity start time in microseconds since 2000-01-01T00:00:00 UTC ("the Epoch")
+    pub start_time: u64,
+    // Actual key bits. Depending on context, it may be a raw epoch key (as seen within `SetKeySet` calls)
+    // or it may be the derived operational group key (as seen in any other usage).
+    pub key: [u8; epoch_key::KLENGTH_BYTES],
+}
+
+impl EpochKey {
+    pub const fn new() -> Self {
+        Self {
+            start_time: 0,
+            key: [0u8; epoch_key::KLENGTH_BYTES],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.start_time = 0;
+        crate::chip::crypto::clear_secret_data(&mut self.key);
+    }
+}
+
+impl PartialEq for EpochKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_time == other.start_time && self.key == other.key
+    }
+}
+
+mod key_set {
+    pub const KEPOCH_KEYS_MAX: usize = 3;
+}
+
+pub struct KeySet {
+    // The actual keys for the group key set
+    pub epoch_keys: [EpochKey; key_set::KEPOCH_KEYS_MAX],
+    // Logical id provided by the Administrator that configured the entry
+    pub keyset_id: u16,
+    // Security policy to use for groups that use this keyset
+    pub policy: SecurityPolicy,
+    // Number of keys present
+    pub num_keys_used: u8,
+}
+
+impl KeySet {
+    pub const fn new() -> Self {
+        Self {
+            epoch_keys: [ const { EpochKey::new() }; key_set::KEPOCH_KEYS_MAX],
+            keyset_id: 0,
+            policy: SecurityPolicy::KcacheAndSync,
+            num_keys_used: 0,
+        }
+    }
+
+    pub const fn new_with(keyset_id: u16, policy: SecurityPolicy, num_keys_used: u8) -> Self {
+        Self {
+            epoch_keys: [ const { EpochKey::new() }; key_set::KEPOCH_KEYS_MAX],
+            keyset_id,
+            policy,
+            num_keys_used,
+        }
+    }
+
+    pub fn clear_keys(&mut self) {
+        for k in &mut self.epoch_keys {
+            k.clear();
+        }
+    }
+}
+
+impl PartialEq for KeySet {
+    fn eq(&self, other: &Self) -> bool {
+        verify_or_return_error!(self.policy == other.policy && self.num_keys_used == other.num_keys_used, false);
+        for (this, other) in self.epoch_keys.iter().zip(other.epoch_keys.iter()) {
+            if *this != *other {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+pub trait GroupListener {
+    /*
+     *  Callback invoked when a new group is added.
+     *
+     *  @param[in] new_group  GroupInfo structure of the new group.
+     */
+    fn on_group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo);
+    /*
+     *  Callback invoked when an existing group is removed.
+     *
+     *  @param[in] old_group  GroupInfo structure of the removed group.
+     */
+    fn on_group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo);
+}
+
+pub trait GroupDataProvider {
+    type GroupInfoIterator;
+    type GroupKeyIterator;
+    type EndpointIterator;
+    type KeySetIterator;
+    type GroupSessionIterator;
+
+    fn new() -> Self where Self: Sized{
+        <Self as GroupDataProvider>::new_with(CHIP_CONFIG_MAX_GROUPS_PER_FABRIC as u16, CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC as u16)
+    }
+
+    fn new_with(max_group_per_fabric: u16, max_group_keys_per_fabric: u16) -> Self;
+
+    fn get_max_groups_per_fabric(&self) -> u16;
+
+    fn get_max_group_keys_per_fabric(&self) -> u16;
+
+    fn init(&mut self) -> ChipErrorResult;
+
+    fn finish(&mut self);
+
+    // By id
+    fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult;
+    fn get_group_info(&self, fabric_index: FabricIndex) -> Result<GroupInfo, ChipError>;
+    fn remove_group_info(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult;
+    // By index
+    fn set_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupInfo) -> ChipErrorResult;
+    fn get_group_info_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupInfo, ChipError>;
+    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, group_id: GroupId) -> ChipErrorResult;
+
+    // Endpoints
+    fn has_endpoint(&self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> bool;
+    fn add_endpoint(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult;
+    fn remove_endpoint(&mut self, fabric_index: FabricIndex, group_id: Option<GroupId>, endpoint_id: EndpointId) -> ChipErrorResult;
+
+    // Iterators
+    fn iter_group_info(&self, fabric_index: FabricIndex) -> Self::GroupInfoIterator;
+    fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Self::EndpointIterator;
 }
