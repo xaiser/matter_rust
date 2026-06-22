@@ -16,6 +16,7 @@ use crate::{
     verify_or_return_value,
 };
 
+use core::ptr::NonNull;
 use zzz_generated::cluster_enums;
 
 pub type SecurityPolicy = cluster_enums::GroupKeyManagement::GroupKeySecurityPolicyEnum;
@@ -267,6 +268,47 @@ pub trait GroupDataProvider {
     fn remove_endpoint(&mut self, fabric_index: FabricIndex, group_id: Option<GroupId>, endpoint_id: EndpointId) -> ChipErrorResult;
 
     // Iterators
-    fn iter_group_info(&self, fabric_index: FabricIndex) -> Self::GroupInfoIterator;
-    fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Self::EndpointIterator;
+    fn iter_group_info(&self, fabric_index: FabricIndex) -> Option<Self::GroupInfoIterator>;
+    fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self::EndpointIterator>;
+
+    //
+    // Group-Key map
+    //
+    fn set_group_key_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupKey) -> ChipErrorResult;
+    fn get_group_key_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupKey, ChipError>;
+    fn remove_group_key_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult;
+    fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
+
+    fn iter_group_keys(&self, fabric_index: FabricIndex) -> Option<Self::GroupKeyIterator>;
+
+    //
+    // Key Sets
+    //
+    fn set_key_set(&mut self, fabric_index: FabricIndex, compressed_fabric_id: &[u8], keys: &KeySet) -> ChipErrorResult;
+    fn get_key_set(&self, fabric_index: FabricIndex, keyset_id: KeysetId) -> Result<KeySet, ChipError>;
+    fn remove_key_set(&mut self, fabric_index: FabricIndex, keyset_id: KeysetId) -> ChipErrorResult;
+
+    /*
+     * @brief Obtain the actual operational Identity Protection Key (IPK) keyset for a given
+     *        fabric. These keys are used by the CASE protocol, and do not participate in
+     *        any direct traffic encryption. Since the identity protection operational keyset
+     *        is used in multiple key derivations and procedures, it cannot be hidden behind a
+     *        SymmetricKeyContext, and must be obtainable by value.
+     *
+     * @param fabric_index - Fabric index for which to get the IPK operational keyset
+     * @param out_keyset - Reference to a KeySet where the IPK keys will be stored on success
+     * @return CHIP_NO_ERROR on success, CHIP_ERROR_NOT_FOUND if the IPK keyset is somehow unavailable
+     *         or another CHIP_ERROR value if an internal storage error occurs.
+     */
+    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<&KeySet, ChipError>;
+
+    fn iter_key_sets(&self, fabric_index: FabricIndex) -> Option<Self::KeySetIterator>;
+
+    fn remove_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
+
+    fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator>;
+    fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
+
+    fn set_listener<Listener: GroupListener>(&mut self, listener: NonNull<Listener>);
+    fn remove_listener(&mut self);
 }
