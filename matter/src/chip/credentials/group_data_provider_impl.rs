@@ -9,7 +9,7 @@ use crate::{
             },
             support::default_string::DefaultString,
         },
-        credentials::group_data_provider::{GroupDataProvider, GroupListener},
+        credentials::group_data_provider::{GroupDataProvider, GroupListener, GroupInfo},
         crypto::{
             self, session_keystore::SessionKeystore,
         },
@@ -48,6 +48,15 @@ impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
     }
     */
 }
+
+impl<Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<Provider> {
+    type Item = GroupInfo;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
 
 pub struct GroupDataProviderImpl<PSD, SKS, LIS>
 where
