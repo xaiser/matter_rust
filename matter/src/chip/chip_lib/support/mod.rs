@@ -15,6 +15,7 @@ pub mod bytes_to_hex;
 pub mod time_utils;
 pub mod intrusive_list;
 pub mod bitset;
+pub mod persistent_data;
 
 #[cfg(test)]
 pub mod test_persistent_storage;
