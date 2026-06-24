@@ -94,7 +94,7 @@ impl<const KMAX_SERIALIZED_SIZE: usize> PersistentStore<KMAX_SERIALIZED_SIZE> {
         persistent.deserialize(&mut reader)
     }
 
-    fn delete<T: DataAccessor, PSD: PersistentStorageDelegate>(&self, persistent: &mut T, storage: * mut PSD) -> ChipErrorResult {
+    fn delete<T: DataAccessor, PSD: PersistentStorageDelegate>(&self, persistent: &T, storage: * mut PSD) -> ChipErrorResult {
         verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
 
         let key = persistent.update_key()?;
@@ -107,7 +107,6 @@ impl<const KMAX_SERIALIZED_SIZE: usize> PersistentStore<KMAX_SERIALIZED_SIZE> {
 
 pub struct PersistentData<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> {
     m_storage: Option<NonNull<PSD>>,
-    //m_buffer: [u8; KMAX_SERIALIZED_SIZE],
     m_store: PersistentStore<KMAX_SERIALIZED_SIZE>,
     m_value: T,
 }
@@ -132,7 +131,6 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
     }
 
     pub fn save_to(&mut self, storage: * mut PSD) -> ChipErrorResult {
-        //Self::save_common(&self.m_value, storage, &mut self.m_store)
         self.m_store.save(&self.m_value, storage)
     }
 
@@ -147,12 +145,10 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
     }
 
     pub fn load_from(&mut self, storage: * mut PSD) -> ChipErrorResult {
-        //Self::load_common(&mut self.m_value, storage, &mut self.m_store)
         self.m_store.load(&mut self.m_value, storage)
     }
 
     pub fn delete_from(&mut self, storage: * mut PSD) -> ChipErrorResult {
-        //Self::delete_common(&mut self.m_value, storage)
         self.m_store.delete(&mut self.m_value, storage)
     }
 
@@ -163,68 +159,283 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
     pub fn as_mut(&mut self) -> &mut T {
         &mut self.m_value
     }
-
-    /*
-    fn save_common(persistent: &T, storage: * mut PSD, buffer: &mut [u8]) -> ChipErrorResult {
-        verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
-
-        let key = persistent.update_key()?;
-
-        // Serialize the data
-        let mut writer = BufferWriter::default();
-        writer.init(buffer.as_mut_ptr(), buffer.len() as u32);
-
-        persistent.serialize(&mut writer)?;
-
-        unsafe {
-            return storage.as_mut().unwrap().sync_set_key_value(key.key_name_str(), &buffer[..writer.get_length_written()]);
-        }
-    }
-
-    fn load_common(persistent: &mut T, storage: * mut PSD, buffer: &mut [u8]) -> ChipErrorResult {
-        verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
-
-        let key = persistent.update_key()?;
-
-        // Set data to defaults
-        persistent.clear();
-
-        // Load the serialized data
-        unsafe {
-            storage.as_ref().unwrap().sync_get_key_value(key.key_name_str(), buffer).map_err(|e| {
-                if e == chip_error_persisted_storage_value_not_found!() {
-                    chip_error_not_found!()
-                } else {
-                    e
-                }
-            })?;
-        }
-
-        // Decode serialized data
-        let mut reader = BufferReader::default();
-        reader.init(buffer.as_mut_ptr(), buffer.len());
-
-        persistent.deserialize(&mut reader)
-    }
-
-    fn delete_common(persistent: &mut T, storage: * mut PSD) -> ChipErrorResult {
-        verify_or_return_error!(!storage.is_null(), Err(chip_error_invalid_argument!()));
-
-        let key = persistent.update_key()?;
-
-        unsafe {
-            return storage.as_mut().unwrap().sync_delete_key_value(key.key_name_str());
-        }
-    }
-    */
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{Tag, common_tag},
+                },
+                support::{
+                    test_persistent_storage::TestPersistentStorage,
+                },
+            },
+        },
+    };
 
-    #[test]
-    fn init() {
-        assert!(false);
+    use core::ptr;
+
+    const MAX_TEST_DATA_SIZE: usize = 64;
+
+    type TestPersistentStore = PersistentStore<MAX_TEST_DATA_SIZE>;
+    type TestPersistentData = PersistentData<TestData, MAX_TEST_DATA_SIZE, TestPersistentStorage>;
+
+    struct TestData {
+        pub key: Option<StorageKeyName>,
+        pub d1: u32,
+        pub d2: i8,
     }
+
+    impl TestData {
+        const NAME: &str = "123";
+        const TAG_NUM: u32 = 0x01;
+
+        pub const fn new() -> Self {
+            Self {
+                key: None,
+                d1: 0,
+                d2: 0,
+            }
+        }
+
+        pub fn new_with(key: &str, d1: u32, d2: i8) -> Self {
+            Self {
+                key: Some(StorageKeyName::from(key)),
+                d1,
+                d2,
+            }
+        }
+
+        pub fn get_tag() -> Tag {
+            common_tag(Self::TAG_NUM)
+        }
+    }
+
+    impl PartialEq for TestData {
+        fn eq(&self, other: &Self) -> bool {
+            if let (Some(a), Some(b)) = (self.key.as_ref(), other.key.as_ref()) {
+                if a.key_name_str() == b.key_name_str() &&
+                    self.d1 == other.d1 &&
+                        self.d2 == other.d2 {
+                            return true;
+                }
+            }
+            false
+        }
+    }
+
+    impl Eq for TestData {}
+
+    impl DataAccessor for TestData {
+        fn update_key(&self) -> Result<StorageKeyName, ChipError> {
+            self.key.clone().ok_or(chip_error_invalid_argument!())
+        }
+
+        fn serialize<Writer: TlvWriter>(&self, writer: &mut Writer) -> ChipErrorResult {
+            let tag = TestData::get_tag();
+            writer.put_string(tag, self.key.as_ref().ok_or(chip_error_invalid_argument!())?.key_name_str())?;
+            writer.put_u32(tag, self.d1)?;
+            writer.put_i8(tag, self.d2)?;
+            chip_ok!()
+        }
+
+        fn deserialize<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            let tag = TestData::get_tag();
+            reader.next_tag(tag)?;
+            if let Some(name) = reader.get_string()? {
+                self.key = Some(StorageKeyName::from(name));
+            } else {
+                self.key = None;
+            }
+
+            reader.next_tag(tag)?;
+            self.d1 = reader.get_u32()?;
+
+            reader.next_tag(tag)?;
+            self.d2 = reader.get_i8()?;
+
+            chip_ok!()
+        }
+
+        fn clear(&mut self) {
+            self.key = None;
+            self.d1 = 0;
+            self.d2 = 0;
+        }
+    }
+
+    mod persistent_store {
+        use super::*;
+        use super::super::*;
+
+        #[test]
+        fn save_successfully() {
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn save_null_storage() {
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(!store.save(&data, ptr::null_mut::<TestPersistentStorage>()).is_ok());
+        }
+
+        #[test]
+        fn save_not_key() {
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new();
+            assert!(!store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn save_buffer_too_small() {
+            let mut storage = TestPersistentStorage::default();
+            let mut store = PersistentStore::<1>::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(!store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+
+            let mut data_2 = TestData::new_with(TestData::NAME, 3, 4);
+
+            assert!(store.load(&mut data_2, ptr::addr_of_mut!(storage)).is_ok());
+            assert!(data == data_2);
+        }
+
+        #[test]
+        fn load_no_storage() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+
+            let mut data_2 = TestData::new_with(TestData::NAME, 3, 4);
+
+            assert!(!store.load(&mut data_2, ptr::null_mut::<TestPersistentStorage>()).is_ok());
+        }
+
+        #[test]
+        fn load_no_key() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+
+            let mut data_2 = TestData::new();
+
+            assert!(!store.load(&mut data_2, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn load_not_found() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+
+            let mut data_2 = TestData::new_with(TestData::NAME, 3, 4);
+
+            assert!(!store.load(&mut data_2, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn delete_successfully() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+
+            assert!(store.delete(&data, ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn delete_no_key() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut store = TestPersistentStore::new();
+            let data = TestData::new_with(TestData::NAME, 1, 2);
+            assert!(store.save(&data, ptr::addr_of_mut!(storage)).is_ok());
+
+            let data = TestData::new();
+            assert!(!store.delete(&data, ptr::addr_of_mut!(storage)).is_ok());
+        }
+    } // end of persistent_store
+    
+    mod persistent_data {
+        use super::*;
+        use super::super::*;
+
+        #[test]
+        fn save_successfully() {
+            let mut storage = TestPersistentStorage::default();
+            let mut data = TestPersistentData::new(
+                TestData::new_with("123", 1, 2),
+                Some(NonNull::from_ref(&storage)),
+                );
+
+            assert!(data.save().is_ok());
+        }
+
+        #[test]
+        fn save_to_successfully() {
+            let mut storage = TestPersistentStorage::default();
+            let mut data = TestPersistentData::new(
+                TestData::new_with("123", 1, 2),
+                None,
+                );
+
+            assert!(data.save_to(ptr::addr_of_mut!(storage)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut data = TestPersistentData::new(
+                TestData::new_with("123", 1, 2),
+                Some(NonNull::from_ref(&storage)),
+                );
+
+            assert!(data.save().is_ok());
+
+            let mut data_2 = TestPersistentData::new(
+                TestData::new_with("123", 3, 4),
+                Some(NonNull::from_ref(&storage)),
+                );
+
+            assert!(data_2.load().is_ok());
+
+            assert!(*data.as_ref() == *data_2.as_ref());
+        }
+
+        #[test]
+        fn delete_successfully() {
+            // save first
+            let mut storage = TestPersistentStorage::default();
+            let mut data = TestPersistentData::new(
+                TestData::new_with("123", 1, 2),
+                Some(NonNull::from_ref(&storage)),
+                );
+
+            assert!(data.save().is_ok());
+            assert!(data.delete_from(ptr::addr_of_mut!(storage)).is_ok());
+        }
+    } // end of persistent data
 } // end of tests

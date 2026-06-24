@@ -5,6 +5,7 @@ use crate::chip::chip_lib::core::{
 use core::fmt::{self, Arguments, Write};
 use core::str;
 
+#[derive(Clone)]
 pub struct StorageKeyName {
     m_key_name_buffer: [u8; KKEY_LENGTH_MAX],
     len: Option<usize>,
