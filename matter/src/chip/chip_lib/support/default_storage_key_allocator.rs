@@ -161,6 +161,10 @@ impl DefaultStorageKeyAllocator {
     pub fn group_control_counter() -> StorageKeyName {
         StorageKeyName::formatted(format_args!("g/gcc"))
     }
+
+    pub fn group_fabric_list() -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("g/gfl"))
+    }
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ pub mod time_utils;
 pub mod intrusive_list;
 pub mod bitset;
 pub mod persistent_data;
+pub mod common_persistent_data;
 
 #[cfg(test)]
 pub mod test_persistent_storage;

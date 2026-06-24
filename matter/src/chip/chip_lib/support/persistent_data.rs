@@ -34,7 +34,6 @@ pub trait DataAccessor {
 type BufferWriter = TlvContiguousBufferWriter;
 type BufferReader = TlvContiguousBufferReader;
 
-
 /// @brief Interface to PersistentStorageDelegate allowing storage of data of variable size such as TLV, delegating data access
 /// to DataAccessor
 /// @tparam kMaxSerializedSize size of the mBuffer necessary to retrieve an entry from the storage. Varies with the type of data

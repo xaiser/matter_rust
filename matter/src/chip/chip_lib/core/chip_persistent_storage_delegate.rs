@@ -2,6 +2,7 @@ use crate::chip_core_error;
 use crate::chip_sdk_error;
 use crate::ChipError;
 use crate::ChipErrorResult;
+use crate::chip_ok;
 
 use crate::chip_error_buffer_too_small;
 
@@ -28,5 +29,39 @@ pub trait PersistentStorageDelegate {
         let err = self.sync_get_key_value(key, &mut buf[..]);
 
         return (err.is_ok()) || (err.is_err_and(|e| e == chip_error_buffer_too_small!()));
+    }
+}
+
+pub struct NopPersistentStorage;
+
+impl PersistentStorageDelegate for NopPersistentStorage {
+    fn sync_get_key_value_raw(
+        &self,
+        _key: &str,
+        _buffer: *mut u8,
+        _size: &mut usize,
+    ) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn sync_get_key_value(&self, _key: &str, _buffer: &mut [u8]) -> Result<usize, ChipError> {
+        Ok(0)
+    }
+
+    fn sync_set_key_value_raw(
+        &mut self,
+        _key: &str,
+        _buffer: *const u8,
+        _: usize,
+    ) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn sync_set_key_value(&mut self, key: &str, buffer: &[u8]) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn sync_delete_key_value(&mut self, key: &str) -> ChipErrorResult {
+        chip_ok!()
     }
 }
