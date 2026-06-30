@@ -129,7 +129,7 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
         }
     }
 
-    pub fn save_to(&mut self, storage: * mut PSD) -> ChipErrorResult {
+    pub fn save_to<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
         self.m_store.save(&self.m_value, storage)
     }
 
@@ -143,7 +143,7 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
         }
     }
 
-    pub fn load_from(&mut self, storage: * mut PSD) -> ChipErrorResult {
+    pub fn load_from<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
         self.m_store.load(&mut self.m_value, storage)
     }
 
