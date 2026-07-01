@@ -97,6 +97,10 @@ impl Tag {
     pub(super) fn default_with_value(val: u64) -> Self {
         Self { m_val: val }
     }
+
+    pub(super) const fn new_with_value(val: u64) -> Self {
+        Self { m_val: val }
+    }
     pub(super) const KPROFILE_ID_SHIFT: u32 = 32;
     pub(super) const KVENDOR_ID_SHIFT: u32 = 48;
     pub(super) const KSPECIAL_TAG_PROFILE_ID: u32 = 0xFFFFFFFF;
@@ -109,8 +113,13 @@ pub const fn unknown_tag() -> Tag {
     }
 }
 
-pub fn profile_tag(profile_id: u32, tag_num: u32) -> Tag {
+pub const fn profile_tag(profile_id: u32, tag_num: u32) -> Tag {
+    /*
     return Tag::default_with_value(
+        ((!profile_id as u64) << Tag::KPROFILE_ID_SHIFT as u8) | tag_num as u64,
+    );
+    */
+    return Tag::new_with_value(
         ((!profile_id as u64) << Tag::KPROFILE_ID_SHIFT as u8) | tag_num as u64,
     );
 }
@@ -124,7 +133,7 @@ pub fn profile_tag_vendor_id(vendor_id: u16, profile_num: u16, tag_num: u32) -> 
     );
 }
 
-pub fn context_tag(tag_num: u8) -> Tag {
+pub const fn context_tag(tag_num: u8) -> Tag {
     return profile_tag(Tag::KSPECIAL_TAG_PROFILE_ID, tag_num as u32);
 }
 

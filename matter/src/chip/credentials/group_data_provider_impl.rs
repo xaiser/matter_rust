@@ -143,16 +143,25 @@ pub mod fabric_data {
         chip_error_not_found,
         chip_ok,
     };
+    /*
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_error;
+    use core::{
+        str::{self, FromStr},
+    };
+    */
     use super::*;
 
-    fn tag_first_group() -> Tag { context_tag(1) }
-    fn tag_group_count() -> Tag { context_tag(2) }
-    fn tag_first_map() -> Tag { context_tag(3) }
-    fn tag_map_count() -> Tag { context_tag(4) }
-    fn tag_first_keyset() -> Tag { context_tag(5) }
-    fn tag_keyset_count() -> Tag { context_tag(6) }
-    fn tag_next() -> Tag { context_tag(7) }
+    const fn tag_first_group() -> Tag { context_tag(1) }
+    const fn tag_group_count() -> Tag { context_tag(2) }
+    const fn tag_first_map() -> Tag { context_tag(3) }
+    const fn tag_map_count() -> Tag { context_tag(4) }
+    const fn tag_first_keyset() -> Tag { context_tag(5) }
+    const fn tag_keyset_count() -> Tag { context_tag(6) }
+    const fn tag_next() -> Tag { context_tag(7) }
 
+    #[derive(Clone)]
     pub struct FabricData {
         pub fabric_index: FabricIndex,
         pub first_group: GroupId,
@@ -235,6 +244,68 @@ pub mod fabric_data {
 
             fabric_list.save_to(storage_ptr)
         }
+
+        pub fn unregister<Storage: PersistentStorageDelegate>(&mut self, storage: NonNull<Storage>) -> ChipErrorResult {
+            let storage_ptr = storage.as_ptr();
+
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            let result = fabric_list.load_from(storage_ptr);
+            if result.is_err_and(|e| e != chip_error_not_found!()) {
+                return result;
+            }
+            // Existing fabric list, search for existing entry
+            let entry_count = fabric_list.as_ref().entry_count();
+            let mut fabric = PersistentFabricData::new(Self::new_with(fabric_list.as_ref().first_entry() as FabricIndex), None);
+            let mut prev = PersistentFabricData::new(Self::new(), None);
+
+            for i in 0..entry_count {
+                match fabric.load_from(storage_ptr) {
+                    Ok(_) => {
+                        if fabric.as_ref().fabric_index == self.fabric_index {
+                            if i == 0 {
+                                // Remove first fabric
+                                fabric_list.as_mut().set_first_entry(self.next.into());
+                            } else {
+                                // Remove intermediate fabric
+                                prev.as_mut().next = self.next;
+                                prev.save_to(storage_ptr)?;
+                            }
+                            // entry_count must > 0 here otherwise we won't get in this loop
+                            fabric_list.as_mut().set_entry_count(entry_count - 1);
+                            return fabric_list.save_to(storage_ptr);
+                        }
+
+                        prev = fabric.clone();
+                        fabric.as_mut().fabric_index = fabric.as_ref().next;
+                    },
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+
+            // Fabric not in the list
+            Err(chip_error_not_found!())
+        }
+
+        pub fn validate<Storage: PersistentStorageDelegate>(&self, storage: NonNull<Storage>) -> ChipErrorResult {
+            let storage_ptr = storage.as_ptr();
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            fabric_list.load_from(storage_ptr)?;
+
+            let entry_count = fabric_list.as_ref().entry_count();
+            let mut fabric = PersistentFabricData::new(Self::new_with(fabric_list.as_ref().first_entry() as FabricIndex), None);
+            for _i in 0..entry_count {
+                fabric.load_from(storage_ptr)?;
+                if fabric.as_ref().fabric_index == self.fabric_index {
+                    return chip_ok!();
+                }
+                fabric.as_mut().fabric_index = self.fabric_index;
+            }
+
+            // Fabric not in the list
+            Err(chip_error_not_found!())
+        }
     }
 
     impl DataAccessor for FabricData {
@@ -297,6 +368,126 @@ pub mod fabric_data {
             self.next = KUNDEFINED_FABRIC_INDEX;
         }
     }
+
+    pub const fn new() -> PersistentFabricData {
+        PersistentFabricData::new(FabricData::new(), None)
+    }
+
+    pub const fn new_with(fabric_index: FabricIndex) -> PersistentFabricData {
+        PersistentFabricData::new(FabricData::new_with(fabric_index), None)
+    }
+
+    pub fn save<PSD: PersistentStorageDelegate>(data: &mut PersistentFabricData, storage: NonNull<PSD>) -> ChipErrorResult {
+        data.as_mut().register(storage)?;
+
+        data.save_to(storage.as_ptr())
+    }
+
+    pub fn delete<PSD: PersistentStorageDelegate>(data: &mut PersistentFabricData, storage: NonNull<PSD>) -> ChipErrorResult {
+        data.as_mut().unregister(storage)?;
+
+        data.delete_from(storage.as_ptr())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::{
+                        test_persistent_storage::TestPersistentStorage,
+                    },
+                },
+            },
+        };
+        use core::ptr;
+
+        type TestFabricData = PersistentFabricData;
+
+        #[test]
+        fn register_as_first_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            assert!(!data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(1, fabric_list.as_ref().entry_count());
+        }
+
+        #[test]
+        fn register_twice_successfully() {
+            let pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+        }
+
+        #[test]
+        fn register_two_same_data_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            let mut data_2 = new_with(1);
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
+            assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(1, fabric_list.as_ref().entry_count());
+        }
+
+        #[test]
+        fn register_two_data_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            let mut data_2 = new_with(2);
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
+            assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(2, fabric_list.as_ref().entry_count());
+        }
+
+        #[test]
+        fn unregister_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            assert!(delete(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(!data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(0, fabric_list.as_ref().entry_count());
+        }
+
+        #[test]
+        fn unregister_not_found() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            assert!(!delete(&mut data, NonNull::from_ref(&pa)).is_ok());
+        }
+
+        #[test]
+        fn unregister_one_of_two_data_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data = new_with(1);
+            let mut data_2 = new_with(2);
+            assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
+            assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
+            assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(2, fabric_list.as_ref().entry_count());
+            assert!(delete(&mut data, NonNull::from_ref(&pa)).is_ok());
+            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            assert_eq!(1, fabric_list.as_ref().entry_count());
+        }
+    } // end of tests
 } 
 
 type FabirList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;

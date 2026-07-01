@@ -38,6 +38,7 @@ type BufferReader = TlvContiguousBufferReader;
 /// to DataAccessor
 /// @tparam kMaxSerializedSize size of the mBuffer necessary to retrieve an entry from the storage. Varies with the type of data
 /// stored. Will be allocated on the stack so the implementation needs to be aware of this when choosing this value.
+#[derive(Clone)]
 pub struct PersistentStore<const KMAX_SERIALIZED_SIZE: usize> {
     m_buffer: [u8; KMAX_SERIALIZED_SIZE],
 }
@@ -110,6 +111,16 @@ pub struct PersistentData<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PS
     m_value: T,
 }
 
+impl<T: DataAccessor + Clone, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> Clone for PersistentData<T, KMAX_SERIALIZED_SIZE, PSD> {
+    fn clone(&self) -> Self {
+        Self {
+            m_storage: self.m_storage,
+            m_store: self.m_store.clone(),
+            m_value: self.m_value.clone(),
+        }
+    }
+}
+
 impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> PersistentData<T, KMAX_SERIALIZED_SIZE, PSD> {
     pub const fn new(value: T, storage: Option<NonNull<PSD>>) -> Self {
         Self {
@@ -147,7 +158,7 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
         self.m_store.load(&mut self.m_value, storage)
     }
 
-    pub fn delete_from(&mut self, storage: * mut PSD) -> ChipErrorResult {
+    pub fn delete_from<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
         self.m_store.delete(&mut self.m_value, storage)
     }
 
