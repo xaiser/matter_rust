@@ -10,6 +10,7 @@ pub const KMAX_VALID_FABRIC_INDEX: FabricIndex = u8::MAX - 1;
 pub const KUNDEFINED_COMPRESSED_FABRIC_ID: CompressedFabricId = 0;
 pub const KUNDEFINED_FABRIC_INDEX: FabricIndex = 0;
 pub const KINVALID_KEYSET_ID: KeysetId = 0xFFFF;
+pub const KINVALID_ENDPOINT_ID: EndpointId = 0xFFFF;
 
 pub fn is_valid_fabric_index(index: FabricIndex) -> bool {
     return index >= KMIN_VALID_FABRIC_INDEX && index <= KMAX_VALID_FABRIC_INDEX;

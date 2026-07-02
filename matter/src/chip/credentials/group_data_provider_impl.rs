@@ -488,7 +488,157 @@ pub mod fabric_data {
             assert_eq!(1, fabric_list.as_ref().entry_count());
         }
     } // end of tests
-} 
+}  // end of fabric_data
+
+pub mod group_data {
+    use super::*;
+    use super::fabric_data::FabricData;
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{Tag, context_tag, anonymous_tag},
+                    tlv_types::TlvType,
+                    data_model_types::KINVALID_ENDPOINT_ID,
+                },
+            },
+        },
+        chip_error_invalid_fabric_index,
+        chip_error_internal,
+        chip_error_not_found,
+        chip_ok,
+    };
+
+    const fn tag_name() -> Tag { context_tag(1) }
+    const fn tag_first_endpoint() -> Tag { context_tag(2) }
+    const fn tag_endpoint_count() -> Tag { context_tag(3) }
+    const fn tag_next() -> Tag { context_tag(4) }
+
+    pub struct GroupData {
+        pub fabric_index: FabricIndex,
+        pub first_endpoint: EndpointId,
+        pub endpoint_count: u16,
+        pub index: u16,
+        pub next: GroupId,
+        pub prev: GroupId,
+        pub first: bool,
+        pub group_info: GroupInfo,
+    }
+
+    type PersistentGroupData<PSD> = PersistentData<GroupData, K_PERSISTENT_BUFFER_MAX, PSD>;
+
+    impl GroupData {
+        pub const fn new() -> Self {
+            Self {
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                first_endpoint: KINVALID_ENDPOINT_ID,
+                endpoint_count: 0,
+                index: 0,
+                next: 0,
+                prev: 0,
+                first: true,
+                group_info: GroupInfo::new(),
+            }
+        }
+
+        pub const fn new_with(fabric_index: FabricIndex) -> Self {
+            let mut g = Self::new();
+            g.fabric_index = fabric_index;
+
+            g
+        }
+
+        pub fn new_with_ids(fabric_index: FabricIndex, group: GroupId) -> Self {
+            let mut g = Self::new();
+            g.fabric_index = fabric_index;
+            g.group_info = GroupInfo::new_with(group, "");
+
+            g
+        }
+
+        #[inline]
+        pub fn set_name(&mut self, group_name: Option<&str>) {
+            self.group_info.set_name(group_name)
+        }
+
+        #[inline]
+        pub fn group_info(&mut self) -> &mut GroupInfo {
+            &mut self.group_info
+        }
+    }
+
+    impl DataAccessor for GroupData {
+        fn update_key(&self) -> Result<StorageKeyName, ChipError> {
+            verify_or_return_error!(KUNDEFINED_FABRIC_INDEX != self.fabric_index, Err(chip_error_invalid_fabric_index!()));
+            Ok(DefaultStorageKeyAllocator::fabric_group(self.fabric_index, self.group_info.group_id))
+        }
+
+        fn serialize<Writer: TlvWriter>(&self, writer: &mut Writer) -> ChipErrorResult {
+            let mut container = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut container)?;
+
+            writer.put_string(tag_name(), self.group_info.name.str().ok_or(chip_error_internal!())?)?;
+            writer.put_u16(tag_first_endpoint(), self.first_endpoint)?;
+            writer.put_u16(tag_endpoint_count(), self.endpoint_count)?;
+            writer.put_u16(tag_next(), self.next)?;
+
+            writer.end_container(container)
+        }
+
+        fn deserialize<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_tag(anonymous_tag())?;
+
+            verify_or_return_error!(TlvType::KtlvTypeStructure == reader.get_type(), Err(chip_error_internal!()));
+
+            let container = reader.enter_container()?;
+
+            reader.next_tag(tag_name())?;
+            self.set_name(reader.get_string()?);
+
+            reader.next_tag(tag_first_endpoint())?;
+            self.first_endpoint = reader.get_u16()?;
+
+            reader.next_tag(tag_endpoint_count())?;
+            self.endpoint_count = reader.get_u16()?;
+
+            reader.next_tag(tag_next())?;
+            self.next = reader.get_u16()?;
+
+            reader.exit_container(container)
+        }
+
+        fn clear(&mut self) {
+            self.set_name(None);
+            self.first_endpoint = KINVALID_ENDPOINT_ID;
+            self.endpoint_count = 0;
+            self.next = 0;
+        }
+    }
+
+    pub fn get<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(group_data: &mut PersistentGroupData<S>, storage: NonNull<PSD>, fabric: &FabricData, target_index: usize) -> bool {
+        group_data.as_ref().fabric_index = fabric.fabric_index;
+        group_data.as_ref().group_info.group_id = fabric.first_group;
+        group_data.as_ref().index = 0;
+        group_data.as_ref().first = true;
+
+        while group_data.as_ref().index < fabric.group_count {
+            if group_data.load_from(storage.as_ptr()).is_ok() {
+                if group_data.as_ref().index == target_index {
+                    return true;
+                }
+                group_data.as_mut().first = false;
+                group_data.as_mut().prev = group_data.as_ref().group_info.group_id;
+                group_data.as_mut().group_info.group_id = group_data.as_ref().next;
+                group_data.as_mut().index += 1;
+            } else {
+                break;
+            }
+        }
+
+        false
+    }
+
+} // end of group_data
 
 type FabirList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;
 //type LinkedData = PersistentData<linked_data::LinkedData, K_PERSISTENT_BUFFER_MAX, NopPersistentStorage>;
