@@ -88,6 +88,8 @@ pub mod fabric_list_impl {
     }
 }
 
+type FabricList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;
+
 pub mod linked_data {
     use super::*;
 
@@ -173,7 +175,7 @@ pub mod fabric_data {
         pub next: FabricIndex,
     }
 
-    type PersistentFabricData = PersistentData<FabricData, K_PERSISTENT_BUFFER_MAX, NopPersistentStorage>;
+    type PersistentFabricData<S: PersistentStorageDelegate> = PersistentData<FabricData, K_PERSISTENT_BUFFER_MAX, S>;
 
     impl FabricData {
         pub const fn new() -> Self {
@@ -205,8 +207,8 @@ pub mod fabric_data {
         pub fn register<Storage: PersistentStorageDelegate>(&mut self, storage: NonNull<Storage>) -> ChipErrorResult {
             let storage_ptr = storage.as_ptr();
 
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            let result = fabric_list.load_from(storage_ptr);
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            let result = FabricList::load_from(&mut fabric_list, storage_ptr);
             if result.is_err_and(|e| e == chip_error_not_found!()) {
                 {
                     // New fabric list
@@ -214,22 +216,22 @@ pub mod fabric_data {
                     list.set_first_entry(self.fabric_index as u16);
                     list.set_entry_count(1);
                 }
-                return fabric_list.save_to(storage_ptr);
+                return FabricList::save_to(&mut fabric_list, storage_ptr);
             }
 
             result?;
 
             // Existing fabric list, search for existing entry
-            let entry_count = fabric_list.as_ref().entry_count();
-            let mut fabric = PersistentFabricData::new(Self::new_with(fabric_list.as_ref().first_entry() as FabricIndex), None);
+            let entry_count = fabric_list.entry_count();
+            let mut fabric = PersistentFabricData::<Storage>::new(Self::new_with(fabric_list.first_entry() as FabricIndex), None);
             for _i in 0..entry_count {
-                match fabric.load_from(storage_ptr) {
+                match PersistentFabricData::<Storage>::load_from(&mut fabric, storage_ptr) {
                     Ok(_) => {
-                        if fabric.as_ref().fabric_index == self.fabric_index {
+                        if fabric.fabric_index == self.fabric_index {
                             // Fabric already registered
                             return chip_ok!();
                         }
-                        fabric.as_mut().fabric_index = fabric.as_ref().next;
+                        fabric.fabric_index = fabric.next;
                     },
                     Err(_) => {
                         break;
@@ -238,45 +240,51 @@ pub mod fabric_data {
             }
 
             // Add this fabric to the fabric list
-            self.next = fabric_list.as_ref().first_entry() as FabricIndex;
-            fabric_list.as_mut().set_first_entry(self.fabric_index.into());
-            fabric_list.as_mut().set_entry_count(entry_count + 1);
+            self.next = fabric_list.first_entry() as FabricIndex;
+            fabric_list.set_first_entry(self.fabric_index.into());
+            fabric_list.set_entry_count(entry_count + 1);
 
-            fabric_list.save_to(storage_ptr)
+            //fabric_list.save_to(storage_ptr)
+            FabricList::save_to(&mut fabric_list, storage_ptr)
         }
 
         pub fn unregister<Storage: PersistentStorageDelegate>(&mut self, storage: NonNull<Storage>) -> ChipErrorResult {
             let storage_ptr = storage.as_ptr();
 
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            let result = fabric_list.load_from(storage_ptr);
+            //let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            //let result = fabric_list.load_from(storage_ptr);
+            let result = FabricList::load_from(&mut fabric_list, storage_ptr);
             if result.is_err_and(|e| e != chip_error_not_found!()) {
                 return result;
             }
             // Existing fabric list, search for existing entry
-            let entry_count = fabric_list.as_ref().entry_count();
-            let mut fabric = PersistentFabricData::new(Self::new_with(fabric_list.as_ref().first_entry() as FabricIndex), None);
-            let mut prev = PersistentFabricData::new(Self::new(), None);
+            let entry_count = fabric_list.entry_count();
+            let mut fabric = PersistentFabricData::<Storage>::new(Self::new_with(fabric_list.first_entry() as FabricIndex), None);
+            let mut prev = PersistentFabricData::<Storage>::new(Self::new(), None);
 
             for i in 0..entry_count {
-                match fabric.load_from(storage_ptr) {
+                //match fabric.load_from(storage_ptr) {
+                match PersistentFabricData::<Storage>::load_from(&mut fabric, storage_ptr) {
                     Ok(_) => {
-                        if fabric.as_ref().fabric_index == self.fabric_index {
+                        if fabric.fabric_index == self.fabric_index {
                             if i == 0 {
                                 // Remove first fabric
-                                fabric_list.as_mut().set_first_entry(self.next.into());
+                                fabric_list.set_first_entry(self.next.into());
                             } else {
                                 // Remove intermediate fabric
-                                prev.as_mut().next = self.next;
-                                prev.save_to(storage_ptr)?;
+                                prev.next = self.next;
+                                //prev.save_to(storage_ptr)?;
+                                PersistentFabricData::<Storage>::save_to(&mut prev, storage_ptr)?;
                             }
                             // entry_count must > 0 here otherwise we won't get in this loop
-                            fabric_list.as_mut().set_entry_count(entry_count - 1);
-                            return fabric_list.save_to(storage_ptr);
+                            fabric_list.set_entry_count(entry_count - 1);
+                            //return fabric_list.save_to(storage_ptr);
+                            return FabricList::save_to(&mut fabric_list, storage_ptr);
                         }
 
                         prev = fabric.clone();
-                        fabric.as_mut().fabric_index = fabric.as_ref().next;
+                        fabric.fabric_index = fabric.next;
                     },
                     Err(_) => {
                         break;
@@ -290,17 +298,17 @@ pub mod fabric_data {
 
         pub fn validate<Storage: PersistentStorageDelegate>(&self, storage: NonNull<Storage>) -> ChipErrorResult {
             let storage_ptr = storage.as_ptr();
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            fabric_list.load_from(storage_ptr)?;
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            FabricList::load_from(&mut fabric_list, storage_ptr)?;
 
-            let entry_count = fabric_list.as_ref().entry_count();
-            let mut fabric = PersistentFabricData::new(Self::new_with(fabric_list.as_ref().first_entry() as FabricIndex), None);
+            let entry_count = fabric_list.entry_count();
+            let mut fabric = PersistentFabricData::<Storage>::new(Self::new_with(fabric_list.first_entry() as FabricIndex), None);
             for _i in 0..entry_count {
-                fabric.load_from(storage_ptr)?;
-                if fabric.as_ref().fabric_index == self.fabric_index {
+                PersistentFabricData::<Storage>::load_from(&mut fabric, storage_ptr)?;
+                if fabric.fabric_index == self.fabric_index {
                     return chip_ok!();
                 }
-                fabric.as_mut().fabric_index = self.fabric_index;
+                fabric.fabric_index = self.fabric_index;
             }
 
             // Fabric not in the list
@@ -369,24 +377,24 @@ pub mod fabric_data {
         }
     }
 
-    pub const fn new() -> PersistentFabricData {
-        PersistentFabricData::new(FabricData::new(), None)
+    pub const fn new<Storage: PersistentStorageDelegate>() -> PersistentFabricData<Storage> {
+        PersistentFabricData::<Storage>::new(FabricData::new(), None)
     }
 
-    pub const fn new_with(fabric_index: FabricIndex) -> PersistentFabricData {
-        PersistentFabricData::new(FabricData::new_with(fabric_index), None)
+    pub const fn new_with<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex) -> PersistentFabricData<Storage> {
+        PersistentFabricData::<Storage>::new(FabricData::new_with(fabric_index), None)
     }
 
-    pub fn save<PSD: PersistentStorageDelegate>(data: &mut PersistentFabricData, storage: NonNull<PSD>) -> ChipErrorResult {
-        data.as_mut().register(storage)?;
+    pub fn save<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(data: &mut PersistentFabricData<S>, storage: NonNull<PSD>) -> ChipErrorResult {
+        data.register(storage)?;
 
-        data.save_to(storage.as_ptr())
+        PersistentFabricData::<S>::save_to(data, storage.as_ptr())
     }
 
-    pub fn delete<PSD: PersistentStorageDelegate>(data: &mut PersistentFabricData, storage: NonNull<PSD>) -> ChipErrorResult {
-        data.as_mut().unregister(storage)?;
+    pub fn delete<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(data: &mut PersistentFabricData<S>, storage: NonNull<PSD>) -> ChipErrorResult {
+        data.unregister(storage)?;
 
-        data.delete_from(storage.as_ptr())
+        PersistentFabricData::<S>::delete_from(data, storage.as_ptr())
     }
 
     #[cfg(test)]
@@ -403,24 +411,24 @@ pub mod fabric_data {
         };
         use core::ptr;
 
-        type TestFabricData = PersistentFabricData;
+        type TestFabricData = PersistentFabricData<NopPersistentStorage>;
 
         #[test]
         fn register_as_first_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
+            let mut data: TestFabricData = new_with(1);
             assert!(!data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(1, fabric_list.as_ref().entry_count());
         }
 
         #[test]
         fn register_twice_successfully() {
             let pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
+            let mut data: TestFabricData = new_with(1);
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
         }
@@ -428,63 +436,63 @@ pub mod fabric_data {
         #[test]
         fn register_two_same_data_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
-            let mut data_2 = new_with(1);
+            let mut data: TestFabricData = new_with(1);
+            let mut data_2: TestFabricData = new_with(1);
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
             assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(1, fabric_list.as_ref().entry_count());
         }
 
         #[test]
         fn register_two_data_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
-            let mut data_2 = new_with(2);
+            let mut data: TestFabricData = new_with(1);
+            let mut data_2: TestFabricData = new_with(2);
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
             assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(2, fabric_list.as_ref().entry_count());
         }
 
         #[test]
         fn unregister_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
+            let mut data: TestFabricData = new_with(1);
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
             assert!(delete(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(!data.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(0, fabric_list.as_ref().entry_count());
         }
 
         #[test]
         fn unregister_not_found() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
+            let mut data: TestFabricData = new_with(1);
             assert!(!delete(&mut data, NonNull::from_ref(&pa)).is_ok());
         }
 
         #[test]
         fn unregister_one_of_two_data_successfully() {
             let mut pa = TestPersistentStorage::default();
-            let mut data = new_with(1);
-            let mut data_2 = new_with(2);
+            let mut data: TestFabricData = new_with(1);
+            let mut data_2: TestFabricData = new_with(2);
             assert!(save(&mut data, NonNull::from_ref(&pa)).is_ok());
             assert!(save(&mut data_2, NonNull::from_ref(&pa)).is_ok());
             assert!(data_2.as_ref().validate(NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(2, fabric_list.as_ref().entry_count());
             assert!(delete(&mut data, NonNull::from_ref(&pa)).is_ok());
-            let mut fabric_list = FabirList::new(fabric_list_impl::FabricList::new(), None);
-            assert!(fabric_list.load_from(ptr::addr_of_mut!(pa)).is_ok());
+            let mut fabric_list = FabricList::new(fabric_list_impl::FabricList::new(), None);
+            assert!(FabricList::load_from(&mut fabric_list, ptr::addr_of_mut!(pa)).is_ok());
             assert_eq!(1, fabric_list.as_ref().entry_count());
         }
     } // end of tests
@@ -507,6 +515,12 @@ pub mod group_data {
         chip_error_internal,
         chip_error_not_found,
         chip_ok,
+    };
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_error;
+    use core::{
+        str::{self, FromStr},
     };
 
     const fn tag_name() -> Tag { context_tag(1) }
@@ -616,20 +630,20 @@ pub mod group_data {
     }
 
     pub fn get<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(group_data: &mut PersistentGroupData<S>, storage: NonNull<PSD>, fabric: &FabricData, target_index: usize) -> bool {
-        group_data.as_ref().fabric_index = fabric.fabric_index;
-        group_data.as_ref().group_info.group_id = fabric.first_group;
-        group_data.as_ref().index = 0;
-        group_data.as_ref().first = true;
+        group_data.fabric_index = fabric.fabric_index;
+        group_data.group_info.group_id = fabric.first_group;
+        group_data.index = 0;
+        group_data.first = true;
 
-        while group_data.as_ref().index < fabric.group_count {
-            if group_data.load_from(storage.as_ptr()).is_ok() {
-                if group_data.as_ref().index == target_index {
+        while group_data.index < fabric.group_count {
+            if PersistentGroupData::<S>::load_from(group_data, storage.as_ptr()).is_ok() {
+                if usize::from(group_data.index) == target_index {
                     return true;
                 }
-                group_data.as_mut().first = false;
-                group_data.as_mut().prev = group_data.as_ref().group_info.group_id;
-                group_data.as_mut().group_info.group_id = group_data.as_ref().next;
-                group_data.as_mut().index += 1;
+                group_data.first = false;
+                group_data.prev = group_data.group_info.group_id;
+                group_data.group_info.group_id = group_data.next;
+                group_data.index += 1;
             } else {
                 break;
             }
@@ -638,9 +652,239 @@ pub mod group_data {
         false
     }
 
+    pub fn find<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(group_data: &mut PersistentGroupData<S>,
+        storage: NonNull<PSD>, fabric: &FabricData, target_group: GroupId) -> bool {
+
+        group_data.fabric_index = fabric.fabric_index;
+        group_data.group_info.group_id = fabric.first_group;
+        group_data.index = 0;
+        group_data.first = true;
+
+        while group_data.index < fabric.group_count {
+            if PersistentGroupData::<S>::load_from(group_data, storage.as_ptr()).is_ok() {
+                if group_data.group_info.group_id == target_group {
+                    return true;
+                }
+                group_data.first = false;
+                group_data.prev = group_data.group_info.group_id;
+                group_data.group_info.group_id = group_data.next;
+                group_data.index += 1;
+            } else {
+                break;
+            }
+        }
+
+        false
+    }
+
+    pub const fn new<Storage: PersistentStorageDelegate>() -> PersistentGroupData<Storage> {
+        PersistentGroupData::<Storage>::new(GroupData::new(), None)
+    }
+
+    pub const fn new_with<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex) -> PersistentGroupData<Storage> {
+        PersistentGroupData::<Storage>::new(GroupData::new_with(fabric_index), None)
+    }
+
+    pub fn new_with_ids<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex, group: GroupId) -> PersistentGroupData<Storage> {
+        PersistentGroupData::<Storage>::new(GroupData::new_with_ids(fabric_index, group), None)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::{
+                        test_persistent_storage::TestPersistentStorage,
+                    },
+                },
+            },
+        };
+        use core::ptr;
+
+        type TestPersistentGroupData = PersistentGroupData<NopPersistentStorage>;
+
+        #[test]
+        fn save_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentGroupData = new_with(1);
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentGroupData = new_with(1);
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+
+            let mut data_2: TestPersistentGroupData = new_with(1);
+
+            assert!(TestPersistentGroupData::load_from(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn get_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
+        }
+
+        #[test]
+        fn get_2_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let group_2: GroupId = 2;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            data.next = group_2;
+            let mut data_2: TestPersistentGroupData = new_with_ids(fabric_index, group_2);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 2;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(TestPersistentGroupData::save_to(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, 1));
+        }
+
+        #[test]
+        fn get_no_group_count_0() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 0;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
+        }
+
+        #[test]
+        fn get_no_index() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, 1));
+        }
+
+        #[test]
+        fn get_no_group() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            //assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
+        }
+
+        #[test]
+        fn find_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, group));
+        }
+
+        #[test]
+        fn find_2_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let group_2: GroupId = 2;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            data.next = group_2;
+            let mut data_2: TestPersistentGroupData = new_with_ids(fabric_index, group_2);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 2;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(TestPersistentGroupData::save_to(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, group_2));
+        }
+
+        #[test]
+        fn find_group_count_0() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 0;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, group));
+        }
+
+        #[test]
+        fn find_no_group() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            //assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, group));
+        }
+
+        #[test]
+        fn find_no_group_id() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group: GroupId = 1;
+            let mut data: TestPersistentGroupData = new_with_ids(fabric_index, group);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_group = group;
+            fabric_data.group_count = 1;
+
+            assert!(TestPersistentGroupData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, group + 1));
+        }
+    } // end of tests
 } // end of group_data
 
-type FabirList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;
 //type LinkedData = PersistentData<linked_data::LinkedData, K_PERSISTENT_BUFFER_MAX, NopPersistentStorage>;
 
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
@@ -662,11 +906,6 @@ impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
             m_total: 0,
         }
     }
-
-    /*
-    pub fn new_with(provider: Option<NonNull<Provider>>, fabric_index) -> Self {
-    }
-    */
 }
 
 impl<Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<Provider> {

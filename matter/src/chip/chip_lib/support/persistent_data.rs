@@ -22,6 +22,7 @@ use crate::{
 };
 
 use core::ptr::NonNull;
+use core::ops::{Deref, DerefMut};
 
 /// @brief Data accessor allowing data to be persisted by PersistentStore to be accessed
 pub trait DataAccessor {
@@ -111,6 +112,22 @@ pub struct PersistentData<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PS
     m_value: T,
 }
 
+impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> Deref for PersistentData<T, KMAX_SERIALIZED_SIZE, PSD> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &T {
+        &self.m_value
+    }
+}
+
+impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> DerefMut for PersistentData<T, KMAX_SERIALIZED_SIZE, PSD> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.m_value
+    }
+}
+
 impl<T: DataAccessor + Clone, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageDelegate> Clone for PersistentData<T, KMAX_SERIALIZED_SIZE, PSD> {
     fn clone(&self) -> Self {
         Self {
@@ -130,36 +147,36 @@ impl<T: DataAccessor, const KMAX_SERIALIZED_SIZE: usize, PSD: PersistentStorageD
         }
     }
 
-    pub fn save(&mut self) -> ChipErrorResult {
-        if let Some(mut storage) = self.m_storage {
+    pub fn save(this: &mut Self) -> ChipErrorResult {
+        if let Some(mut storage) = this.m_storage {
             unsafe {
-                self.save_to(storage.as_mut())
+                Self::save_to(this, storage.as_mut())
             }
         } else {
             Err(chip_error_invalid_argument!())
         }
     }
 
-    pub fn save_to<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
-        self.m_store.save(&self.m_value, storage)
+    pub fn save_to<S: PersistentStorageDelegate>(this: &mut Self, storage: * mut S) -> ChipErrorResult {
+        this.m_store.save(&this.m_value, storage)
     }
 
-    pub fn load(&mut self) -> ChipErrorResult {
-        if let Some(mut storage) = self.m_storage {
+    pub fn load(this: &mut Self) -> ChipErrorResult {
+        if let Some(mut storage) = this.m_storage {
             unsafe {
-                self.load_from(storage.as_mut())
+                Self::load_from(this, storage.as_mut())
             }
         } else {
             Err(chip_error_invalid_argument!())
         }
     }
 
-    pub fn load_from<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
-        self.m_store.load(&mut self.m_value, storage)
+    pub fn load_from<S: PersistentStorageDelegate>(this: &mut Self, storage: * mut S) -> ChipErrorResult {
+        this.m_store.load(&mut this.m_value, storage)
     }
 
-    pub fn delete_from<S: PersistentStorageDelegate>(&mut self, storage: * mut S) -> ChipErrorResult {
-        self.m_store.delete(&mut self.m_value, storage)
+    pub fn delete_from<S: PersistentStorageDelegate>(this: &mut Self, storage: * mut S) -> ChipErrorResult {
+        this.m_store.delete(&mut this.m_value, storage)
     }
 
     pub fn as_ref(&self) -> &T {
@@ -400,7 +417,7 @@ mod tests {
                 Some(NonNull::from_ref(&storage)),
                 );
 
-            assert!(data.save().is_ok());
+            assert!(TestPersistentData::save(&mut data).is_ok());
         }
 
         #[test]
@@ -411,7 +428,7 @@ mod tests {
                 None,
                 );
 
-            assert!(data.save_to(ptr::addr_of_mut!(storage)).is_ok());
+            assert!(TestPersistentData::save_to(&mut data, ptr::addr_of_mut!(storage)).is_ok());
         }
 
         #[test]
@@ -423,14 +440,15 @@ mod tests {
                 Some(NonNull::from_ref(&storage)),
                 );
 
-            assert!(data.save().is_ok());
+            assert!(TestPersistentData::save(&mut data).is_ok());
 
             let mut data_2 = TestPersistentData::new(
                 TestData::new_with("123", 3, 4),
                 Some(NonNull::from_ref(&storage)),
                 );
 
-            assert!(data_2.load().is_ok());
+            //assert!(data_2.load().is_ok());
+            assert!(TestPersistentData::load(&mut data_2).is_ok());
 
             assert!(*data.as_ref() == *data_2.as_ref());
         }
@@ -444,8 +462,8 @@ mod tests {
                 Some(NonNull::from_ref(&storage)),
                 );
 
-            assert!(data.save().is_ok());
-            assert!(data.delete_from(ptr::addr_of_mut!(storage)).is_ok());
+            assert!(TestPersistentData::save(&mut data).is_ok());
+            assert!(TestPersistentData::delete_from(&mut data, ptr::addr_of_mut!(storage)).is_ok());
         }
     } // end of persistent data
 } // end of tests
