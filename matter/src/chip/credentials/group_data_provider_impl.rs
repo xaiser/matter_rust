@@ -885,7 +885,260 @@ pub mod group_data {
     } // end of tests
 } // end of group_data
 
-//type LinkedData = PersistentData<linked_data::LinkedData, K_PERSISTENT_BUFFER_MAX, NopPersistentStorage>;
+pub mod key_map_data {
+    use super::*;
+    use super::{
+        linked_data::LinkedData,
+        fabric_data::FabricData,
+    };
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{Tag, context_tag, anonymous_tag},
+                    tlv_types::TlvType,
+                    data_model_types::KINVALID_KEYSET_ID,
+                },
+            },
+            credentials::group_data_provider::GroupKey,
+        },
+        chip_error_invalid_fabric_index,
+        chip_error_internal,
+        chip_error_not_found,
+        chip_ok,
+    };
+    const fn tag_group_id() -> Tag { context_tag(1) }
+    const fn tag_keyset_id() -> Tag { context_tag(2) }
+    const fn tag_next() -> Tag { context_tag(3) }
+
+    pub struct KeyMapData {
+        pub group_key: GroupKey,
+        pub linked_data: LinkedData,
+        pub fabric_index: FabricIndex,
+        pub group_id: GroupId,
+        pub keyset_id: KeysetId,
+    }
+
+    type PersistentKeyMapData<S> = PersistentData<KeyMapData, K_PERSISTENT_BUFFER_MAX, S>;
+
+    impl KeyMapData {
+        pub const fn new() -> Self {
+            Self {
+                group_key: GroupKey::new(),
+                linked_data: LinkedData::new(),
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                group_id: KUNDEFINED_GROUP_ID,
+                keyset_id: KINVALID_KEYSET_ID,
+            }
+        }
+
+        pub const fn new_with_fabric(fabric: FabricIndex) -> Self {
+            Self {
+                group_key: GroupKey::new(),
+                linked_data: LinkedData::new(),
+                fabric_index: fabric,
+                group_id: KUNDEFINED_GROUP_ID,
+                keyset_id: KINVALID_KEYSET_ID,
+            }
+        }
+
+        pub const fn new_with(fabric: FabricIndex, link_id: u16, group: GroupId, keyset: KeysetId) -> Self {
+            Self {
+                group_key: GroupKey::new_with(group, keyset),
+                linked_data: LinkedData::new_with(link_id),
+                fabric_index: fabric,
+                group_id: KUNDEFINED_GROUP_ID,
+                keyset_id: KINVALID_KEYSET_ID,
+            }
+        }
+    }
+
+    impl DataAccessor for KeyMapData {
+        fn update_key(&self) -> Result<StorageKeyName, ChipError> {
+            verify_or_return_error!(KUNDEFINED_FABRIC_INDEX != self.fabric_index, Err(chip_error_invalid_fabric_index!()));
+            Ok(DefaultStorageKeyAllocator::fabric_group_key(self.fabric_index, self.linked_data.id))
+        }
+
+        fn serialize<Writer: TlvWriter>(&self, writer: &mut Writer) -> ChipErrorResult {
+            let mut container = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut container)?;
+
+            writer.put_u16(tag_group_id(), self.group_key.group_id)?;
+            writer.put_u16(tag_keyset_id(), self.group_key.keyset_id)?;
+            writer.put_u16(tag_next(), self.linked_data.next)?;
+
+            writer.end_container(container)
+        }
+
+        fn deserialize<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_tag(anonymous_tag())?;
+
+            verify_or_return_error!(TlvType::KtlvTypeStructure == reader.get_type(), Err(chip_error_internal!()));
+
+            let container = reader.enter_container()?;
+
+            reader.next_tag(tag_group_id())?;
+            self.group_key.group_id = reader.get_u16()?;
+
+            reader.next_tag(tag_keyset_id())?;
+            self.group_key.keyset_id = reader.get_u16()?;
+
+            reader.next_tag(tag_next())?;
+            self.linked_data.next = reader.get_u16()?;
+
+            reader.exit_container(container)
+        }
+
+        fn clear(&mut self) { }
+    }
+
+    pub const fn new<Storage: PersistentStorageDelegate>() -> PersistentKeyMapData<Storage> {
+        PersistentKeyMapData::<Storage>::new(KeyMapData::new(), None)
+    }
+
+    pub const fn new_with_fabric<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex) -> PersistentKeyMapData<Storage> {
+        PersistentKeyMapData::<Storage>::new(KeyMapData::new_with_fabric(fabric_index), None)
+    }
+
+    pub const fn new_with<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex, link_id: u16, group: GroupId, keyset: KeysetId) -> PersistentKeyMapData<Storage> {
+        PersistentKeyMapData::<Storage>::new(KeyMapData::new_with(fabric_index, link_id, group, keyset), None)
+    }
+
+    pub fn get<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(key_map_data: &mut PersistentKeyMapData<S>, storage: NonNull<PSD>, fabric: &FabricData, target_index: usize) -> bool {
+        key_map_data.fabric_index = fabric.fabric_index;
+        key_map_data.linked_data.id = fabric.first_map;
+        key_map_data.linked_data.max_id = 0;
+        key_map_data.linked_data.index = 0;
+        key_map_data.linked_data.first = true;
+
+        while key_map_data.linked_data.index < fabric.map_count {
+            if PersistentKeyMapData::<S>::load_from(key_map_data, storage.as_ptr()).is_ok() {
+                if usize::from(key_map_data.linked_data.index) == target_index {
+                    return true;
+                }
+                key_map_data.linked_data.max_id = key_map_data.linked_data.max_id.max(key_map_data.linked_data.id);
+                key_map_data.linked_data.first = false;
+                key_map_data.linked_data.prev = key_map_data.linked_data.id;
+                key_map_data.linked_data.id = key_map_data.linked_data.next;
+                key_map_data.linked_data.index += 1;
+            } else {
+                break;
+            }
+        }
+
+        key_map_data.linked_data.id = key_map_data.linked_data.max_id.wrapping_add(1);
+
+        false
+    }
+
+    pub fn find_by_key<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(key_map_data: &mut PersistentKeyMapData<S>, storage: NonNull<PSD>, fabric: &FabricData, map: &GroupKey) -> bool {
+        key_map_data.fabric_index = fabric.fabric_index;
+        key_map_data.linked_data.id = fabric.first_map;
+        key_map_data.linked_data.max_id = 0;
+        key_map_data.linked_data.index = 0;
+        key_map_data.linked_data.first = true;
+
+        while key_map_data.linked_data.index < fabric.map_count {
+            if PersistentKeyMapData::<S>::load_from(key_map_data, storage.as_ptr()).is_ok() {
+                if key_map_data.group_key == *map {
+                    return true;
+                }
+                key_map_data.linked_data.max_id = key_map_data.linked_data.max_id.max(key_map_data.linked_data.id);
+                key_map_data.linked_data.first = false;
+                key_map_data.linked_data.prev = key_map_data.linked_data.id;
+                key_map_data.linked_data.id = key_map_data.linked_data.next;
+                key_map_data.linked_data.index += 1;
+            } else {
+                break;
+            }
+        }
+
+        key_map_data.linked_data.id = key_map_data.linked_data.max_id.wrapping_add(1);
+
+        false
+    }
+
+    pub fn find_by_id<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(key_map_data: &mut PersistentKeyMapData<S>, storage: NonNull<PSD>, fabric: &FabricData, find_id: &KeysetId) -> usize {
+        key_map_data.fabric_index = fabric.fabric_index;
+        key_map_data.linked_data.id = fabric.first_map;
+        key_map_data.linked_data.max_id = 0;
+        key_map_data.linked_data.index = 0;
+        key_map_data.linked_data.first = true;
+
+        while key_map_data.linked_data.index < fabric.map_count {
+            if PersistentKeyMapData::<S>::load_from(key_map_data, storage.as_ptr()).is_ok() {
+                if key_map_data.group_key.keyset_id == *find_id {
+                    return key_map_data.linked_data.index.into();
+                }
+                key_map_data.linked_data.max_id = key_map_data.linked_data.max_id.max(key_map_data.linked_data.id);
+                key_map_data.linked_data.first = false;
+                key_map_data.linked_data.prev = key_map_data.linked_data.id;
+                key_map_data.linked_data.id = key_map_data.linked_data.next;
+                key_map_data.linked_data.index += 1;
+            } else {
+                break;
+            }
+        }
+
+        key_map_data.linked_data.id = key_map_data.linked_data.max_id.wrapping_add(1);
+
+        usize::MAX
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::{
+                        test_persistent_storage::TestPersistentStorage,
+                    },
+                },
+            },
+        };
+        use core::ptr;
+
+        type TestPersistentKeyMapData = PersistentKeyMapData<NopPersistentStorage>;
+
+        #[test]
+        fn save_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentKeyMapData = new_with_fabric(1);
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentKeyMapData = new_with_fabric(1);
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+
+            let mut data_2: TestPersistentKeyMapData = new_with_fabric(1);
+
+            assert!(TestPersistentKeyMapData::load_from(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn get_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
+        }
+    } // end of tests
+} // end of key_map_data
 
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
 {

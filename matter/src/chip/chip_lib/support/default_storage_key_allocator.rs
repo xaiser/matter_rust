@@ -176,6 +176,10 @@ impl DefaultStorageKeyAllocator {
     pub fn fabric_group(index: FabricIndex, group: GroupId) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/g/{}", index, group))
     }
+
+    pub fn fabric_group_key(fabric: FabricIndex, index: u16) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/gk/{}", fabric, index))
+    }
 }
 
 #[cfg(test)]
