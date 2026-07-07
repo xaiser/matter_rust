@@ -163,7 +163,7 @@ impl PartialEq for EpochKey {
     }
 }
 
-mod key_set {
+pub mod key_set {
     pub const KEPOCH_KEYS_MAX: usize = 3;
 }
 

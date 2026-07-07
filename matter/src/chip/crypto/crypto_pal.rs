@@ -1421,6 +1421,17 @@ pub struct GroupOperationalCredentials {
     pub m_private_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
 }
 
+impl GroupOperationalCredentials {
+    pub const fn new() -> Self {
+        Self {
+            m_start_time: 0,
+            m_hash: 0,
+            m_encryption_key: [0u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+            m_private_key: [0u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+        }
+    }
+}
+
 pub fn derive_group_operation_key(
     epoch_key: &[u8],
     compressed_fabric_id: &[u8],

@@ -1561,6 +1561,91 @@ pub mod endpoint_data {
     } // enf of tests
 } // end of endpoint_data
 
+pub mod key_set_data {
+    use super::*;
+    use super::{
+        fabric_data::FabricData,
+    };
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{Tag, context_tag, anonymous_tag},
+                    tlv_types::TlvType,
+                    data_model_types::KINVALID_KEYSET_ID,
+                },
+            },
+            credentials::group_data_provider::{SecurityPolicy, key_set},
+            crypto::GroupOperationalCredentials,
+        },
+        chip_error_invalid_fabric_index,
+        chip_error_internal,
+        /*
+        chip_error_not_found,
+        chip_ok,
+        */
+    };
+    const fn tag_policy() -> Tag { context_tag(1) }
+    const fn tag_num_keys() -> Tag { context_tag(2) }
+    const fn tag_group_credentials() -> Tag { context_tag(3) }
+    const fn tag_start_time() -> Tag { context_tag(4) }
+    const fn tag_key_hash() -> Tag { context_tag(5) }
+    const fn tag_key_value() -> Tag { context_tag(6) }
+    const fn tag_next() -> Tag { context_tag(7) }
+
+    pub struct KeySetData {
+        pub fabric_index: FabricIndex,
+        pub next: KeysetId,
+        pub prev: KeysetId,
+        pub first: bool,
+        pub keyset_id: KeysetId,
+        pub policy: SecurityPolicy,
+        pub keys_count: u8,
+        pub operational_keys: [GroupOperationalCredentials; key_set::KEPOCH_KEYS_MAX],
+    }
+
+    impl KeySetData {
+        pub const fn new() -> Self {
+            Self {
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                next: KINVALID_KEYSET_ID,
+                prev: KINVALID_KEYSET_ID,
+                first: true,
+                keyset_id: 0,
+                policy: SecurityPolicy::KcacheAndSync,
+                keys_count: 0,
+                operational_keys: [ const { GroupOperationalCredentials::new() }; key_set::KEPOCH_KEYS_MAX],
+            }
+        }
+
+        pub const fn new_with_fabic_keyset(fabric: FabricIndex, id: KeysetId) -> Self {
+            Self {
+                fabric_index: fabric,
+                next: KINVALID_KEYSET_ID,
+                prev: KINVALID_KEYSET_ID,
+                first: true,
+                keyset_id: id,
+                policy: SecurityPolicy::KcacheAndSync,
+                keys_count: 0,
+                operational_keys: [ const { GroupOperationalCredentials::new() }; key_set::KEPOCH_KEYS_MAX],
+            }
+        }
+
+        pub const fn new_with(fabric: FabricIndex, id: KeysetId, policy_id: SecurityPolicy, num_keys: u8) -> Self {
+            Self {
+                fabric_index: fabric,
+                next: KINVALID_KEYSET_ID,
+                prev: KINVALID_KEYSET_ID,
+                first: true,
+                keyset_id: id,
+                policy: policy_id,
+                keys_count: num_keys,
+                operational_keys: [ const { GroupOperationalCredentials::new() }; key_set::KEPOCH_KEYS_MAX],
+            }
+        }
+    }
+} // end of key_set_data
+
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
 {
     m_provider: Option<NonNull<Provider>>,
