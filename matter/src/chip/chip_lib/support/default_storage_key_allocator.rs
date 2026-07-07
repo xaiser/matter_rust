@@ -2,7 +2,7 @@ use crate::chip::{
     chip_lib::core::{
         chip_persistent_storage_delegate::KKEY_LENGTH_MAX, data_model_types::FabricIndex,
     },
-    GroupId,
+    GroupId, EndpointId,
 };
 
 use core::fmt::{self, Arguments, Write};
@@ -179,6 +179,10 @@ impl DefaultStorageKeyAllocator {
 
     pub fn fabric_group_key(fabric: FabricIndex, index: u16) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/gk/{}", fabric, index))
+    }
+
+    pub fn fabric_group_endpoint(fabric: FabricIndex, group: GroupId, endpoint: EndpointId) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/g/{}/e/{}", fabric, group, endpoint))
     }
 }
 

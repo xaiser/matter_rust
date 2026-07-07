@@ -474,7 +474,7 @@ pub mod fabric_data {
 
         #[test]
         fn unregister_not_found() {
-            let mut pa = TestPersistentStorage::default();
+            let pa = TestPersistentStorage::default();
             let mut data: TestFabricData = new_with(1);
             assert!(!delete(&mut data, NonNull::from_ref(&pa)).is_ok());
         }
@@ -516,12 +516,14 @@ pub mod group_data {
         chip_error_not_found,
         chip_ok,
     };
+    /*
     use crate::chip_internal_log;
     use crate::chip_internal_log_impl;
     use crate::chip_log_error;
     use core::{
         str::{self, FromStr},
     };
+    */
 
     const fn tag_name() -> Tag { context_tag(1) }
     const fn tag_first_endpoint() -> Tag { context_tag(2) }
@@ -904,8 +906,10 @@ pub mod key_map_data {
         },
         chip_error_invalid_fabric_index,
         chip_error_internal,
+        /*
         chip_error_not_found,
         chip_ok,
+        */
     };
     const fn tag_group_id() -> Tag { context_tag(1) }
     const fn tag_keyset_id() -> Tag { context_tag(2) }
@@ -1058,7 +1062,7 @@ pub mod key_map_data {
         false
     }
 
-    pub fn find_by_id<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(key_map_data: &mut PersistentKeyMapData<S>, storage: NonNull<PSD>, fabric: &FabricData, find_id: &KeysetId) -> usize {
+    pub fn find_by_id<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(key_map_data: &mut PersistentKeyMapData<S>, storage: NonNull<PSD>, fabric: &FabricData, find_id: &KeysetId) -> Option<usize> {
         key_map_data.fabric_index = fabric.fabric_index;
         key_map_data.linked_data.id = fabric.first_map;
         key_map_data.linked_data.max_id = 0;
@@ -1068,7 +1072,7 @@ pub mod key_map_data {
         while key_map_data.linked_data.index < fabric.map_count {
             if PersistentKeyMapData::<S>::load_from(key_map_data, storage.as_ptr()).is_ok() {
                 if key_map_data.group_key.keyset_id == *find_id {
-                    return key_map_data.linked_data.index.into();
+                    return Some(key_map_data.linked_data.index.into());
                 }
                 key_map_data.linked_data.max_id = key_map_data.linked_data.max_id.max(key_map_data.linked_data.id);
                 key_map_data.linked_data.first = false;
@@ -1082,7 +1086,7 @@ pub mod key_map_data {
 
         key_map_data.linked_data.id = key_map_data.linked_data.max_id.wrapping_add(1);
 
-        usize::MAX
+        None
     }
 
     #[cfg(test)]
@@ -1137,8 +1141,425 @@ pub mod key_map_data {
             assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
             assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
         }
+
+        #[test]
+        fn get_no_index() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, 1));
+        }
+
+        #[test]
+        fn get_no_load() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+
+            //assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, 0));
+        }
+
+        #[test]
+        fn get_by_key_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+            let group_key = GroupKey::new_with(group_id, keyset_id);
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find_by_key(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_key));
+        }
+
+        #[test]
+        fn get_by_key_incorrect_key() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+            let group_key = GroupKey::new_with(group_id + 1, keyset_id);
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find_by_key(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_key));
+        }
+
+        #[test]
+        fn get_by_key_no_key() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+            let group_key = GroupKey::new_with(group_id, keyset_id);
+
+            //assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find_by_key(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_key));
+        }
+
+        #[test]
+        fn get_by_id_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find_by_id(&mut data, NonNull::from_ref(&pa), &fabric_data, &keyset_id).is_some_and(|i| i == 0));
+        }
+
+        #[test]
+        fn get_by_id_incorrect_id() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+            // incorrect keset id
+            let keyset_id = keyset_id + 1;
+
+            assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find_by_id(&mut data, NonNull::from_ref(&pa), &fabric_data, &keyset_id).is_none());
+        }
+
+        #[test]
+        fn get_by_id_no_id() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let id: u16 = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+            let mut data: TestPersistentKeyMapData = new_with(fabric_index, id, group_id, keyset_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_map = id;
+            fabric_data.map_count = 1;
+
+            //assert!(TestPersistentKeyMapData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find_by_id(&mut data, NonNull::from_ref(&pa), &fabric_data, &keyset_id).is_none());
+        }
     } // end of tests
 } // end of key_map_data
+
+pub mod endpoint_data {
+    use super::*;
+    use super::{
+        group_data::GroupData,
+        fabric_data::FabricData,
+    };
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    tlv_tags::{Tag, context_tag, anonymous_tag},
+                    tlv_types::TlvType,
+                    data_model_types::KINVALID_ENDPOINT_ID,
+                },
+            },
+            credentials::group_data_provider::GroupEndpoint,
+        },
+        chip_error_invalid_fabric_index,
+        chip_error_internal,
+        /*
+        chip_error_not_found,
+        chip_ok,
+        */
+    };
+    const fn tag_endpoint() -> Tag { context_tag(1) }
+    const fn tag_next() -> Tag { context_tag(2) }
+
+    pub struct EndpointData {
+        pub group_endpoint: GroupEndpoint,
+        pub fabric_index: FabricIndex,
+        pub index: u16,
+        pub next: EndpointId,
+        pub prev: EndpointId,
+        pub first: bool,
+    }
+
+    type PersistentEndpointData<S> = PersistentData<EndpointData, K_PERSISTENT_BUFFER_MAX, S>;
+
+    impl EndpointData {
+        pub const fn new() -> Self {
+            Self {
+                group_endpoint: GroupEndpoint::new(),
+                fabric_index: KUNDEFINED_FABRIC_INDEX,
+                index: 0,
+                next: 0,
+                prev: 0,
+                first: true,
+            }
+        }
+
+        pub const fn new_with(fabric: FabricIndex, group: GroupId, endpoint: EndpointId) -> Self {
+            Self {
+                group_endpoint: GroupEndpoint::new_with(group, endpoint),
+                fabric_index: fabric,
+                index: 0,
+                next: 0,
+                prev: 0,
+                first: true,
+            }
+        }
+
+        pub const fn new_with_fabric(fabric: FabricIndex) -> Self {
+            Self::new_with(fabric, KUNDEFINED_GROUP_ID, KINVALID_ENDPOINT_ID)
+        }
+    }
+
+    impl DataAccessor for EndpointData {
+        fn update_key(&self) -> Result<StorageKeyName, ChipError> {
+            verify_or_return_error!(KUNDEFINED_FABRIC_INDEX != self.fabric_index, Err(chip_error_invalid_fabric_index!()));
+            Ok(DefaultStorageKeyAllocator::fabric_group_endpoint(self.fabric_index, self.group_endpoint.group_id, self.group_endpoint.endpoint_id))
+        }
+
+        fn serialize<Writer: TlvWriter>(&self, writer: &mut Writer) -> ChipErrorResult {
+            let mut container = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut container)?;
+
+            writer.put_u16(tag_endpoint(), self.group_endpoint.endpoint_id)?;
+            writer.put_u16(tag_next(), self.next)?;
+
+            writer.end_container(container)
+        }
+
+        fn deserialize<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_tag(anonymous_tag())?;
+
+            verify_or_return_error!(TlvType::KtlvTypeStructure == reader.get_type(), Err(chip_error_internal!()));
+
+            let container = reader.enter_container()?;
+
+            reader.next_tag(tag_endpoint())?;
+            self.group_endpoint.endpoint_id = reader.get_u16()?;
+
+            reader.next_tag(tag_next())?;
+            self.next = reader.get_u16()?;
+
+            reader.exit_container(container)
+        }
+
+        fn clear(&mut self) {
+            self.next = KINVALID_ENDPOINT_ID;
+        }
+    }
+
+    pub const fn new<Storage: PersistentStorageDelegate>() -> PersistentEndpointData<Storage> {
+        PersistentEndpointData::<Storage>::new(EndpointData::new(), None)
+    }
+
+    pub const fn new_with_fabric<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex) -> PersistentEndpointData<Storage> {
+        PersistentEndpointData::<Storage>::new(EndpointData::new_with_fabric(fabric_index), None)
+    }
+
+    pub const fn new_with<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex, group: GroupId, endpoint: EndpointId) -> PersistentEndpointData<Storage> {
+        PersistentEndpointData::<Storage>::new(EndpointData::new_with(fabric_index, group, endpoint), None)
+    }
+
+    pub fn get<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(endpoint_data: &mut PersistentEndpointData<S>, storage: NonNull<PSD>, fabric: &FabricData, group: &GroupData, target_id: EndpointId) -> bool {
+        endpoint_data.fabric_index = fabric.fabric_index;
+        endpoint_data.group_endpoint.group_id = group.group_info.group_id;
+        endpoint_data.group_endpoint.endpoint_id = group.first_endpoint;
+        endpoint_data.index = 0;
+        endpoint_data.first = true;
+
+        while endpoint_data.index < group.endpoint_count {
+            if PersistentEndpointData::<S>::load_from(endpoint_data, storage.as_ptr()).is_ok() {
+                if endpoint_data.group_endpoint.endpoint_id == target_id {
+                    return true;
+                }
+                endpoint_data.first = false;
+                endpoint_data.prev = endpoint_data.group_endpoint.endpoint_id;
+                endpoint_data.group_endpoint.endpoint_id = endpoint_data.next;
+                endpoint_data.index += 1;
+            } else {
+                break;
+            }
+        }
+
+        false
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::{
+                        test_persistent_storage::TestPersistentStorage,
+                    },
+                },
+            },
+        };
+        use core::ptr;
+
+        type TestPersistentEndpointData = PersistentEndpointData<NopPersistentStorage>;
+
+        #[test]
+        fn save_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentEndpointData = new_with_fabric(1);
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentEndpointData = new_with_fabric(1);
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+
+            let mut data_2: TestPersistentEndpointData = new_with_fabric(1);
+
+            assert!(TestPersistentEndpointData::load_from(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn get_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let endpoint_id: EndpointId = 1;
+            let mut data: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+
+            let mut group_data = super::group_data::GroupData::new();
+            group_data.group_info.group_id = group_id;
+            group_data.first_endpoint = endpoint_id;
+            group_data.endpoint_count = 1;
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+        }
+
+        #[test]
+        fn get_count_0() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let endpoint_id: EndpointId = 1;
+            let mut data: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+
+            let mut group_data = super::group_data::GroupData::new();
+            group_data.group_info.group_id = group_id;
+            group_data.first_endpoint = endpoint_id;
+            group_data.endpoint_count = 0;
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+        }
+
+        #[test]
+        fn get_no_data() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let endpoint_id: EndpointId = 1;
+            let mut data: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+
+            let mut group_data = super::group_data::GroupData::new();
+            group_data.group_info.group_id = group_id;
+            group_data.first_endpoint = endpoint_id;
+            group_data.endpoint_count = 1;
+
+            //assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+        }
+
+        #[test]
+        fn get_no_id() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let endpoint_id: EndpointId = 1;
+            let mut data: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+
+            let mut group_data = super::group_data::GroupData::new();
+            group_data.group_info.group_id = group_id;
+            group_data.first_endpoint = endpoint_id;
+            group_data.endpoint_count = 1;
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id + 1));
+        }
+
+        #[test]
+        fn get_second_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let endpoint_id: EndpointId = 1;
+            let endpoint_id_2: EndpointId = 2;
+            let mut data: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id);
+            data.next = endpoint_id_2;
+            let mut data_2: TestPersistentEndpointData = new_with(fabric_index, group_id, endpoint_id_2);
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+
+            let mut group_data = super::group_data::GroupData::new();
+            group_data.group_info.group_id = group_id;
+            group_data.first_endpoint = endpoint_id;
+            group_data.endpoint_count = 2;
+
+            assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(TestPersistentEndpointData::save_to(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id_2));
+        }
+    } // enf of tests
+} // end of endpoint_data
 
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
 {
