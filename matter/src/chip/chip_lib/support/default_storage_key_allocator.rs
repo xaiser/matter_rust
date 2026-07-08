@@ -184,6 +184,10 @@ impl DefaultStorageKeyAllocator {
     pub fn fabric_group_endpoint(fabric: FabricIndex, group: GroupId, endpoint: EndpointId) -> StorageKeyName {
         StorageKeyName::formatted(format_args!("f/{}/g/{}/e/{}", fabric, group, endpoint))
     }
+
+    pub fn fabric_keyset(fabric: FabricIndex, keyset: u16) -> StorageKeyName {
+        StorageKeyName::formatted(format_args!("f/{}/k/{}", fabric, keyset))
+    }
 }
 
 #[cfg(test)]

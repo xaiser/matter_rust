@@ -1579,6 +1579,7 @@ pub mod key_set_data {
             crypto::GroupOperationalCredentials,
         },
         chip_error_invalid_fabric_index,
+        chip_error_invalid_key_id,
         chip_error_internal,
         /*
         chip_error_not_found,
@@ -1603,6 +1604,8 @@ pub mod key_set_data {
         pub keys_count: u8,
         pub operational_keys: [GroupOperationalCredentials; key_set::KEPOCH_KEYS_MAX],
     }
+
+    type PersistentKeySetData<S> = PersistentData<KeySetData, K_PERSISTENT_BUFFER_MAX, S>;
 
     impl KeySetData {
         pub const fn new() -> Self {
@@ -1643,7 +1646,122 @@ pub mod key_set_data {
                 operational_keys: [ const { GroupOperationalCredentials::new() }; key_set::KEPOCH_KEYS_MAX],
             }
         }
+
+        pub fn get_current_group_credentials(&mut self) -> Option<&mut GroupOperationalCredentials> {
+            match self.keys_count {
+                0 | 1 => {
+                    Some(&mut self.operational_keys[0])
+                },
+                2 => {
+                    Some(&mut self.operational_keys[1])
+                },
+                _ => {
+                    None
+                }
+            }
+        }
     }
+
+    impl DataAccessor for KeySetData {
+        fn update_key(&self) -> Result<StorageKeyName, ChipError> {
+            verify_or_return_error!(KUNDEFINED_FABRIC_INDEX != self.fabric_index, Err(chip_error_invalid_fabric_index!()));
+            verify_or_return_error!(KINVALID_KEYSET_ID != self.keyset_id, Err(chip_error_invalid_key_id!()));
+            Ok(DefaultStorageKeyAllocator::fabric_keyset(self.fabric_index, self.keyset_id))
+        }
+
+        fn serialize<Writer: TlvWriter>(&self, writer: &mut Writer) -> ChipErrorResult {
+            let mut container = TlvType::KtlvTypeNotSpecified;
+            writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut container)?;
+
+            writer.put_u16(tag_policy(), self.policy as u16)?;
+            writer.put_u16(tag_num_keys(), self.keys_count.into())?;
+
+            {
+                let mut array_container = TlvType::KtlvTypeNotSpecified;
+                writer.start_container(anonymous_tag(), TlvType::KtlvTypeArray, &mut array_container)?;
+                let mut key_count = 0u8;
+                for key in &self.operational_keys {
+                    let mut start_time = 0u64;
+                    let mut hash = 0u16;
+                    let mut encryption_key = [0u8; crate::chip::crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES];
+                    let mut item_container = TlvType::KtlvTypeNotSpecified;
+                    writer.start_container(anonymous_tag(), TlvType::KtlvTypeStructure, &mut item_container)?;
+                    if key_count < self.keys_count {
+                        start_time = key.m_start_time;
+                        hash = key.m_hash;
+                        encryption_key.copy_from_slice(&key.m_encryption_key);
+                    }
+                    key_count += 1;
+
+                    writer.put_u64(tag_start_time(), start_time)?;
+                    writer.put_u16(tag_key_hash(), hash)?;
+                    writer.put_bytes(tag_key_value(), &encryption_key)?;
+
+                    writer.end_container(item_container)?;
+                }
+
+                writer.end_container(array_container)?;
+            }
+
+            writer.put_u16(tag_next(), self.next)?;
+
+            writer.end_container(container)
+        }
+
+        fn deserialize<'a, Reader: TlvReader<'a>>(&mut self, reader: &mut Reader) -> ChipErrorResult {
+            reader.next_tag(anonymous_tag())?;
+
+            verify_or_return_error!(TlvType::KtlvTypeStructure == reader.get_type(), Err(chip_error_internal!()));
+
+            let container = reader.enter_container()?;
+
+            reader.next_tag(tag_policy())?;
+            self.policy = SecurityPolicy::try_from(reader.get_u16()?).map_err(|_| chip_error_internal!())?;
+
+            reader.next_tag(tag_num_keys())?;
+            self.keys_count = reader.get_u16()? as u8;
+
+            {
+                reader.next_tag(tag_group_credentials())?;
+                verify_or_return_error!(TlvType::KtlvTypeArray == reader.get_type(), Err(chip_error_internal!()));
+                let array_container = reader.enter_container()?;
+
+                for key in &mut self.operational_keys {
+                    reader.next_tag(anonymous_tag())?;
+                    verify_or_return_error!(TlvType::KtlvTypeStructure == reader.get_type(), Err(chip_error_internal!()));
+
+                    let item_container = reader.enter_container()?;
+
+                    reader.next_tag(tag_start_time())?;
+                    key.m_start_time = reader.get_u64()?;
+
+                    reader.next_tag(tag_key_hash())?;
+                    key.m_hash = reader.get_u16()?;
+
+                    reader.next_tag(tag_key_value())?;
+                    key.m_encryption_key.copy_from_slice(reader.get_bytes()?);
+
+                    crate::chip::crypto::derive_group_privacy_key(&key.m_encryption_key, &mut key.m_privacy_key)?;
+
+                    reader.exit_container(item_container)?;
+                }
+                reader.exit_container(array_container)?;
+            }
+
+            reader.next_tag(tag_next())?;
+            self.next = reader.get_u16()?;
+
+            reader.exit_container(container)
+        }
+
+        fn clear(&mut self) {
+            self.policy = SecurityPolicy::KcacheAndSync;
+            self.keys_count= 0;
+            self.operational_keys = [ const { GroupOperationalCredentials::new() }; key_set::KEPOCH_KEYS_MAX ];
+            self.next = KINVALID_KEYSET_ID;
+        }
+    }
+
 } // end of key_set_data
 
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>

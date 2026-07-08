@@ -1418,7 +1418,7 @@ pub struct GroupOperationalCredentials {
     pub m_start_time: u64,
     pub m_hash: u16,
     pub m_encryption_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
-    pub m_private_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+    pub m_privacy_key: [u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
 }
 
 impl GroupOperationalCredentials {
@@ -1427,7 +1427,7 @@ impl GroupOperationalCredentials {
             m_start_time: 0,
             m_hash: 0,
             m_encryption_key: [0u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
-            m_private_key: [0u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
+            m_privacy_key: [0u8; CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES],
         }
     }
 }
@@ -1444,7 +1444,7 @@ pub fn derive_gropu_session(operational_key: &[u8], session_id: &mut u16) -> Chi
     chip_ok!()
 }
 
-pub fn derive_group_private(epoch_key: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
+pub fn derive_group_privacy_key(epoch_key: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
     chip_ok!()
 }
 

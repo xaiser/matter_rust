@@ -507,6 +507,13 @@ macro_rules! chip_error_wrong_encryption_type_from_peer {
 }
 
 #[macro_export]
+macro_rules! chip_error_invalid_key_id {
+    () => {
+        chip_core_error!(0x85)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_invalid_integer_value {
     () => {
         chip_core_error!(0x8f)
