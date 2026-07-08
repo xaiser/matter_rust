@@ -1586,6 +1586,15 @@ pub mod key_set_data {
         chip_ok,
         */
     };
+
+    /*
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_error;
+    use core::{
+        str::{self, FromStr},
+    };
+    */
     const fn tag_policy() -> Tag { context_tag(1) }
     const fn tag_num_keys() -> Tag { context_tag(2) }
     const fn tag_group_credentials() -> Tag { context_tag(3) }
@@ -1621,7 +1630,7 @@ pub mod key_set_data {
             }
         }
 
-        pub const fn new_with_fabic_keyset(fabric: FabricIndex, id: KeysetId) -> Self {
+        pub const fn new_with_fabric_keyset(fabric: FabricIndex, id: KeysetId) -> Self {
             Self {
                 fabric_index: fabric,
                 next: KINVALID_KEYSET_ID,
@@ -1678,7 +1687,7 @@ pub mod key_set_data {
 
             {
                 let mut array_container = TlvType::KtlvTypeNotSpecified;
-                writer.start_container(anonymous_tag(), TlvType::KtlvTypeArray, &mut array_container)?;
+                writer.start_container(tag_group_credentials(), TlvType::KtlvTypeArray, &mut array_container)?;
                 let mut key_count = 0u8;
                 for key in &self.operational_keys {
                     let mut start_time = 0u64;
@@ -1762,6 +1771,174 @@ pub mod key_set_data {
         }
     }
 
+
+    pub const fn new<Storage: PersistentStorageDelegate>() -> PersistentKeySetData<Storage> {
+        PersistentKeySetData::<Storage>::new(KeySetData::new(), None)
+    }
+
+    pub const fn new_with_fabric_keyset<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex, id: KeysetId) -> PersistentKeySetData<Storage> {
+        PersistentKeySetData::<Storage>::new(KeySetData::new_with_fabric_keyset(fabric_index, id), None)
+    }
+
+    pub const fn new_with<Storage: PersistentStorageDelegate>(fabric_index: FabricIndex, id: KeysetId, policy_id: SecurityPolicy, num_keys: u8) -> PersistentKeySetData<Storage> {
+        PersistentKeySetData::<Storage>::new(KeySetData::new_with(fabric_index, id, policy_id, num_keys), None)
+    }
+
+    pub fn find<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(keyset_data: &mut PersistentKeySetData<S>, storage: NonNull<PSD>, fabric: &FabricData, target_id: usize) -> bool {
+        let mut count = 0u16;
+
+        keyset_data.fabric_index = fabric.fabric_index;
+        keyset_data.keyset_id = fabric.first_keyset;
+        keyset_data.first = true;
+
+        while count < fabric.keyset_count {
+            count += 1;
+            if PersistentKeySetData::<S>::load_from(keyset_data, storage.as_ptr()).is_ok() {
+                if usize::from(keyset_data.keyset_id) == target_id {
+                    return true;
+                }
+                keyset_data.first = false;
+                keyset_data.prev = keyset_data.keyset_id;
+                keyset_data.keyset_id = keyset_data.next;
+            } else {
+                break;
+            }
+        }
+
+        false
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    support::{
+                        test_persistent_storage::TestPersistentStorage,
+                    },
+                },
+            },
+        };
+        use core::ptr;
+
+        type TestPersistentKeySetData = PersistentKeySetData<NopPersistentStorage>;
+
+        #[test]
+        fn save_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentKeySetData = new_with_fabric_keyset(1, 2);
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn load_successfully() {
+            let mut pa = TestPersistentStorage::default();
+            let mut data: TestPersistentKeySetData = new_with_fabric_keyset(1, 2);
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+
+            let mut data_2: TestPersistentKeySetData = new_with_fabric_keyset(1, 2);
+
+            assert!(TestPersistentKeySetData::load_from(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+        }
+
+        #[test]
+        fn find_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let keyset_id: KeysetId = 2;
+            let policy_id = SecurityPolicy::KcacheAndSync;
+            let num_keys = 3u8;
+            let mut data: TestPersistentKeySetData = new_with(fabric_index, keyset_id, policy_id, num_keys);
+
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_keyset = keyset_id;
+            fabric_data.keyset_count = num_keys as u16;
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, keyset_id.into()));
+        }
+
+        #[test]
+        fn find_second_ok() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let keyset_id: KeysetId = 2;
+            let keyset_id_2: KeysetId = 3;
+            let policy_id = SecurityPolicy::KcacheAndSync;
+            let num_keys = 3u8;
+            let mut data: TestPersistentKeySetData = new_with(fabric_index, keyset_id, policy_id, num_keys);
+            let mut data_2: TestPersistentKeySetData = new_with(fabric_index, keyset_id_2, policy_id, num_keys);
+
+            data.next = keyset_id_2;
+
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_keyset = keyset_id;
+            fabric_data.keyset_count = num_keys as u16;
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(TestPersistentKeySetData::save_to(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, keyset_id_2.into()));
+        }
+
+        #[test]
+        fn find_key_count_zero() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let keyset_id: KeysetId = 2;
+            let policy_id = SecurityPolicy::KcacheAndSync;
+            let num_keys = 3u8;
+            let mut data: TestPersistentKeySetData = new_with(fabric_index, keyset_id, policy_id, num_keys);
+
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_keyset = keyset_id;
+            fabric_data.keyset_count = 0;
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, keyset_id.into()));
+        }
+
+        #[test]
+        fn find_load_failed() {
+            let pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let keyset_id: KeysetId = 2;
+            let policy_id = SecurityPolicy::KcacheAndSync;
+            let num_keys = 3u8;
+            let mut data: TestPersistentKeySetData = new_with(fabric_index, keyset_id, policy_id, num_keys);
+
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_keyset = keyset_id;
+            fabric_data.keyset_count = num_keys as u16;
+
+            //assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, keyset_id.into()));
+        }
+
+        #[test]
+        fn find_no_key() {
+            let mut pa = TestPersistentStorage::default();
+            let fabric_index: FabricIndex = 1;
+            let keyset_id: KeysetId = 2;
+            let policy_id = SecurityPolicy::KcacheAndSync;
+            let num_keys = 3u8;
+            let mut data: TestPersistentKeySetData = new_with(fabric_index, keyset_id, policy_id, num_keys);
+
+            let mut fabric_data = super::fabric_data::FabricData::new();
+            fabric_data.fabric_index = fabric_index;
+            fabric_data.first_keyset = keyset_id;
+            fabric_data.keyset_count = num_keys as u16;
+
+            assert!(TestPersistentKeySetData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, (keyset_id + 1).into()));
+        }
+    } // end of tests
 } // end of key_set_data
 
 struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
