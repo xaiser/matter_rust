@@ -11,13 +11,14 @@ use crate::{
                 chip_persistent_storage_delegate::NopPersistentStorage,
             },
             support::{
+                pool::BitMapObjectPool,
                 default_string::DefaultString,
                 persistent_data::{PersistentData, DataAccessor},
                 common_persistent_data::{stored_data_list::StoredDataList, fabric_list},
                 default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
             },
         },
-        credentials::group_data_provider::{GroupDataProvider, GroupListener, GroupInfo},
+        credentials::group_data_provider::{GroupDataProvider, GroupListener, GroupInfo, GroupKey, KeySet},
         crypto::{
             self, session_keystore::SessionKeystore,
         },
@@ -29,6 +30,8 @@ use crate::{
     ChipErrorResult,
     verify_or_return_error,
     verify_or_return_value,
+    chip_error_not_implemented,
+    chip_ok,
 };
 
 use core::ptr::NonNull;
@@ -1941,16 +1944,50 @@ pub mod key_set_data {
     } // end of tests
 } // end of key_set_data
 
-struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
+pub mod iter_impl {
+    use super::*;
+
+    pub struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_fabric: FabricIndex,
+        m_next_id: u16,
+        m_count: usize,
+        m_total: usize,
+    }
+
+    impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_next_id: 0,
+                m_count: 0,
+                m_total: 0,
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<Provider> {
+        type Item = GroupInfo;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            None
+        }
+    }
+} // end of private
+
+/*
+struct GroupKeyIteratorImpl
 {
-    m_provider: Option<NonNull<Provider>>,
+    m_provider: Option<NonNull<GroupDataProviderImpl>>,
     m_fabric: FabricIndex,
     m_next_id: u16,
     m_count: usize,
     m_total: usize,
 }
 
-impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
+impl GroupKeyIteratorImpl {
     pub const fn new() -> Self {
         Self {
             m_provider: None,
@@ -1962,13 +1999,55 @@ impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
     }
 }
 
-impl<Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<Provider> {
-    type Item = GroupInfo;
+impl Iterator for GroupKeyIteratorImpl {
+    type Item = GroupKey;
 
     fn next(&mut self) -> Option<Self::Item> {
         None
     }
 }
+
+struct EndpointIteratorImpl
+{
+    m_provider: Option<NonNull<GroupDataProviderImpl>>,
+    m_fabric: FabricIndex,
+    m_first_group: GroupId,
+    m_group: u16,
+    m_group_index: usize,
+    m_group_count: usize,
+    m_endpoint: u16,
+    m_endpoint_index: usize,
+    m_endpoint_count: usize,
+    m_first_endpoint: bool,
+}
+
+impl EndpointIteratorImpl {
+    pub const fn new() -> Self {
+        Self {
+            m_provider: None,
+            m_fabric: KUNDEFINED_FABRIC_INDEX,
+            m_first_group: KUNDEFINED_GROUP_ID,
+            m_group: 0,
+            m_group_index: 0,
+            m_group_count: 0,
+            m_endpoint: 0,
+            m_endpoint_index: 0,
+            m_endpoint_count: 0,
+            m_first_endpoint: true,
+        }
+    }
+}
+
+impl Iterator for EndpointIteratorImpl {
+    type Item = GroupEndpoint;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+*/
+
+type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
 
 
 pub struct GroupDataProviderImpl<PSD, SKS, LIS>
@@ -1982,4 +2061,154 @@ where
     m_max_groups_per_fabric: u16,
     m_max_group_keys_per_fabric: u16,
     m_listener: Option<NonNull<LIS>>,
+    m_iter: GroupInfoIterator<PSD, SKS, LIS>,
+}
+
+impl<PSD, SKS, LIS> GroupDataProvider for GroupDataProviderImpl<PSD, SKS, LIS>
+where
+    PSD: PersistentStorageDelegate,
+    SKS: SessionKeystore,
+    LIS: GroupListener,
+{
+    type GroupInfoIterator = GroupInfoIterator<PSD, SKS, LIS>;
+    type GroupKeyIterator = u8;
+    type EndpointIterator = u8;
+    type KeySetIterator = u8;
+    type GroupSessionIterator = u8;
+
+    fn new_with(max_group_per_fabric: u16, max_group_keys_per_fabric: u16) -> Self {
+        Self {
+            m_storage: None,
+            m_sesion_keystore: None,
+            m_max_groups_per_fabric: 0,
+            m_max_group_keys_per_fabric: 0,
+            m_listener: None,
+            m_iter: GroupInfoIterator::<PSD, SKS, LIS>::new(),
+        }
+    }
+
+    fn get_max_groups_per_fabric(&self) -> u16 {
+        0
+    }
+
+    fn get_max_group_keys_per_fabric(&self) -> u16 {
+        0
+    }
+
+    fn init(&mut self) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn finish(&mut self) {}
+
+    // By id
+    fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn get_group_info(&self, fabric_index: FabricIndex) -> Result<GroupInfo, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn remove_group_info(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    // By index
+    fn set_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupInfo) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn get_group_info_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupInfo, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, group_id: GroupId) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    // Endpoints
+    fn has_endpoint(&self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> bool {
+        true
+    }
+
+    fn add_endpoint(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn remove_endpoint(&mut self, fabric_index: FabricIndex, group_id: Option<GroupId>, endpoint_id: EndpointId) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    // Iterators
+    fn iter_group_info(&self, fabric_index: FabricIndex) -> Option<Self::GroupInfoIterator> {
+        None
+    }
+
+    fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self::EndpointIterator> {
+        None
+    }
+
+    //
+    // Group-Key map
+    //
+    fn set_group_key_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupKey) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn get_group_key_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupKey, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn remove_group_key_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn iter_group_keys(&self, fabric_index: FabricIndex) -> Option<Self::GroupKeyIterator> {
+        None
+    }
+
+    //
+    // Key Sets
+    //
+    fn set_key_set(&mut self, fabric_index: FabricIndex, compressed_fabric_id: &[u8], keys: &KeySet) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn get_key_set(&self, fabric_index: FabricIndex, keyset_id: KeysetId) -> Result<KeySet, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn remove_key_set(&mut self, fabric_index: FabricIndex, keyset_id: KeysetId) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<&KeySet, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn iter_key_sets(&self, fabric_index: FabricIndex) -> Option<Self::KeySetIterator> {
+        None
+    }
+
+    fn remove_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator> {
+        None
+    }
+
+    fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError> {
+        Err(chip_error_not_implemented!())
+    }
+
+    fn set_listener<Listener: GroupListener>(&mut self, listener: NonNull<Listener>) {
+
+    }
+    fn remove_listener(&mut self) {}
 }
