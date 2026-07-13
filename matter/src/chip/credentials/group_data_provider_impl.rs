@@ -18,9 +18,9 @@ use crate::{
                 default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
             },
         },
-        credentials::group_data_provider::{GroupDataProvider, GroupListener, GroupInfo, GroupKey, KeySet},
+        credentials::group_data_provider::{GroupDataProvider, GroupListener, GroupInfo, GroupKey, KeySet, GroupEndpoint, GroupSession},
         crypto::{
-            self, session_keystore::SessionKeystore,
+            self, session_keystore::SessionKeystore, Aes128KeyHandle, Symmetric128BitsKeyByteArray, SymmetricKeyContext,
         },
         GroupId, FabricIndex,
     },
@@ -1947,6 +1947,23 @@ pub mod key_set_data {
 pub mod iter_impl {
     use super::*;
 
+    use crate::{
+        chip::{
+            crypto::{
+                SymmetricEncryptResult, SymmetricDecryptResult,
+            },
+        },
+    };
+
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_error;
+    use core::{
+        str::{self, FromStr},
+    };
+
+    use core::marker::PhantomData;
+
     pub struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
     {
         m_provider: Option<NonNull<Provider>>,
@@ -1975,7 +1992,297 @@ pub mod iter_impl {
             None
         }
     }
-} // end of private
+
+    pub struct GroupKeyIteratorImpl<Provider: GroupDataProvider>
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_fabric: FabricIndex,
+        m_next_id: u16,
+        m_count: usize,
+        m_total: usize,
+    }
+
+    impl<Provider: GroupDataProvider> GroupKeyIteratorImpl<Provider> {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_next_id: 0,
+                m_count: 0,
+                m_total: 0,
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProvider> Iterator for GroupKeyIteratorImpl<Provider> {
+        type Item = GroupKey;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            None
+        }
+    }
+
+    pub struct EndpointIteratorImpl<Provider: GroupDataProvider>
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_fabric: FabricIndex,
+        m_first_group: GroupId,
+        m_group: u16,
+        m_group_index: usize,
+        m_group_count: usize,
+        m_endpoint: u16,
+        m_endpoint_index: usize,
+        m_endpoint_count: usize,
+        m_first_endpoint: bool,
+    }
+
+    impl<Provider: GroupDataProvider> EndpointIteratorImpl<Provider> {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_first_group: KUNDEFINED_GROUP_ID,
+                m_group: 0,
+                m_group_index: 0,
+                m_group_count: 0,
+                m_endpoint: 0,
+                m_endpoint_index: 0,
+                m_endpoint_count: 0,
+                m_first_endpoint: true,
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProvider> Iterator for EndpointIteratorImpl<Provider> {
+        type Item = GroupEndpoint;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            None
+        }
+    }
+
+    pub struct GroupKeyContext<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_key_hash: u16,
+        m_encryption_key: Aes128KeyHandle,
+        m_privacy_key: Aes128KeyHandle,
+        m_phantom: PhantomData<SKS>,
+    }
+
+    impl<SKS, Provider> GroupKeyContext<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_key_hash: 0,
+                m_encryption_key: Aes128KeyHandle::new(),
+                m_privacy_key: Aes128KeyHandle::new(),
+                m_phantom: PhantomData,
+            }
+        }
+
+        pub fn new_with_provider(provider: Option<NonNull<Provider>>) -> Self {
+            Self {
+                m_provider: provider,
+                m_key_hash: 0,
+                m_encryption_key: Aes128KeyHandle::new(),
+                m_privacy_key: Aes128KeyHandle::new(),
+                m_phantom: PhantomData,
+            }
+        }
+
+        pub fn new_with(provider: Option<NonNull<Provider>>, encryption_key: &Symmetric128BitsKeyByteArray, hash: u16, 
+            privacy_key: &Symmetric128BitsKeyByteArray) -> Self {
+            let mut s = Self {
+                m_provider: provider,
+                m_key_hash: 0,
+                m_encryption_key: Aes128KeyHandle::new(),
+                m_privacy_key: Aes128KeyHandle::new(),
+                m_phantom: PhantomData,
+            };
+
+            s.initialize(encryption_key, hash, privacy_key);
+
+            s
+        }
+
+        pub fn initialize(&mut self, encryption_key: &Symmetric128BitsKeyByteArray, hash: u16, privacy_key: &Symmetric128BitsKeyByteArray) {
+            self.release_keys();
+            self.m_key_hash = hash;
+            // TODO: Load group keys to the session keystore upon loading from persistent storage
+            //
+            // Group keys should be transformed into a key handle as soon as possible or even
+            // the key storage should be taken over by SessionKeystore interface, but this looks
+            // like more work, so let's use the transitional code below for now.
+            unsafe {
+                if let Some(mut provider) = self.m_provider &&
+                 let Some(mut session_keystore_ptr) = provider.as_mut().get_session_keystore() {
+                     let session_keystore = session_keystore_ptr.as_mut();
+                     match session_keystore.create_key_aes128(encryption_key) {
+                         Ok(key) => {
+                             self.m_encryption_key = key;
+                         },
+                         Err(e) => {
+                            chip_log_error!(
+                                SecureChannel,
+                                "group key contexet failed to create key 1"
+                            );
+                         }
+                     }
+                     match session_keystore.create_key_aes128(privacy_key) {
+                         Ok(key) => {
+                             self.m_privacy_key = key;
+                         },
+                         Err(e) => {
+                            chip_log_error!(
+                                SecureChannel,
+                                "group key contexet failed to create key 2"
+                            );
+                         }
+                     }
+                } else {
+                    chip_log_error!(
+                        SecureChannel,
+                        "group key contexet no group data key store"
+                    );
+                }
+            }
+        }
+
+        pub fn release_keys(&mut self) {
+            unsafe {
+                if let Some(mut provider) = self.m_provider &&
+                 let Some(mut session_keystore_ptr) = provider.as_mut().get_session_keystore() {
+                     let session_keystore = session_keystore_ptr.as_mut();
+                     session_keystore.destroy_key_128bits(&mut self.m_encryption_key);
+                     session_keystore.destroy_key_128bits(&mut self.m_privacy_key);
+                } else {
+                    chip_log_error!(
+                        SecureChannel,
+                        "group key contexet no group data key store"
+                    );
+                }
+            }
+        }
+    }
+
+    impl<SKS, Provider> SymmetricKeyContext for GroupKeyContext<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        fn get_key_hash(&mut self) -> u16 {
+            self.m_key_hash
+        }
+
+        fn message_encrypt(&self, _plaintext: &[u8], _aad: &[u8], _nonce: &[u8], _mic: &mut [u8], _ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+            Err(chip_error_not_implemented!())
+        }
+
+        fn message_decrypt(&self, _ciphertext: &[u8], _aad: &[u8], _nonce: &[u8], _mic: &[u8], _plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
+            Err(chip_error_not_implemented!())
+        }
+
+        fn privacy_encrypt(&self, _input: &[u8], _nonce: &[u8], _output: &mut [u8]) -> ChipErrorResult {
+            Err(chip_error_not_implemented!())
+        }
+
+        fn privacy_decrypt(&self, _input: &[u8], _nonce: &[u8], _output: &mut [u8]) -> ChipErrorResult {
+            Err(chip_error_not_implemented!())
+        }
+
+        fn release(&mut self) {
+        }
+    }
+
+    pub struct KeySetIteratorImpl<Provider: GroupDataProvider>
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_fabric: FabricIndex,
+        m_next_id: u16,
+        m_count: usize,
+        m_total: usize,
+    }
+
+    impl<Provider: GroupDataProvider> KeySetIteratorImpl<Provider> {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_next_id: 0,
+                m_count: 0,
+                m_total: 0,
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProvider> Iterator for KeySetIteratorImpl<Provider> {
+        type Item = KeySet;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            None
+        }
+    }
+
+    pub struct GroupSessionIteratorImpl<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        m_provider: Option<NonNull<Provider>>,
+        m_first_fabric: FabricIndex,
+        m_fabric: FabricIndex,
+        m_fabric_count: u16,
+        m_fabric_total: u16,
+        m_mapping: u16,
+        m_map_count: u16,
+        m_key_index: u16,
+        m_key_count: u16,
+        m_first_map: bool,
+        m_group_key_context: GroupKeyContext<SKS, Provider>,
+    }
+
+    impl<SKS, Provider> GroupSessionIteratorImpl<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        pub const fn new() -> Self {
+            Self {
+                m_provider: None,
+                m_first_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_fabric_count: 0,
+                m_fabric_total: 0,
+                m_mapping: 0,
+                m_map_count: 0,
+                m_key_index: 0,
+                m_key_count: 0,
+                m_first_map: true,
+                m_group_key_context: GroupKeyContext::<SKS, Provider>::new(),
+            }
+        }
+    }
+
+    impl<SKS, Provider> Iterator for GroupSessionIteratorImpl<SKS, Provider>
+    where
+        SKS: SessionKeystore,
+        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+    {
+        type Item = GroupSession<GroupKeyContext<SKS, Provider>>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            None
+        }
+    }
+} // end of iter_impl
 
 /*
 struct GroupKeyIteratorImpl
@@ -2048,7 +2355,26 @@ impl Iterator for EndpointIteratorImpl {
 */
 
 type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupInfoIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupInfoIterator<PSD, SKS, LIS>, 2>;
 
+type GroupKeyIterator<PSD, SKS, LIS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupKeyIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupKeyIterator<PSD, SKS, LIS>, 2>;
+
+type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type EndpointIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<EndpointIterator<PSD, SKS, LIS>, 2>;
+
+type KeySetIterator<PSD, SKS, LIS> = iter_impl::KeySetIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type KeySetIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<KeySetIterator<PSD, SKS, LIS>, 2>;
+
+type GroupSessionIterator<PSD, SKS, LIS> = iter_impl::GroupSessionIteratorImpl<SKS, GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupSessionIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupSessionIterator<PSD, SKS, LIS>, 2>;
+
+pub trait GetSessionKeystore<SKS>
+where
+    SKS: SessionKeystore,
+{
+    fn get_session_keystore(&mut self) -> Option<NonNull<SKS>>;
+}
 
 pub struct GroupDataProviderImpl<PSD, SKS, LIS>
 where
@@ -2061,7 +2387,22 @@ where
     m_max_groups_per_fabric: u16,
     m_max_group_keys_per_fabric: u16,
     m_listener: Option<NonNull<LIS>>,
-    m_iter: GroupInfoIterator<PSD, SKS, LIS>,
+    m_group_info_iterators: GroupInfoIteratorPool<PSD, SKS, LIS>,
+    m_group_key_iterators: GroupKeyIteratorPool<PSD, SKS, LIS>,
+    m_endpoint_iterators: EndpointIteratorPool<PSD, SKS, LIS>,
+    m_key_set_iterators: KeySetIteratorPool<PSD, SKS, LIS>,
+    m_group_session_iterators: GroupSessionIteratorPool<PSD, SKS, LIS>,
+}
+
+impl<PSD, SKS, LIS> GetSessionKeystore<SKS> for GroupDataProviderImpl<PSD, SKS, LIS>
+where
+    PSD: PersistentStorageDelegate,
+    SKS: SessionKeystore,
+    LIS: GroupListener,
+{
+    fn get_session_keystore(&mut self) -> Option<NonNull<SKS>> {
+        self.m_sesion_keystore.clone()
+    }
 }
 
 impl<PSD, SKS, LIS> GroupDataProvider for GroupDataProviderImpl<PSD, SKS, LIS>
@@ -2071,10 +2412,10 @@ where
     LIS: GroupListener,
 {
     type GroupInfoIterator = GroupInfoIterator<PSD, SKS, LIS>;
-    type GroupKeyIterator = u8;
-    type EndpointIterator = u8;
-    type KeySetIterator = u8;
-    type GroupSessionIterator = u8;
+    type GroupKeyIterator = GroupKeyIterator<PSD, SKS, LIS>;
+    type EndpointIterator = EndpointIterator<PSD, SKS, LIS>;
+    type KeySetIterator = KeySetIterator<PSD, SKS, LIS>;
+    type GroupSessionIterator = GroupSessionIterator<PSD, SKS, LIS>;
 
     fn new_with(max_group_per_fabric: u16, max_group_keys_per_fabric: u16) -> Self {
         Self {
@@ -2083,7 +2424,11 @@ where
             m_max_groups_per_fabric: 0,
             m_max_group_keys_per_fabric: 0,
             m_listener: None,
-            m_iter: GroupInfoIterator::<PSD, SKS, LIS>::new(),
+            m_group_info_iterators: GroupInfoIteratorPool::<PSD, SKS, LIS>::new(),
+            m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
+            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
+            m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
+            m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
         }
     }
 
@@ -2212,3 +2557,13 @@ where
     }
     fn remove_listener(&mut self) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init() {
+        let p = 
+    }
+} // end of tests

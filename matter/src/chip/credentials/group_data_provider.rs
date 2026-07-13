@@ -2,12 +2,13 @@ use crate::{
     chip::{
         chip_lib::{
             core::{
-                data_model_types::{KeysetId, EndpointId},
+                data_model_types::{KeysetId, EndpointId, KUNDEFINED_FABRIC_INDEX},
                 chip_config::{CHIP_CONFIG_MAX_GROUP_NAME_LENGTH, CHIP_CONFIG_MAX_GROUPS_PER_FABRIC, CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC},
                 group_id::KUNDEFINED_GROUP_ID,
             },
             support::default_string::DefaultString,
         },
+        crypto::SymmetricKeyContext,
         GroupId, FabricIndex,
     },
     ChipError,
@@ -126,6 +127,25 @@ impl GroupEndpoint {
 impl PartialEq for GroupEndpoint {
     fn eq(&self, other: &Self) -> bool {
         self.group_id == other.group_id && self.endpoint_id == self.endpoint_id
+    }
+}
+
+/// Group Session
+pub struct GroupSession<KeyContext: SymmetricKeyContext> {
+    pub group_id: GroupId,
+    pub fabric_index: FabricIndex,
+    pub security_policy: SecurityPolicy,
+    pub key_context: Option<NonNull<KeyContext>>,
+}
+
+impl<KeyContext: SymmetricKeyContext> GroupSession<KeyContext> {
+    pub const fn new() -> Self {
+        Self {
+            group_id: KUNDEFINED_GROUP_ID,
+            fabric_index: KUNDEFINED_FABRIC_INDEX,
+            security_policy: SecurityPolicy::KcacheAndSync,
+            key_context: None,
+        }
     }
 }
 
