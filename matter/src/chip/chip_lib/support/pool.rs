@@ -40,7 +40,7 @@ where
 pub trait ObjectPool<ElementType, Mem> {
     fn create_object(&mut self, init_value: ElementType) -> *mut ElementType;
     fn release_object(&mut self, element: *mut ElementType);
-    fn releaes_all(&mut self);
+    fn release_all(&mut self);
     fn exhausted(&self) -> bool;
     fn for_each_active_object<F>(&mut self, f: F) -> Loop
     where
@@ -224,7 +224,22 @@ where
         self.deallocate(element);
     }
 
-    fn releaes_all(&mut self) {}
+    fn release_all(&mut self) {
+        let capacity = self.capacity();
+        for word in (0..).take_while(|&word| word * K_BIT_CHUNK_SIZE < capacity) {
+            let usage = &self.m_usage[word];
+            let value = usage.load(Ordering::Relaxed);
+            for offset in (0..).clone().take_while(|&offset| {
+                offset < K_BIT_CHUNK_SIZE && offset + word * K_BIT_CHUNK_SIZE < capacity
+            }) {
+                if (value & (K_BIT1 << offset)) != 0 {
+                    //if f(self.at(word * K_BIT_CHUNK_SIZE + offset)) == Loop::Break {
+                    let object = self.at(word * K_BIT_CHUNK_SIZE + offset);
+                    self.release_object(object);
+                }
+            }
+        }
+    }
 
     fn exhausted(&self) -> bool {
         return StaticAllocatorBitMap::exhausted(self);
@@ -403,6 +418,24 @@ mod test {
             assert_eq!(2, object_pool.allocated());
             object_pool.release_object(s);
             object_pool.release_object(b);
+            assert_eq!(0, object_pool.allocated());
+        }
+
+        #[test]
+        fn release_all() {
+            let mut object_pool = create_object_pool!(StubStruct, 10);
+            let s = object_pool.create_object(StubStruct {
+                _inner: StubStructInner { init: true },
+                the_int: 1,
+                _the_string: "test",
+            });
+            let b = object_pool.create_object(StubStruct {
+                _inner: StubStructInner { init: true },
+                the_int: 2,
+                _the_string: "test",
+            });
+            assert_eq!(2, object_pool.allocated());
+            object_pool.release_all();
             assert_eq!(0, object_pool.allocated());
         }
 

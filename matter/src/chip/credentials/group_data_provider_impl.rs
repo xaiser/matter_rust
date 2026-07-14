@@ -4,14 +4,14 @@ use crate::{
         chip_lib::{
             core::{
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
-                data_model_types::{KeysetId, EndpointId, KUNDEFINED_FABRIC_INDEX},
+                data_model_types::{KeysetId, EndpointId, KUNDEFINED_FABRIC_INDEX, KINVALID_ENDPOINT_ID},
                 group_id::KUNDEFINED_GROUP_ID,
                 tlv_writer::TlvWriter,
                 tlv_reader::TlvReader,
                 chip_persistent_storage_delegate::NopPersistentStorage,
             },
             support::{
-                pool::BitMapObjectPool,
+                pool::{BitMapObjectPool, ObjectPool},
                 default_string::DefaultString,
                 persistent_data::{PersistentData, DataAccessor},
                 common_persistent_data::{stored_data_list::StoredDataList, fabric_list},
@@ -30,7 +30,16 @@ use crate::{
     ChipErrorResult,
     verify_or_return_error,
     verify_or_return_value,
+    verify_or_die,
     chip_error_not_implemented,
+    chip_error_incorrect_state,
+    chip_error_internal,
+    chip_error_invalid_fabric_index,
+    chip_error_invalid_argument,
+    chip_error_key_not_found,
+    chip_error_not_found,
+    chip_error_duplicate_key_id,
+    chip_error_invalid_list_length,
     chip_ok,
 };
 
@@ -144,7 +153,6 @@ pub mod fabric_data {
             },
         },
         chip_error_invalid_fabric_index,
-        chip_error_internal,
         chip_error_not_found,
         chip_ok,
     };
@@ -178,7 +186,7 @@ pub mod fabric_data {
         pub next: FabricIndex,
     }
 
-    type PersistentFabricData<S: PersistentStorageDelegate> = PersistentData<FabricData, K_PERSISTENT_BUFFER_MAX, S>;
+    pub type PersistentFabricData<S: PersistentStorageDelegate> = PersistentData<FabricData, K_PERSISTENT_BUFFER_MAX, S>;
 
     impl FabricData {
         pub const fn new() -> Self {
@@ -544,7 +552,7 @@ pub mod group_data {
         pub group_info: GroupInfo,
     }
 
-    type PersistentGroupData<PSD> = PersistentData<GroupData, K_PERSISTENT_BUFFER_MAX, PSD>;
+    pub type PersistentGroupData<PSD> = PersistentData<GroupData, K_PERSISTENT_BUFFER_MAX, PSD>;
 
     impl GroupData {
         pub const fn new() -> Self {
@@ -1324,7 +1332,7 @@ pub mod endpoint_data {
         pub first: bool,
     }
 
-    type PersistentEndpointData<S> = PersistentData<EndpointData, K_PERSISTENT_BUFFER_MAX, S>;
+    pub type PersistentEndpointData<S> = PersistentData<EndpointData, K_PERSISTENT_BUFFER_MAX, S>;
 
     impl EndpointData {
         pub const fn new() -> Self {
@@ -2369,6 +2377,10 @@ type KeySetIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<KeySetIterator<PSD, SK
 type GroupSessionIterator<PSD, SKS, LIS> = iter_impl::GroupSessionIteratorImpl<SKS, GroupDataProviderImpl<PSD, SKS, LIS>>;
 type GroupSessionIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupSessionIterator<PSD, SKS, LIS>, 2>;
 
+type FabricData = fabric_data::PersistentFabricData<NopPersistentStorage>;
+type GroupData = group_data::PersistentGroupData<NopPersistentStorage>;
+type EndpointData = endpoint_data::PersistentEndpointData<NopPersistentStorage>;
+
 pub trait GetSessionKeystore<SKS>
 where
     SKS: SessionKeystore,
@@ -2402,6 +2414,77 @@ where
 {
     fn get_session_keystore(&mut self) -> Option<NonNull<SKS>> {
         self.m_sesion_keystore.clone()
+    }
+}
+
+impl<PSD, SKS, LIS> GroupDataProviderImpl<PSD, SKS, LIS>
+where
+    PSD: PersistentStorageDelegate,
+    SKS: SessionKeystore,
+    LIS: GroupListener,
+{
+    pub const fn new() -> Self {
+        Self {
+            m_storage: None,
+            m_sesion_keystore: None,
+            m_max_groups_per_fabric: 0,
+            m_max_group_keys_per_fabric: 0,
+            m_listener: None,
+            m_group_info_iterators: GroupInfoIteratorPool::<PSD, SKS, LIS>::new(),
+            m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
+            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
+            m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
+            m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
+        }
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.m_storage.is_some()
+    }
+
+    pub fn set_storage_delegate(&mut self, storage: Option<NonNull<PSD>>) {
+        verify_or_die!(storage.is_some());
+        self.m_storage = storage;
+    }
+
+    pub fn remove_endpoints(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult {
+        unsafe {
+            let storage_ptr = self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
+
+            let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+            let mut group: GroupData = group_data::new();
+
+            verify_or_return_error!(FabricData::load_from(&mut fabric, storage_ptr).is_ok(), Err(chip_error_invalid_fabric_index!()));
+            verify_or_return_error!(group_data::find(&mut group, NonNull::new_unchecked(storage_ptr), &fabric, group_id), Err(chip_error_key_not_found!()));
+
+            let mut endpoint: EndpointData = endpoint_data::new_with(fabric_index, group.group_info.group_id, group.first_endpoint);
+
+            for endpoint_index in 0..group.endpoint_count {
+                EndpointData::load_from(&mut endpoint, storage_ptr)?;
+                EndpointData::delete_from(&mut endpoint, storage_ptr)?;
+                endpoint.group_endpoint.endpoint_id = endpoint.next;
+            }
+
+            group.first_endpoint = KINVALID_ENDPOINT_ID;
+            group.endpoint_count = 0;
+            return GroupData::save_to(&mut group, storage_ptr);
+        }
+    }
+
+    fn group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo) {
+        if let Some(mut listener_ptr) = self.m_listener {
+            unsafe {
+                listener_ptr.as_mut().on_group_added(fabric_index, new_group);
+            }
+        }
+    }
+
+    fn group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo) {
+        if let Some(mut listener_ptr) = self.m_listener {
+            unsafe {
+                listener_ptr.as_mut().on_group_removed(fabric_index, old_group);
+            }
+        }
     }
 }
 
@@ -2441,10 +2524,20 @@ where
     }
 
     fn init(&mut self) -> ChipErrorResult {
+        if self.m_storage.is_none() || self.m_sesion_keystore.is_none() {
+            return Err(chip_error_incorrect_state!());
+        }
+
         chip_ok!()
     }
 
-    fn finish(&mut self) {}
+    fn finish(&mut self) {
+        self.m_group_info_iterators.release_all();
+        self.m_group_key_iterators.release_all();
+        self.m_endpoint_iterators.release_all();
+        self.m_key_set_iterators.release_all();
+        self.m_group_session_iterators.release_all();
+    }
 
     // By id
     fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult {
@@ -2461,6 +2554,71 @@ where
 
     // By index
     fn set_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupInfo) -> ChipErrorResult {
+        unsafe {
+            let storage_ptr = self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
+
+            let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+            let mut group: GroupData = group_data::new();
+
+            match FabricData::load_from(&mut fabric, storage_ptr) {
+                Ok(()) => {
+                    // do nothing
+                }
+                Err(e) => {
+                    if e != chip_error_not_found!() {
+                        return Err(e);
+                    }
+                }
+            }
+
+            let found = group_data::find(&mut group, NonNull::new_unchecked(storage_ptr), &fabric, info.group_id);
+
+            verify_or_return_error!(!found || (usize::from(group.index) == index), Err(chip_error_duplicate_key_id!()));
+
+            group.group_info.group_id = info.group_id;
+            group.endpoint_count = 0;
+            group.set_name(info.name.str());
+
+            if found {
+                // Update existing entry
+                return GroupData::save_to(&mut group, storage_ptr);
+            }
+
+            if index < fabric.group_count.into() {
+                // Replace existing entry with a new group
+                let mut old_group: GroupData = group_data::new();
+                group_data::get(&mut old_group, NonNull::new_unchecked(storage_ptr), &fabric, index);
+                group.first = old_group.first;
+                group.prev = old_group.prev;
+                group.next = old_group.next;
+
+                self.remove_endpoints(fabric_index, old_group.group_info.group_id)?;
+                GroupData::delete_from(&mut old_group, storage_ptr)?;
+                self.group_removed(fabric_index, &old_group.group_info);
+            } else {
+                // Insert last
+                verify_or_return_error!(usize::from(fabric.group_count) == index, Err(chip_error_invalid_argument!()));
+                verify_or_return_error!(fabric.group_count < self.m_max_groups_per_fabric, Err(chip_error_invalid_list_length!()));
+                fabric.group_count += 1;
+            }
+
+            GroupData::save_to(&mut group, storage_ptr)?;
+
+            if group.first {
+                // First group, update fabric
+                fabric.first_group = group.group_info.group_id;
+            } else {
+                // Second to last group, update previous
+                let mut prev_group: GroupData = group_data::new_with_ids(fabric_index, group.prev);
+                GroupData::load_from(&mut prev_group, storage_ptr)?;
+                prev_group.next = group.group_info.group_id;
+                GroupData::save_to(&mut prev_group, storage_ptr)?;
+            }
+
+            // Update fabric
+            FabricData::save_to(&mut fabric, storage_ptr)?;
+            self.group_added(fabric_index, &group.group_info);
+        }
         chip_ok!()
     }
 
@@ -2561,9 +2719,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        chip::{
+            chip_lib::{
+                support::{
+                    test_persistent_storage::TestPersistentStorage,
+                },
+            },
+            crypto::{
+                raw_session_keystore::RawKeySessionKeystore,
+            },
+        },
+    };
+
+    struct TestGroupListener(u8);
+
+    impl TestGroupListener {
+        const fn new() -> Self {
+            Self(0)
+        }
+    }
+
+    impl GroupListener for TestGroupListener {
+        fn on_group_added(&mut self, _fabric_index: FabricIndex, _new_group: &GroupInfo) {}
+        fn on_group_removed(&mut self, _fabric_index: FabricIndex, _old_group: &GroupInfo) {}
+    }
+
+    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
 
     #[test]
     fn init() {
-        let p = 
+        let mut p = TestGroupDataProvider::new();
+        assert!(!p.init().is_ok());
     }
 } // end of tests

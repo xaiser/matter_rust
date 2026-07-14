@@ -289,13 +289,6 @@ macro_rules! chip_error_too_many_peer_nodes {
 }
 
 #[macro_export]
-macro_rules! chip_error_key_not_found {
-    () => {
-        chip_core_error!(0x10)
-    };
-}
-
-#[macro_export]
 macro_rules! chip_error_no_memory {
     () => {
         chip_core_error!(0x0b)
@@ -306,6 +299,20 @@ macro_rules! chip_error_no_memory {
 macro_rules! chip_error_no_message_handler {
     () => {
         chip_core_error!(0x0c)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_key_not_found {
+    () => {
+        chip_core_error!(0x10)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_duplicate_key_id {
+    () => {
+        chip_core_error!(0x1a)
     };
 }
 
@@ -327,6 +334,13 @@ macro_rules! chip_error_buffer_too_small {
 macro_rules! chip_error_well_uninitialized {
     () => {
         chip_core_error!(0x1c)
+    };
+}
+
+#[macro_export]
+macro_rules! chip_error_invalid_list_length {
+    () => {
+        chip_core_error!(0x1f)
     };
 }
 
