@@ -2554,7 +2554,31 @@ where
 
     // By id
     fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult {
-        chip_ok!()
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        match FabricData::load_from(&mut fabric, storage_ptr) {
+            Err(e) if e != chip_error_not_found!() => return Err(e),
+            _ => {}
+        }
+
+        unsafe {
+            if group_data::find(&mut group, NonNull::new_unchecked(storage_ptr), &fabric, info.group_id) {
+                // Existing group_id
+                group.set_name(info.name.str());
+                return GroupData::save_to(&mut group, storage_ptr);
+            }
+        }
+
+        // New group_id
+        group.group_info.group_id = info.group_id;
+        group.set_name(info.name.str());
+        
+        self.set_group_info_at(fabric_index, fabric.group_count.into(), info)
     }
 
     fn get_group_info(&self, fabric_index: FabricIndex) -> Result<GroupInfo, ChipError> {
@@ -2883,5 +2907,43 @@ mod tests {
         assert!(p.set_group_info_at(fabric_index, 0, &group_info_3).is_ok());
         assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id_3));
         assert!(l.last_remove.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn set_group_info_at_index_too_big() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(!p.set_group_info_at(fabric_index, 1, &group_info).is_ok());
+    }
+
+    #[test]
+    fn set_group_info_at_too_much_group() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        for index in 0..=p.m_max_groups_per_fabric {
+            let group_info = GroupInfo::new_with(group_id + index, "tg");
+            if index < p.m_max_groups_per_fabric {
+                assert!(p.set_group_info_at(fabric_index, index.into(), &group_info).is_ok());
+            } else {
+                assert!(!p.set_group_info_at(fabric_index, index.into(), &group_info).is_ok());
+            }
+        }
     }
 } // end of tests
