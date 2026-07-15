@@ -43,6 +43,13 @@ use crate::{
     chip_ok,
 };
 
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_error;
+use core::{
+    str::{self, FromStr},
+};
+
 use core::ptr::NonNull;
 
 const K_PERSISTENT_BUFFER_MAX: usize = 128;
@@ -2072,7 +2079,7 @@ pub mod iter_impl {
     pub struct GroupKeyContext<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         m_provider: Option<NonNull<Provider>>,
         m_key_hash: u16,
@@ -2084,7 +2091,7 @@ pub mod iter_impl {
     impl<SKS, Provider> GroupKeyContext<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         pub const fn new() -> Self {
             Self {
@@ -2184,7 +2191,7 @@ pub mod iter_impl {
     impl<SKS, Provider> SymmetricKeyContext for GroupKeyContext<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         fn get_key_hash(&mut self) -> u16 {
             self.m_key_hash
@@ -2242,7 +2249,7 @@ pub mod iter_impl {
     pub struct GroupSessionIteratorImpl<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         m_provider: Option<NonNull<Provider>>,
         m_first_fabric: FabricIndex,
@@ -2260,7 +2267,7 @@ pub mod iter_impl {
     impl<SKS, Provider> GroupSessionIteratorImpl<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         pub const fn new() -> Self {
             Self {
@@ -2282,7 +2289,7 @@ pub mod iter_impl {
     impl<SKS, Provider> Iterator for GroupSessionIteratorImpl<SKS, Provider>
     where
         SKS: SessionKeystore,
-        Provider: GroupDataProvider + GetSessionKeystore<SKS>,
+        Provider: GroupDataProvider + UpdateSessionKeystore<SKS>,
     {
         type Item = GroupSession<GroupKeyContext<SKS, Provider>>;
 
@@ -2381,11 +2388,12 @@ type FabricData = fabric_data::PersistentFabricData<NopPersistentStorage>;
 type GroupData = group_data::PersistentGroupData<NopPersistentStorage>;
 type EndpointData = endpoint_data::PersistentEndpointData<NopPersistentStorage>;
 
-pub trait GetSessionKeystore<SKS>
+pub trait UpdateSessionKeystore<SKS>
 where
     SKS: SessionKeystore,
 {
     fn get_session_keystore(&mut self) -> Option<NonNull<SKS>>;
+    fn set_session_keystore(&mut self, store: Option<NonNull<SKS>>);
 }
 
 pub struct GroupDataProviderImpl<PSD, SKS, LIS>
@@ -2406,7 +2414,7 @@ where
     m_group_session_iterators: GroupSessionIteratorPool<PSD, SKS, LIS>,
 }
 
-impl<PSD, SKS, LIS> GetSessionKeystore<SKS> for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS, LIS> UpdateSessionKeystore<SKS> for GroupDataProviderImpl<PSD, SKS, LIS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
@@ -2414,6 +2422,10 @@ where
 {
     fn get_session_keystore(&mut self) -> Option<NonNull<SKS>> {
         self.m_sesion_keystore.clone()
+    }
+
+    fn set_session_keystore(&mut self, store: Option<NonNull<SKS>>) {
+        self.m_sesion_keystore = store;
     }
 }
 
@@ -2499,13 +2511,14 @@ where
     type EndpointIterator = EndpointIterator<PSD, SKS, LIS>;
     type KeySetIterator = KeySetIterator<PSD, SKS, LIS>;
     type GroupSessionIterator = GroupSessionIterator<PSD, SKS, LIS>;
+    type Listener = LIS;
 
     fn new_with(max_group_per_fabric: u16, max_group_keys_per_fabric: u16) -> Self {
         Self {
             m_storage: None,
             m_sesion_keystore: None,
-            m_max_groups_per_fabric: 0,
-            m_max_group_keys_per_fabric: 0,
+            m_max_groups_per_fabric: max_group_per_fabric,
+            m_max_group_keys_per_fabric: max_group_keys_per_fabric,
             m_listener: None,
             m_group_info_iterators: GroupInfoIteratorPool::<PSD, SKS, LIS>::new(),
             m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
@@ -2710,9 +2723,10 @@ where
         Err(chip_error_not_implemented!())
     }
 
-    fn set_listener<Listener: GroupListener>(&mut self, listener: NonNull<Listener>) {
-
+    fn set_listener(&mut self, listener: Option<NonNull<LIS>>) {
+        self.m_listener = listener;
     }
+
     fn remove_listener(&mut self) {}
 }
 
@@ -2732,24 +2746,142 @@ mod tests {
         },
     };
 
-    struct TestGroupListener(u8);
+    struct TestGroupListener {
+        pub last_add: Option<(FabricIndex, GroupInfo)>,
+        pub last_remove: Option<(FabricIndex, GroupInfo)>,
+    }
 
     impl TestGroupListener {
         const fn new() -> Self {
-            Self(0)
+            Self {
+                last_add: None,
+                last_remove: None,
+            }
         }
     }
 
     impl GroupListener for TestGroupListener {
-        fn on_group_added(&mut self, _fabric_index: FabricIndex, _new_group: &GroupInfo) {}
-        fn on_group_removed(&mut self, _fabric_index: FabricIndex, _old_group: &GroupInfo) {}
+        fn on_group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo) {
+            self.last_add = Some((fabric_index, new_group.clone()));
+        }
+        fn on_group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo) {
+            self.last_remove = Some((fabric_index, old_group.clone()));
+        }
     }
 
     type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
 
     #[test]
     fn init() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
         let mut p = TestGroupDataProvider::new();
-        assert!(!p.init().is_ok());
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        assert!(p.init().is_ok());
+    }
+
+    #[test]
+    fn set_group_info_at_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn set_group_info_no_storage() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        //p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        //assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(1, "tg");
+        assert!(!p.set_group_info_at(1, 0, &group_info).is_ok());
+    }
+
+    #[test]
+    fn set_group_info_index_mismatched() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(1, "tg");
+        assert!(p.set_group_info_at(1, 0, &group_info).is_ok());
+        assert!(!p.set_group_info_at(1, 1, &group_info).is_ok());
+    }
+
+    #[test]
+    fn set_group_info_set_twice() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(1, "tg");
+        assert!(p.set_group_info_at(1, 0, &group_info).is_ok());
+        assert!(p.set_group_info_at(1, 0, &group_info).is_ok());
+    }
+
+    #[test]
+    fn set_group_info_set_different_group() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let group_id_2: GroupId = 2;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
+        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
+        assert!(p.set_group_info_at(fabric_index, 1, &group_info_2).is_ok());
+    }
+
+    #[test]
+    fn set_group_info_replace_old_one() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let group_id_2: GroupId = 2;
+        let group_id_3: GroupId = 3;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
+        let group_info_3 = GroupInfo::new_with(group_id_3, "tg");
+        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
+        assert!(p.set_group_info_at(fabric_index, 1, &group_info_2).is_ok());
+        assert!(p.set_group_info_at(fabric_index, 0, &group_info_3).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id_3));
+        assert!(l.last_remove.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
     }
 } // end of tests

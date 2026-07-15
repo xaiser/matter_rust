@@ -26,6 +26,8 @@ pub const KIDENTITY_PROTECTION_KEY_SET_ID: KeysetId = 0;
 /// Group Info
 pub const KGROUP_NAME_MAX: usize = CHIP_CONFIG_MAX_GROUP_NAME_LENGTH;
 pub type GroupInfoName = DefaultString< { KGROUP_NAME_MAX + 1 } >;
+
+#[derive(Clone)]
 pub struct GroupInfo {
     // Identifies group within the scope of the given Fabric
     pub group_id: GroupId,
@@ -258,6 +260,7 @@ pub trait GroupDataProvider {
     type EndpointIterator;
     type KeySetIterator;
     type GroupSessionIterator;
+    type Listener: GroupListener;
 
     fn new() -> Self where Self: Sized{
         <Self as GroupDataProvider>::new_with(CHIP_CONFIG_MAX_GROUPS_PER_FABRIC as u16, CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC as u16)
@@ -329,6 +332,6 @@ pub trait GroupDataProvider {
     fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator>;
     fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
 
-    fn set_listener<Listener: GroupListener>(&mut self, listener: NonNull<Listener>);
+    fn set_listener(&mut self, listener: Option<NonNull<Self::Listener>>);
     fn remove_listener(&mut self);
 }
