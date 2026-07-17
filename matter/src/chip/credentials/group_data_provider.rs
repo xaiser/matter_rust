@@ -278,12 +278,12 @@ pub trait GroupDataProvider {
 
     // By id
     fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult;
-    fn get_group_info(&self, fabric_index: FabricIndex) -> Result<GroupInfo, ChipError>;
+    fn get_group_info(&self, fabric_index: FabricIndex, group_id: GroupId) -> Result<GroupInfo, ChipError>;
     fn remove_group_info(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult;
     // By index
     fn set_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, info: &GroupInfo) -> ChipErrorResult;
     fn get_group_info_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupInfo, ChipError>;
-    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, group_id: GroupId) -> ChipErrorResult;
+    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult;
 
     // Endpoints
     fn has_endpoint(&self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> bool;

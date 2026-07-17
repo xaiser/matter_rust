@@ -131,7 +131,7 @@ pub mod linked_data {
                 next: 0,
                 prev: 0,
                 max_id: 0,
-                first: false,
+                first: true,
             }
         }
 
@@ -142,7 +142,7 @@ pub mod linked_data {
                 next: 0,
                 prev: 0,
                 max_id: 0,
-                first: false,
+                first: true,
             }
         }
     }
@@ -1418,7 +1418,7 @@ pub mod endpoint_data {
         PersistentEndpointData::<Storage>::new(EndpointData::new_with(fabric_index, group, endpoint), None)
     }
 
-    pub fn get<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(endpoint_data: &mut PersistentEndpointData<S>, storage: NonNull<PSD>, fabric: &FabricData, group: &GroupData, target_id: EndpointId) -> bool {
+    pub fn find<PSD: PersistentStorageDelegate, S: PersistentStorageDelegate>(endpoint_data: &mut PersistentEndpointData<S>, storage: NonNull<PSD>, fabric: &FabricData, group: &GroupData, target_id: EndpointId) -> bool {
         endpoint_data.fabric_index = fabric.fabric_index;
         endpoint_data.group_endpoint.group_id = group.group_info.group_id;
         endpoint_data.group_endpoint.endpoint_id = group.first_endpoint;
@@ -1479,7 +1479,7 @@ pub mod endpoint_data {
         }
 
         #[test]
-        fn get_ok() {
+        fn find_ok() {
             let mut pa = TestPersistentStorage::default();
             let fabric_index: FabricIndex = 1;
             let group_id: GroupId = 1;
@@ -1494,11 +1494,11 @@ pub mod endpoint_data {
             group_data.endpoint_count = 1;
 
             assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
-            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
         }
 
         #[test]
-        fn get_count_0() {
+        fn find_count_0() {
             let mut pa = TestPersistentStorage::default();
             let fabric_index: FabricIndex = 1;
             let group_id: GroupId = 1;
@@ -1513,11 +1513,11 @@ pub mod endpoint_data {
             group_data.endpoint_count = 0;
 
             assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
-            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
         }
 
         #[test]
-        fn get_no_data() {
+        fn find_no_data() {
             let pa = TestPersistentStorage::default();
             let fabric_index: FabricIndex = 1;
             let group_id: GroupId = 1;
@@ -1532,11 +1532,11 @@ pub mod endpoint_data {
             group_data.endpoint_count = 1;
 
             //assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
-            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id));
         }
 
         #[test]
-        fn get_no_id() {
+        fn find_no_id() {
             let mut pa = TestPersistentStorage::default();
             let fabric_index: FabricIndex = 1;
             let group_id: GroupId = 1;
@@ -1551,11 +1551,11 @@ pub mod endpoint_data {
             group_data.endpoint_count = 1;
 
             assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
-            assert!(!get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id + 1));
+            assert!(!find(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id + 1));
         }
 
         #[test]
-        fn get_second_ok() {
+        fn find_second_ok() {
             let mut pa = TestPersistentStorage::default();
             let fabric_index: FabricIndex = 1;
             let group_id: GroupId = 1;
@@ -1574,7 +1574,7 @@ pub mod endpoint_data {
 
             assert!(TestPersistentEndpointData::save_to(&mut data, ptr::addr_of_mut!(pa)).is_ok());
             assert!(TestPersistentEndpointData::save_to(&mut data_2, ptr::addr_of_mut!(pa)).is_ok());
-            assert!(get(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id_2));
+            assert!(find(&mut data, NonNull::from_ref(&pa), &fabric_data, &group_data, endpoint_id_2));
         }
     } // enf of tests
 } // end of endpoint_data
@@ -2581,12 +2581,32 @@ where
         self.set_group_info_at(fabric_index, fabric.group_count.into(), info)
     }
 
-    fn get_group_info(&self, fabric_index: FabricIndex) -> Result<GroupInfo, ChipError> {
-        Err(chip_error_not_implemented!())
+    fn get_group_info(&self, fabric_index: FabricIndex, group_id: GroupId) -> Result<GroupInfo, ChipError> {
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+        verify_or_return_error!(group_data::find(&mut group, self.m_storage.clone().ok_or(chip_error_internal!())?, &fabric, group_id), Err(chip_error_not_found!()));
+
+        Ok(GroupInfo::new_with(group_id, group.group_info.name.str().ok_or(chip_error_internal!())?))
     }
 
     fn remove_group_info(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult {
-        chip_ok!()
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+        verify_or_return_error!(group_data::find(&mut group, self.m_storage.clone().ok_or(chip_error_internal!())?, &fabric, group_id), Err(chip_error_not_found!()));
+
+        self.remove_group_info_at(fabric_index, usize::from(group.index))
     }
 
     // By index
@@ -2660,20 +2680,152 @@ where
     }
 
     fn get_group_info_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupInfo, ChipError> {
-        Err(chip_error_not_implemented!())
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        verify_or_return_error!(
+            group_data::get(&mut group, self.m_storage.clone().ok_or(chip_error_internal!())?, &fabric, index),
+            Err(chip_error_not_found!()));
+
+        Ok(group.group_info.clone())
     }
 
-    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize, group_id: GroupId) -> ChipErrorResult {
+    fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        verify_or_return_error!(
+            group_data::get(&mut group, self.m_storage.clone().ok_or(chip_error_internal!())?, &fabric, index),
+            Err(chip_error_not_found!()));
+
+        let mut endpoint: EndpointData = endpoint_data::new_with(fabric_index, group.group_info.group_id, group.first_endpoint);
+
+        for endpoint_index in 0..group.endpoint_count {
+            EndpointData::load_from(&mut endpoint, storage_ptr)?;
+            EndpointData::delete_from(&mut endpoint, storage_ptr)?;
+            endpoint.group_endpoint.endpoint_id = endpoint.next;
+        }
+
+        GroupData::delete_from(&mut group, storage_ptr)?;
+
+        if group.first {
+            // Remove first group
+            fabric.first_group = group.next;
+        } else {
+            // Remove intermediate group, update previous
+            let mut prev_group: GroupData = group_data::new_with_ids(fabric_index, group.prev);
+            GroupData::load_from(&mut prev_group, storage_ptr)?;
+            prev_group.next = group.next;
+            GroupData::save_to(&mut prev_group, storage_ptr)?;
+        }
+
+        if fabric.group_count > 0 {
+            fabric.group_count -= 1;
+        }
+
+        // Update fabric
+        FabricData::save_to(&mut fabric, storage_ptr)?;
+        self.group_removed(fabric_index, &group.group_info);
         chip_ok!()
     }
 
     // Endpoints
     fn has_endpoint(&self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> bool {
-        true
+        let storage_ptr = unsafe {
+            if let Some(ptr) = self.m_storage.as_ref() {
+                ptr.as_ptr()
+            } else {
+                return false;
+            }
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+        let mut endpoint: EndpointData = endpoint_data::new();
+
+        verify_or_return_error!(FabricData::load_from(&mut fabric, storage_ptr).is_ok(), false);
+        verify_or_return_error!(
+            group_data::find(&mut group, self.m_storage.clone().unwrap(), &fabric, group_id),
+            false);
+
+        endpoint_data::find(&mut endpoint, self.m_storage.clone().unwrap(), &fabric, &group, endpoint_id)
     }
 
     fn add_endpoint(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult {
-        chip_ok!()
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+
+        match FabricData::load_from(&mut fabric, storage_ptr) {
+            Err(e) if e != chip_error_not_found!() => return Err(e),
+            _ => {}
+        }
+
+        if !group_data::find(&mut group, self.m_storage.clone().unwrap(), &fabric, group_id) {
+            // New group
+            verify_or_return_error!(fabric.group_count < self.m_max_groups_per_fabric, Err(chip_error_invalid_list_length!()));
+            {
+                let mut e = endpoint_data::new_with(fabric_index, group_id, endpoint_id);
+                EndpointData::save_to(&mut e, storage_ptr)?;
+            }
+
+            // Save the new group into the fabric
+            group.group_info.group_id = group_id;
+            group.group_info.set_name(None);
+            group.first_endpoint = endpoint_id;
+            group.endpoint_count = 1;
+            group.next = fabric.first_group;
+            group.prev = KUNDEFINED_GROUP_ID;
+            GroupData::save_to(&mut group, storage_ptr)?;
+
+            // Update fabric
+            fabric.first_group = group.group_info.group_id;
+            fabric.group_count += 1;
+            FabricData::save_to(&mut fabric, storage_ptr)?;
+            self.group_added(fabric_index, &group.group_info);
+            return chip_ok!();
+        }
+
+        // Existing group
+        let mut endpoint = endpoint_data::new();
+        if endpoint_data::find(&mut endpoint, self.m_storage.clone().unwrap(), &fabric, &group, endpoint_id) {
+            return chip_ok!();
+        }
+
+        // New endpoint, insert last
+        endpoint.group_endpoint.endpoint_id = endpoint_id;
+        EndpointData::save_to(&mut endpoint, storage_ptr)?;
+
+        if endpoint.first {
+            // First endpoint of group
+            group.first_endpoint = endpoint.group_endpoint.endpoint_id;
+        } else {
+            // Previous endpoint(s)
+            EndpointData::save_to(&mut endpoint, storage_ptr)?;
+            let mut prev = endpoint_data::new_with(fabric_index, group_id, endpoint.prev);
+            EndpointData::load_from(&mut prev, storage_ptr)?;
+            prev.next = endpoint.group_endpoint.endpoint_id;
+            EndpointData::save_to(&mut prev, storage_ptr)?;
+        }
+
+        group.endpoint_count += 1;
+
+        GroupData::save_to(&mut group, storage_ptr)
     }
 
     fn remove_endpoint(&mut self, fabric_index: FabricIndex, group_id: Option<GroupId>, endpoint_id: EndpointId) -> ChipErrorResult {
@@ -2823,7 +2975,7 @@ mod tests {
     }
 
     #[test]
-    fn set_group_info_no_storage() {
+    fn set_group_info_at_no_storage() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
         let l = TestGroupListener::new();
@@ -2945,5 +3097,328 @@ mod tests {
                 assert!(!p.set_group_info_at(fabric_index, index.into(), &group_info).is_ok());
             }
         }
+    }
+
+    #[test]
+    fn set_group_info_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn set_same_group_info_twice_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn set_group_info_no_storage() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        //p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        //assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(!p.set_group_info(fabric_index, &group_info).is_ok());
+    }
+
+    #[test]
+    fn get_group_info_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+        assert!(p.get_group_info(fabric_index, group_id).is_ok_and(|info| info.group_id == group_id && info.name == "tg".into()));
+    }
+
+    #[test]
+    fn get_group_info_incorrect_fabric_index() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+        assert!(!p.get_group_info(fabric_index + 1, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_info_incorrect_group_id() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+        assert!(!p.get_group_info(fabric_index, group_id + 1).is_ok());
+    }
+
+    #[test]
+    fn remove_group_info_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_group_info(fabric_index, group_id).is_ok());
+        assert!(l.last_remove.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn remove_group_info_incorrect_fabric() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(!p.remove_group_info(fabric_index + 1, group_id).is_ok());
+    }
+
+    #[test]
+    fn remove_group_info_incorrect_group_id() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(!p.remove_group_info(fabric_index, group_id + 1).is_ok());
+    }
+
+    #[test]
+    fn remove_group_info_twice() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_group_info(fabric_index, group_id).is_ok());
+        assert!(l.last_remove.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+        assert!(!p.remove_group_info(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn remove_group_info_middle_one() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let group_id_2: GroupId = 2;
+        let group_id_3: GroupId = 3;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
+        let group_info_3 = GroupInfo::new_with(group_id_3, "tg");
+        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
+        assert!(p.set_group_info_at(fabric_index, 1, &group_info_2).is_ok());
+        assert!(p.set_group_info_at(fabric_index, 2, &group_info_3).is_ok());
+
+        // remove the middle one
+        assert!(p.get_group_info(fabric_index, group_id_2).is_ok());
+        assert!(p.remove_group_info(fabric_index, group_id_2).is_ok());
+
+        // ensure we can still read the rest
+        assert!(p.get_group_info(fabric_index, group_id).is_ok());
+        assert!(!p.get_group_info(fabric_index, group_id_2).is_ok());
+        assert!(p.get_group_info(fabric_index, group_id_3).is_ok());
+    }
+
+    #[test]
+    fn get_group_info_at_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        // set first
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.get_group_info_at(fabric_index, 0).is_ok());
+    }
+
+    #[test]
+    fn add_endpoint_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        assert!(!p.has_endpoint(fabric_index, group_id, endpoint_id));
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.has_endpoint(fabric_index, group_id, endpoint_id));
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn add_endpoint_to_existed_group_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn add_endpoint_twice_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+    }
+
+    #[test]
+    fn add_two_endpoint_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
     }
 } // end of tests
