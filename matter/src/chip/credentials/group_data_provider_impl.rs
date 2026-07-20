@@ -2498,6 +2498,46 @@ where
             }
         }
     }
+
+    fn remove_endpoint_at(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult {
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut group: GroupData = group_data::new();
+        let mut endpoint: EndpointData = endpoint_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+        verify_or_return_error!(
+            group_data::find(&mut group, self.m_storage.clone().unwrap(), &fabric, group_id),
+            Err(chip_error_not_found!()));
+        verify_or_return_error!(
+            endpoint_data::find(&mut endpoint, self.m_storage.clone().unwrap(), &fabric, &group, endpoint_id),
+            Err(chip_error_not_found!()));
+
+        // Existing endpoint
+        EndpointData::delete_from(&mut endpoint, storage_ptr)?;
+
+        if endpoint.first {
+            // Remove first
+            group.first_endpoint = endpoint.next;
+        } else {
+            // Remove middle
+            let mut prev = endpoint_data::new_with(fabric_index, group_id, endpoint.prev);
+            EndpointData::load_from(&mut prev, storage_ptr)?;
+            prev.next = endpoint.next;
+            EndpointData::save_to(&mut prev, storage_ptr)?;
+        }
+
+        if group.endpoint_count > 1 {
+            group.endpoint_count -= 1;
+            return GroupData::save_to(&mut group, storage_ptr);
+        }
+
+        // No more endpoints, remove the group
+        return self.remove_group_info_at(fabric_index, group.index.into());
+    }
 }
 
 impl<PSD, SKS, LIS> GroupDataProvider for GroupDataProviderImpl<PSD, SKS, LIS>
@@ -2713,7 +2753,9 @@ where
         let mut endpoint: EndpointData = endpoint_data::new_with(fabric_index, group.group_info.group_id, group.first_endpoint);
 
         for endpoint_index in 0..group.endpoint_count {
-            EndpointData::load_from(&mut endpoint, storage_ptr)?;
+            if EndpointData::load_from(&mut endpoint, storage_ptr).is_err() {
+                break;
+            }
             EndpointData::delete_from(&mut endpoint, storage_ptr)?;
             endpoint.group_endpoint.endpoint_id = endpoint.next;
         }
@@ -2829,6 +2871,33 @@ where
     }
 
     fn remove_endpoint(&mut self, fabric_index: FabricIndex, group_id: Option<GroupId>, endpoint_id: EndpointId) -> ChipErrorResult {
+        if let Some(gid) = group_id {
+            return self.remove_endpoint_at(fabric_index, gid, endpoint_id);
+        }
+
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        let mut group: GroupData = group_data::new_with_ids(fabric_index, fabric.first_group);
+
+        let mut endpoint: EndpointData = endpoint_data::new();
+
+        // Loop through all the groups
+        for group_index in 0..fabric.group_count {
+            if GroupData::load_from(&mut group, storage_ptr).is_err() {
+                break;
+            }
+            if endpoint_data::find(&mut endpoint, self.m_storage.clone().unwrap(), &fabric, &group, endpoint_id) {
+                self.remove_endpoint_at(fabric_index, group.group_info.group_id, endpoint_id)?;
+            }
+
+            group.group_info.group_id = group.next;
+        }
+
         chip_ok!()
     }
 
@@ -3420,5 +3489,145 @@ mod tests {
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
         assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+    }
+
+    #[test]
+    fn remove_endpoint_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_endpoint_at(fabric_index, group_id, endpoint_id).is_ok());
+    }
+
+    #[test]
+    fn remove_endpoint_no_endpoint() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        //assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        //assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(!p.remove_endpoint_at(fabric_index, group_id, endpoint_id).is_ok());
+    }
+
+    #[test]
+    fn remove_two_endpoints_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_endpoint_at(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(p.remove_endpoint_at(fabric_index, group_id, endpoint_id).is_ok());
+    }
+
+    #[test]
+    fn remove_middle_endpoint_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 2).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_endpoint_at(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(p.has_endpoint(fabric_index, group_id, endpoint_id));
+        assert!(p.has_endpoint(fabric_index, group_id, endpoint_id + 2));
+    }
+
+    #[test]
+    fn remove_endpoint_without_group_id_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_endpoint(fabric_index, None, endpoint_id).is_ok());
+    }
+
+    #[test]
+    fn remove_two_endpoints_without_group_id_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+        let group_info = GroupInfo::new_with(group_id, "tg");
+
+        // add first
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
+
+        assert!(p.remove_endpoint(fabric_index, None, endpoint_id).is_ok());
+        assert!(p.remove_endpoint(fabric_index, None, endpoint_id + 1).is_ok());
     }
 } // end of tests
