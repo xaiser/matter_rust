@@ -1978,29 +1978,47 @@ pub mod iter_impl {
     };
 
     use core::marker::PhantomData;
+    use core::sync::atomic::{AtomicU8, Ordering};
 
-    pub struct GroupInfoIteratorImpl<Provider: GroupDataProvider>
+    static GROUP_INFO_COUNT: AtomicU8 = AtomicU8::new(0);
+    static GROUP_INFO_MAX: u8 = 2;
+
+    pub struct GroupInfoIteratorImpl<'a, Provider: GroupDataProvider>
     {
         m_provider: Option<NonNull<Provider>>,
         m_fabric: FabricIndex,
         m_next_id: u16,
         m_count: usize,
         m_total: usize,
+        m_ref_count: &'a AtomicU8,
     }
 
-    impl<Provider: GroupDataProvider> GroupInfoIteratorImpl<Provider> {
-        pub const fn new() -> Self {
+    impl<'a, Provider: GroupDataProvider> GroupInfoIteratorImpl<'a, Provider> {
+        /*
+        pub const fn new(ref_count: &'a AtomicU8) -> Self {
             Self {
                 m_provider: None,
                 m_fabric: KUNDEFINED_FABRIC_INDEX,
                 m_next_id: 0,
                 m_count: 0,
                 m_total: 0,
+                m_ref_count: ref_count,
+            }
+        }
+        */
+        pub const fn create(ref_count: &'a AtomicU8) -> Option<Self> {
+            Self {
+                m_provider: None,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_next_id: 0,
+                m_count: 0,
+                m_total: 0,
+                m_ref_count: ref_count,
             }
         }
     }
 
-    impl<Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<Provider> {
+    impl<'a, Provider: GroupDataProvider> Iterator for GroupInfoIteratorImpl<'a, Provider> {
         type Item = GroupInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -2369,8 +2387,8 @@ impl Iterator for EndpointIteratorImpl {
 }
 */
 
-type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-type GroupInfoIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupInfoIterator<PSD, SKS, LIS>, 2>;
+type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<'static, GroupDataProviderImpl<PSD, SKS, LIS>>;
+//type GroupInfoIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupInfoIterator<PSD, SKS, LIS>, 2>;
 
 type GroupKeyIterator<PSD, SKS, LIS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
 type GroupKeyIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupKeyIterator<PSD, SKS, LIS>, 2>;
