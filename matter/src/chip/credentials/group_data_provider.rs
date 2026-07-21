@@ -292,6 +292,7 @@ pub trait GroupDataProvider {
 
     // Iterators
     fn iter_group_info(&self, fabric_index: FabricIndex) -> Option<Self::GroupInfoIterator>;
+    fn release_iter_group_info(&self);
     fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self::EndpointIterator>;
 
     //
