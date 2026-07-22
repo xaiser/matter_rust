@@ -2204,6 +2204,7 @@ pub mod iter_impl {
             Some(s)
         }
 
+        /*
         pub fn count(&self) -> usize {
             let storage_ptr = unsafe {
                 if let Some(provider_ptr) = self.m_provider {
@@ -2239,6 +2240,7 @@ pub mod iter_impl {
 
             count
         }
+        */
     }
 
     impl<Provider: GroupDataProviderIterImpl> Iterator for EndpointIteratorImpl<Provider> {
@@ -3707,7 +3709,7 @@ mod tests {
     }
 
     #[test]
-    fn add_two_endpoint_successfully() {
+    fn add_two_endpoints_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
         let l = TestGroupListener::new();
@@ -3889,5 +3891,70 @@ mod tests {
         }
 
         assert_eq!(0, p.m_group_info_iterators.get());
+    }
+
+    #[test]
+    fn iter_endpoint_in_same_group() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        {
+            let data = p.iter_endpoints(fabric_index, Some(group_id));
+            assert_eq!(1, p.m_endpoint_iterators.get());
+            assert!(data.is_some());
+            let mut data = data.unwrap();
+            assert!(data.next().is_some_and(|e| e.group_id == group_id && e.endpoint_id == endpoint_id));
+            assert!(data.next().is_some_and(|e| e.group_id == group_id && e.endpoint_id == endpoint_id + 1));
+            assert!(data.next().is_none());
+        }
+        {
+            assert!(p.iter_endpoints(fabric_index, Some(group_id)).is_some_and(|i| i.count() == 2));
+        }
+
+        assert_eq!(0, p.m_endpoint_iterators.get());
+    }
+
+    #[test]
+    fn iter_endpoint_in_multiple_groups() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let endpoint_id: EndpointId = 1;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id + 1, endpoint_id).is_ok());
+        assert!(p.add_endpoint(fabric_index, group_id + 1, endpoint_id + 1).is_ok());
+        {
+            let data = p.iter_endpoints(fabric_index, None);
+            assert_eq!(1, p.m_endpoint_iterators.get());
+            assert!(data.is_some());
+            let mut data = data.unwrap();
+            assert!(data.next().is_some_and(|e| e.group_id == group_id + 1&& e.endpoint_id == endpoint_id));
+            assert!(data.next().is_some_and(|e| e.group_id == group_id + 1&& e.endpoint_id == endpoint_id + 1));
+            assert!(data.next().is_some_and(|e| e.group_id == group_id && e.endpoint_id == endpoint_id));
+            assert!(data.next().is_some_and(|e| e.group_id == group_id && e.endpoint_id == endpoint_id + 1));
+            assert!(data.next().is_none());
+        }
+
+        assert_eq!(0, p.m_endpoint_iterators.get());
     }
 } // end of tests
