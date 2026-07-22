@@ -73,6 +73,7 @@ impl PartialEq for GroupInfo {
 }
 
 /// Group Key
+#[derive(Clone)]
 pub struct GroupKey {
     // Identifies group within the scope of the given Fabric
     pub group_id: GroupId,
