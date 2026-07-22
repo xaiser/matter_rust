@@ -103,6 +103,7 @@ impl PartialEq for GroupKey {
 }
 
 /// Group Endpoint
+#[derive(Clone)]
 pub struct GroupEndpoint {
     // Identifies group within the scope of the given Fabric
     pub group_id: GroupId,
@@ -294,6 +295,7 @@ pub trait GroupDataProvider {
     fn iter_group_info(&self, fabric_index: FabricIndex) -> Option<Self::GroupInfoIterator>;
     fn release_iter_group_info(&self);
     fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self::EndpointIterator>;
+    fn release_iter_endpoint(&self);
 
     //
     // Group-Key map

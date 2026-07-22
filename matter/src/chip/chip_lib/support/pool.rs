@@ -424,12 +424,12 @@ mod test {
         #[test]
         fn release_all() {
             let mut object_pool = create_object_pool!(StubStruct, 10);
-            let s = object_pool.create_object(StubStruct {
+            let _s = object_pool.create_object(StubStruct {
                 _inner: StubStructInner { init: true },
                 the_int: 1,
                 _the_string: "test",
             });
-            let b = object_pool.create_object(StubStruct {
+            let _b = object_pool.create_object(StubStruct {
                 _inner: StubStructInner { init: true },
                 the_int: 2,
                 _the_string: "test",

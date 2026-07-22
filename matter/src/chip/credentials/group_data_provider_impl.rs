@@ -1983,22 +1983,25 @@ pub mod iter_impl {
     //use core::sync::atomic::{AtomicU8, Ordering};
 
     pub const GROUP_INFO_MAX: u8 = 2;
+    pub const ENDPOINT_MAX: u8 = 2;
 
     trait Release {
         fn release(&mut self);
     }
 
-    pub struct GroupInfoIteratorImpl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>>
+    //pub struct GroupInfoIteratorImpl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>>
+    pub struct GroupInfoIteratorImpl<Provider: GroupDataProvider + Storage>
     {
         m_provider: Option<NonNull<Provider>>,
         m_fabric: FabricIndex,
         m_next_id: u16,
         m_count: usize,
         m_total: usize,
-        m_phantom: PhantomData<PSD>,
+        //m_phantom: PhantomData<PSD>,
     }
 
-    impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> GroupInfoIteratorImpl<PSD, Provider> {
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> GroupInfoIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> GroupInfoIteratorImpl<Provider> {
         pub const fn new() -> Self {
             Self {
                 m_provider: None,
@@ -2006,7 +2009,7 @@ pub mod iter_impl {
                 m_next_id: 0,
                 m_count: 0,
                 m_total: 0,
-                m_phantom: PhantomData,
+                //m_phantom: PhantomData,
             }
         }
 
@@ -2030,7 +2033,7 @@ pub mod iter_impl {
                 m_next_id: 0,
                 m_count: 0,
                 m_total: 0,
-                m_phantom: PhantomData,
+                //m_phantom: PhantomData,
             };
 
             let mut fabric: FabricData = fabric_data::new_with(fabric_index);
@@ -2048,7 +2051,8 @@ pub mod iter_impl {
         }
     }
 
-    impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Iterator for GroupInfoIteratorImpl<PSD, Provider> {
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Iterator for GroupInfoIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Iterator for GroupInfoIteratorImpl<Provider> {
         type Item = GroupInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -2076,7 +2080,8 @@ pub mod iter_impl {
         }
     }
 
-    impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Release for  GroupInfoIteratorImpl<PSD, Provider> {
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Release for  GroupInfoIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Release for  GroupInfoIteratorImpl<Provider> {
         fn release(&mut self) {
             if let Some(ptr) = self.m_provider {
                 unsafe {
@@ -2086,7 +2091,8 @@ pub mod iter_impl {
         }
     }
 
-    impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Drop for  GroupInfoIteratorImpl<PSD, Provider> {
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Drop for  GroupInfoIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Drop for  GroupInfoIteratorImpl<Provider> {
         fn drop(&mut self) {
             self.release()
         }
@@ -2121,7 +2127,8 @@ pub mod iter_impl {
         }
     }
 
-    pub struct EndpointIteratorImpl<Provider: GroupDataProvider>
+    //pub struct EndpointIteratorImpl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>>
+    pub struct EndpointIteratorImpl<Provider: GroupDataProvider + Storage>
     {
         m_provider: Option<NonNull<Provider>>,
         m_fabric: FabricIndex,
@@ -2133,9 +2140,11 @@ pub mod iter_impl {
         m_endpoint_index: usize,
         m_endpoint_count: usize,
         m_first_endpoint: bool,
+        //m_phantom: PhantomData<PSD>,
     }
 
-    impl<Provider: GroupDataProvider> EndpointIteratorImpl<Provider> {
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> EndpointIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> EndpointIteratorImpl<Provider> {
         pub const fn new() -> Self {
             Self {
                 m_provider: None,
@@ -2148,15 +2157,165 @@ pub mod iter_impl {
                 m_endpoint_index: 0,
                 m_endpoint_count: 0,
                 m_first_endpoint: true,
+                //m_phantom: PhantomData,
+            }
+        }
+
+        pub fn new_with(provider: Option<NonNull<Provider>>, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self> {
+            let storage_ptr = unsafe {
+                if let Some(provider_ptr) = provider {
+                    let provider = provider_ptr.as_ref();
+                    if let Some(storage_ptr) = provider.get_storage() {
+                        storage_ptr.as_ptr()
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            };
+
+            let mut s = Self {
+                m_provider: provider,
+                m_fabric: fabric_index,
+                m_first_group: KUNDEFINED_GROUP_ID,
+                m_group: 0,
+                m_group_index: 0,
+                m_group_count: 0,
+                m_endpoint: 0,
+                m_endpoint_index: 0,
+                m_endpoint_count: 0,
+                m_first_endpoint: true,
+                //m_phantom: PhantomData,
+            };
+
+            let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+            FabricData::load_from(&mut fabric, storage_ptr).ok()?;
+
+            if let Some(gid) = group_id {
+                let mut group: GroupData = group_data::new_with_ids(fabric_index, gid);
+                GroupData::load_from(&mut group, storage_ptr).ok()?;
+
+                s.m_group = gid;
+                s.m_first_group = gid;
+                s.m_group_count = 1;
+                s.m_endpoint = group.first_endpoint;
+                s.m_endpoint_count = usize::from(group.endpoint_count);
+            } else {
+                let mut group: GroupData = group_data::new_with_ids(fabric_index, fabric.first_group);
+                GroupData::load_from(&mut group, storage_ptr).ok()?;
+
+                s.m_group = fabric.first_group;
+                s.m_first_group = fabric.first_group;
+                s.m_group_count = usize::from(fabric.group_count);
+                s.m_endpoint = group.first_endpoint;
+                s.m_endpoint_count = usize::from(group.endpoint_count);
+            }
+
+            Some(s)
+        }
+
+        pub fn count(&self) -> usize {
+            let storage_ptr = unsafe {
+                if let Some(provider_ptr) = self.m_provider {
+                    let provider = provider_ptr.as_ref();
+                    if let Some(storage_ptr) = provider.get_storage() {
+                        storage_ptr.as_ptr()
+                    } else {
+                        return 0;
+                    }
+                } else {
+                    return 0;
+                }
+            };
+
+            let mut group: GroupData = group_data::new_with_ids(self.m_fabric, self.m_first_group);
+            let mut count = 0usize;
+            for group_index in 0..self.m_group_count {
+                if GroupData::load_from(&mut group, storage_ptr).is_err() {
+                    break;
+                }
+
+                let mut endpoint: EndpointData = endpoint_data::new_with(self.m_fabric, group.group_info.group_id,
+                    group.first_endpoint);
+                for endpoint_index in 0..group.endpoint_count {
+                    if EndpointData::load_from(&mut endpoint, storage_ptr).is_err() {
+                        break;
+                    }
+                    endpoint.group_endpoint.endpoint_id = endpoint.next;
+                    count += 1;
+                }
+                group.group_info.group_id = group.next;
+            }
+
+            count
+        }
+    }
+
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Iterator for EndpointIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Iterator for EndpointIteratorImpl<Provider> {
+        type Item = GroupEndpoint;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let storage_ptr = unsafe {
+                if let Some(provider_ptr) = self.m_provider {
+                    let provider = provider_ptr.as_ref();
+                    if let Some(storage_ptr) = provider.get_storage() {
+                        storage_ptr.as_ptr()
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            };
+
+            while self.m_group_index < self.m_group_count {
+                let mut group: GroupData = group_data::new_with_ids(self.m_fabric, self.m_group);
+                if GroupData::load_from(&mut group, storage_ptr).is_err() {
+                    self.m_group_index = self.m_group_count;
+                    return None;
+                }
+                if self.m_first_endpoint {
+                    self.m_endpoint = group.first_endpoint;
+                    self.m_endpoint_index = 0;
+                    self.m_endpoint_count = usize::from(group.endpoint_count);
+                    self.m_first_endpoint = false;
+                } 
+
+                if self.m_endpoint_index < self.m_endpoint_count {
+                    let mut endpoint: EndpointData = endpoint_data::new_with(self.m_fabric, self.m_group,
+                        self.m_endpoint);
+                    if EndpointData::load_from(&mut endpoint, storage_ptr).is_ok() {
+                        self.m_endpoint = endpoint.next;
+                        self.m_endpoint_index += 1;
+                        return Some(endpoint.group_endpoint.clone());
+                    }
+                }
+
+                self.m_group = group.next;
+                self.m_group_index += 1;
+                self.m_first_endpoint = true;
+            }
+            None
+        }
+    }
+
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Release for  EndpointIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Release for  EndpointIteratorImpl<Provider> {
+        fn release(&mut self) {
+            if let Some(ptr) = self.m_provider {
+                unsafe {
+                    ptr.as_ref().release_iter_endpoint();
+                }
             }
         }
     }
 
-    impl<Provider: GroupDataProvider> Iterator for EndpointIteratorImpl<Provider> {
-        type Item = GroupEndpoint;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            None
+    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Drop for  EndpointIteratorImpl<PSD, Provider> {
+    impl<Provider: GroupDataProvider + Storage> Drop for  EndpointIteratorImpl<Provider> {
+        fn drop(&mut self) {
+            self.release()
         }
     }
 
@@ -2383,14 +2542,16 @@ pub mod iter_impl {
     }
 } // end of iter_impl
 
-type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<PSD, GroupDataProviderImpl<PSD, SKS, LIS>>;
+//type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<PSD, GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
 //type GroupInfoIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupInfoIterator<PSD, SKS, LIS>, 2>;
 
 type GroupKeyIterator<PSD, SKS, LIS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
 type GroupKeyIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupKeyIterator<PSD, SKS, LIS>, 2>;
 
+//type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<PSD, GroupDataProviderImpl<PSD, SKS, LIS>>;
 type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-type EndpointIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<EndpointIterator<PSD, SKS, LIS>, 2>;
+//type EndpointIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<EndpointIterator<PSD, SKS, LIS>, 2>;
 
 type KeySetIterator<PSD, SKS, LIS> = iter_impl::KeySetIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
 type KeySetIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<KeySetIterator<PSD, SKS, LIS>, 2>;
@@ -2410,11 +2571,11 @@ where
     fn set_session_keystore(&mut self, store: Option<NonNull<SKS>>);
 }
 
-trait Storage<PSD>
-where
-    PSD: PersistentStorageDelegate,
+pub trait Storage
 {
-    fn get_storage(&self) -> Option<NonNull<PSD>>;
+    type StorageType: PersistentStorageDelegate;
+
+    fn get_storage(&self) -> Option<NonNull<Self::StorageType>>;
 }
 
 pub struct GroupDataProviderImpl<PSD, SKS, LIS>
@@ -2437,7 +2598,7 @@ where
     */
     m_group_info_iterators: Cell<u8>,
     m_group_key_iterators: GroupKeyIteratorPool<PSD, SKS, LIS>,
-    m_endpoint_iterators: EndpointIteratorPool<PSD, SKS, LIS>,
+    m_endpoint_iterators: Cell<u8>,
     m_key_set_iterators: KeySetIteratorPool<PSD, SKS, LIS>,
     m_group_session_iterators: GroupSessionIteratorPool<PSD, SKS, LIS>,
 }
@@ -2457,13 +2618,15 @@ where
     }
 }
 
-impl<PSD, SKS, LIS> Storage<PSD> for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS, LIS> Storage for GroupDataProviderImpl<PSD, SKS, LIS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
     LIS: GroupListener,
 {
-    fn get_storage(&self) -> Option<NonNull<PSD>> {
+    type StorageType = PSD;
+
+    fn get_storage(&self) -> Option<NonNull<Self::StorageType>> {
         self.m_storage.clone()
     }
 }
@@ -2490,7 +2653,7 @@ where
             */
             m_group_info_iterators: Cell::new(0),
             m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
-            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
+            m_endpoint_iterators: Cell::new(0),
             m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
             m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
         }
@@ -2615,7 +2778,7 @@ where
             */
             m_group_info_iterators: Cell::new(0),
             m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
-            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
+            m_endpoint_iterators: Cell::new(0),
             m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
             m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
         }
@@ -2642,7 +2805,7 @@ where
         self.m_group_info_iterators.set(0);
 
         self.m_group_key_iterators.release_all();
-        self.m_endpoint_iterators.release_all();
+        self.m_endpoint_iterators.set(0);
         self.m_key_set_iterators.release_all();
         self.m_group_session_iterators.release_all();
     }
@@ -2975,7 +3138,20 @@ where
     }
 
     fn iter_endpoints(&self, fabric_index: FabricIndex, group_id: Option<GroupId>) -> Option<Self::EndpointIterator> {
-        None
+        verify_or_return_error!(self.is_initialized(), None);
+        verify_or_return_error!(self.m_endpoint_iterators.get() < iter_impl::ENDPOINT_MAX, None);
+
+        let c = self.m_endpoint_iterators.get();
+        self.m_endpoint_iterators.set(c + 1);
+
+        Some(EndpointIterator::new_with(Some(NonNull::from_ref(self)), fabric_index, group_id)?)
+    }
+
+    fn release_iter_endpoint(&self) {
+        let c = self.m_endpoint_iterators.get();
+        if c > 0 {
+            self.m_endpoint_iterators.set(c - 1);
+        }
     }
 
     //
@@ -3113,7 +3289,7 @@ mod tests {
 
     #[test]
     fn set_group_info_at_no_storage() {
-        let pa = TestPersistentStorage::default();
+        //let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
         let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
@@ -3273,7 +3449,7 @@ mod tests {
 
     #[test]
     fn set_group_info_no_storage() {
-        let pa = TestPersistentStorage::default();
+        //let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
         let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
@@ -3491,7 +3667,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         assert!(!p.has_endpoint(fabric_index, group_id, endpoint_id));
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3532,7 +3707,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
         assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
@@ -3552,7 +3726,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id + 1).is_ok());
@@ -3572,7 +3745,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3594,7 +3766,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         //assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3616,7 +3787,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3640,7 +3810,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3666,7 +3835,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -3688,7 +3856,6 @@ mod tests {
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-        let group_info = GroupInfo::new_with(group_id, "tg");
 
         // add first
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
