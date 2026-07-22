@@ -1985,23 +1985,22 @@ pub mod iter_impl {
     pub const GROUP_INFO_MAX: u8 = 2;
     pub const ENDPOINT_MAX: u8 = 2;
 
+    pub trait GroupDataProviderIterImpl: GroupDataProvider + Storage {}
+
     trait Release {
         fn release(&mut self);
     }
 
-    //pub struct GroupInfoIteratorImpl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>>
-    pub struct GroupInfoIteratorImpl<Provider: GroupDataProvider + Storage>
+    pub struct GroupInfoIteratorImpl<Provider: GroupDataProviderIterImpl>
     {
         m_provider: Option<NonNull<Provider>>,
         m_fabric: FabricIndex,
         m_next_id: u16,
         m_count: usize,
         m_total: usize,
-        //m_phantom: PhantomData<PSD>,
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> GroupInfoIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> GroupInfoIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> GroupInfoIteratorImpl<Provider> {
         pub const fn new() -> Self {
             Self {
                 m_provider: None,
@@ -2009,7 +2008,6 @@ pub mod iter_impl {
                 m_next_id: 0,
                 m_count: 0,
                 m_total: 0,
-                //m_phantom: PhantomData,
             }
         }
 
@@ -2033,7 +2031,6 @@ pub mod iter_impl {
                 m_next_id: 0,
                 m_count: 0,
                 m_total: 0,
-                //m_phantom: PhantomData,
             };
 
             let mut fabric: FabricData = fabric_data::new_with(fabric_index);
@@ -2051,8 +2048,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Iterator for GroupInfoIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Iterator for GroupInfoIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Iterator for GroupInfoIteratorImpl<Provider> {
         type Item = GroupInfo;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -2080,8 +2076,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Release for  GroupInfoIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Release for  GroupInfoIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Release for  GroupInfoIteratorImpl<Provider> {
         fn release(&mut self) {
             if let Some(ptr) = self.m_provider {
                 unsafe {
@@ -2091,8 +2086,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Drop for  GroupInfoIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Drop for  GroupInfoIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Drop for  GroupInfoIteratorImpl<Provider> {
         fn drop(&mut self) {
             self.release()
         }
@@ -2127,8 +2121,7 @@ pub mod iter_impl {
         }
     }
 
-    //pub struct EndpointIteratorImpl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>>
-    pub struct EndpointIteratorImpl<Provider: GroupDataProvider + Storage>
+    pub struct EndpointIteratorImpl<Provider: GroupDataProviderIterImpl>
     {
         m_provider: Option<NonNull<Provider>>,
         m_fabric: FabricIndex,
@@ -2140,11 +2133,9 @@ pub mod iter_impl {
         m_endpoint_index: usize,
         m_endpoint_count: usize,
         m_first_endpoint: bool,
-        //m_phantom: PhantomData<PSD>,
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> EndpointIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> EndpointIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> EndpointIteratorImpl<Provider> {
         pub const fn new() -> Self {
             Self {
                 m_provider: None,
@@ -2157,7 +2148,6 @@ pub mod iter_impl {
                 m_endpoint_index: 0,
                 m_endpoint_count: 0,
                 m_first_endpoint: true,
-                //m_phantom: PhantomData,
             }
         }
 
@@ -2186,7 +2176,6 @@ pub mod iter_impl {
                 m_endpoint_index: 0,
                 m_endpoint_count: 0,
                 m_first_endpoint: true,
-                //m_phantom: PhantomData,
             };
 
             let mut fabric: FabricData = fabric_data::new_with(fabric_index);
@@ -2252,8 +2241,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Iterator for EndpointIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Iterator for EndpointIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Iterator for EndpointIteratorImpl<Provider> {
         type Item = GroupEndpoint;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -2301,8 +2289,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Release for  EndpointIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Release for  EndpointIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Release for  EndpointIteratorImpl<Provider> {
         fn release(&mut self) {
             if let Some(ptr) = self.m_provider {
                 unsafe {
@@ -2312,8 +2299,7 @@ pub mod iter_impl {
         }
     }
 
-    //impl<PSD: PersistentStorageDelegate, Provider: GroupDataProvider + Storage<PSD>> Drop for  EndpointIteratorImpl<PSD, Provider> {
-    impl<Provider: GroupDataProvider + Storage> Drop for  EndpointIteratorImpl<Provider> {
+    impl<Provider: GroupDataProviderIterImpl> Drop for  EndpointIteratorImpl<Provider> {
         fn drop(&mut self) {
             self.release()
         }
@@ -2630,6 +2616,13 @@ where
         self.m_storage.clone()
     }
 }
+
+impl<PSD, SKS, LIS> iter_impl::GroupDataProviderIterImpl for GroupDataProviderImpl<PSD, SKS, LIS>
+where
+    PSD: PersistentStorageDelegate,
+    SKS: SessionKeystore,
+    LIS: GroupListener,
+{ }
 
 impl<PSD, SKS, LIS> GroupDataProviderImpl<PSD, SKS, LIS>
 where
