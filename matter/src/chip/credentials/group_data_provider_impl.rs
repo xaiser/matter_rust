@@ -3165,20 +3165,9 @@ where
         // If the group exists, the index must match
         let found = key_map_data::find_by_key(&mut map, self.m_storage.clone().unwrap(), &fabric, &in_map);
 
-        chip_log_error!(
-            FabricProvisioning,
-            "found {}, index {} == {}",
-            found,
-           map.linked_data.index,
-           index
-        );
         verify_or_return_error!(!found || (usize::from(map.linked_data.index) == index), Err(chip_error_duplicate_key_id!()));
 
         let found = key_map_data::get(&mut map, self.m_storage.clone().unwrap(), &fabric, index);
-        /*
-        map.group_id = in_map.group_id;
-        map.keyset_id = in_map.keyset_id;
-        */
         map.group_key = in_map.clone();
 
         if found {
@@ -3211,15 +3200,74 @@ where
     }
 
     fn get_group_key_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupKey, ChipError> {
-        Err(chip_error_not_implemented!())
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut map: KeyMapData = key_map_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+        verify_or_return_error!(key_map_data::get(&mut map, self.m_storage.clone().unwrap(), &fabric, index), Err(chip_error_not_found!()));
+
+        // Target map found
+        Ok(map.group_key.clone())
     }
 
     fn remove_group_key_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
-        chip_ok!()
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        let mut map: KeyMapData = key_map_data::new();
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+        verify_or_return_error!(key_map_data::get(&mut map, self.m_storage.clone().unwrap(), &fabric, index), Err(chip_error_not_found!()));
+
+        KeyMapData::delete_from(&mut map, storage_ptr)?;
+
+        if map.linked_data.first {
+            fabric.first_map = map.linked_data.next;
+        } else {
+            let mut prev: KeyMapData = key_map_data::new_with(fabric_index, map.linked_data.prev, KUNDEFINED_GROUP_ID, 0);
+            KeyMapData::load_from(&mut prev, storage_ptr)?;
+            prev.linked_data.next = map.linked_data.next;
+            KeyMapData::save_to(&mut prev, storage_ptr)?;
+        }
+
+        if fabric.map_count > 0 {
+            fabric.map_count -= 1;
+        }
+
+        // Update fabric
+        FabricData::save_to(&mut fabric, storage_ptr)
     }
 
     fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-        chip_ok!()
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        let mut map: KeyMapData = key_map_data::new();
+        for count in 0..fabric.map_count {
+            if KeyMapData::load_from(&mut map, storage_ptr).is_err() {
+                break;
+            }
+
+            KeyMapData::delete_from(&mut map, storage_ptr);
+            map.linked_data.id = map.linked_data.next;
+        }
+
+        // Update fabric
+        fabric.first_map = 0;
+        fabric.map_count = 0;
+
+        FabricData::save_to(&mut fabric, storage_ptr)
     }
 
     fn iter_group_keys(&self, fabric_index: FabricIndex) -> Option<Self::GroupKeyIterator> {
@@ -4084,5 +4132,186 @@ mod tests {
 
         assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
         assert!(!p.set_group_key_at(fabric_index, 1, &group_key).is_ok());
+    }
+
+    #[test]
+    fn set_group_key_differnt_key_to_same_index() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        let group_key_2 = GroupKey::new_with(group_id + 1, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key_2).is_ok());
+    }
+
+    #[test]
+    fn set_group_key_at_set_2_keys() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        let group_key_2 = GroupKey::new_with(group_id + 1, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.set_group_key_at(fabric_index, 1, &group_key_2).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_at_successsfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.get_group_key_at(fabric_index, 0).is_ok_and(|k| k.group_id == group_id && k.keyset_id == keyset_id));
+    }
+
+    #[test]
+    fn get_group_key_at_index_outof_boundary() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(!p.get_group_key_at(fabric_index, 1).is_ok());
+    }
+
+    #[test]
+    fn remove_group_key_at_successsfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.remove_group_key_at(fabric_index, 0).is_ok());
+    }
+
+    #[test]
+    fn remove_group_key_at_no_key() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(!p.remove_group_key_at(fabric_index, 1).is_ok());
+    }
+
+    #[test]
+    fn remove_group_key_at_one_of_2_keys() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        let group_key_2 = GroupKey::new_with(group_id + 1, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.set_group_key_at(fabric_index, 1, &group_key_2).is_ok());
+        assert!(p.remove_group_key_at(fabric_index, 0).is_ok());
+    }
+
+    #[test]
+    fn remove_group_keys_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        let group_key_2 = GroupKey::new_with(group_id + 1, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+        assert!(p.set_group_key_at(fabric_index, 1, &group_key_2).is_ok());
+        assert!(p.remove_group_keys(fabric_index).is_ok());
+    }
+
+    #[test]
+    fn remove_group_keys_no_key_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        let group_key_2 = GroupKey::new_with(group_id + 1, keyset_id);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // to init fabric firat
+        let group_info = GroupInfo::new_with(group_id, "tg");
+        assert!(p.set_group_info(fabric_index, &group_info).is_ok());
+
+        assert!(p.remove_group_keys(fabric_index).is_ok());
     }
 } // end of tests
