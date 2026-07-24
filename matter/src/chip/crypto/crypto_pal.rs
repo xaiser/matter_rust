@@ -1432,28 +1432,96 @@ impl GroupOperationalCredentials {
     }
 }
 
-pub fn derive_group_operation_key(
+/* Operational Group Key Group, Security Info: "GroupKey v1.0" */
+const K_GROUP_SECURITY_INFO: &str = "GroupKey v1.0";
+
+/* Group Key Derivation Function, Info: "GroupKeyHash" ” */
+const K_GROUP_KEY_HASH_INFO: &str = "GroupKeyHash";
+const K_GROUP_KEY_HASH_SALT: [u8; 0] = [];
+
+/*
+    OperationalGroupKey =
+        Crypto_KDF
+        (
+            InputKey = Epoch Key,
+            Salt = CompressedFabricIdentifier,
+            Info = "GroupKey v1.0",
+            Length = CRYPTO_SYMMETRIC_KEY_LENGTH_BITS
+        )
+*/
+pub fn derive_group_operational_key(
     epoch_key: &[u8],
     compressed_fabric_id: &[u8],
     out_key: &mut [u8],
 ) -> ChipErrorResult {
+    verify_or_return_error!(epoch_key.len() == CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES, Err(chip_error_invalid_argument!()));
+    verify_or_return_error!(out_key.len() >= CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES, Err(chip_error_invalid_argument!()));
+
+    HKDFSha::hkdf_sha(
+        epoch_key,
+        compressed_fabric_id,
+        K_GROUP_SECURITY_INFO.as_bytes(),
+        out_key,
+    )
+}
+
+/*
+    GKH = Crypto_KDF (
+        InputKey = OperationalGroupKey,
+        Salt = [],
+        Info = "GroupKeyHash",
+        Length = 16)
+*/
+pub fn derive_group_session_id(operational_key: &[u8], session_id: &mut u16) -> ChipErrorResult {
+    verify_or_return_error!(operational_key.len() == CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES, Err(chip_error_invalid_argument!()));
+
+    let mut out_key = [0u8; core::mem::size_of::<u16>()];
+
+    HKDFSha::hkdf_sha(
+        operational_key,
+        &K_GROUP_KEY_HASH_SALT,
+        K_GROUP_KEY_HASH_INFO.as_bytes(),
+        &mut out_key[..],
+    )?;
+
+    *session_id = u16::from_be_bytes(out_key);
+
     chip_ok!()
 }
 
-pub fn derive_gropu_session(operational_key: &[u8], session_id: &mut u16) -> ChipErrorResult {
-    chip_ok!()
-}
+/* Operational Group Key Group, PrivacyKey Info: "PrivacyKey" */
+const K_GROUP_PRIVACY_INFO: &str = "PrivacyKey";
 
+/*
+    PrivacyKey =
+         Crypto_KDF
+         (
+            InputKey = EncryptionKey,
+            Salt = [],
+            Info = "PrivacyKey",
+            Length = CRYPTO_SYMMETRIC_KEY_LENGTH_BITS
+         )
+*/
 pub fn derive_group_privacy_key(epoch_key: &[u8], out_key: &mut [u8]) -> ChipErrorResult {
-    chip_ok!()
+    verify_or_return_error!(epoch_key.len() == CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES, Err(chip_error_invalid_argument!()));
+    verify_or_return_error!(out_key.len() >= CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES, Err(chip_error_invalid_argument!()));
+
+    HKDFSha::hkdf_sha(
+        epoch_key,
+        &[],
+        K_GROUP_PRIVACY_INFO.as_bytes(),
+        out_key,
+    )
 }
 
 pub fn derive_group_operational_credentials(
     epoch_key: &[u8],
-    compressed_fabrc_id: &[u8],
+    compressed_fabric_id: &[u8],
     operational_credentials: &mut GroupOperationalCredentials,
 ) -> ChipErrorResult {
-    chip_ok!()
+    derive_group_operational_key(epoch_key, compressed_fabric_id, &mut operational_credentials.m_encryption_key[..])?;
+    derive_group_session_id(&operational_credentials.m_encryption_key[..], &mut operational_credentials.m_hash)?;
+    derive_group_privacy_key(&operational_credentials.m_encryption_key[..], &mut operational_credentials.m_privacy_key[..])
 }
 
 pub struct HKDFSha;

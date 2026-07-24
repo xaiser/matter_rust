@@ -153,7 +153,7 @@ impl<KeyContext: SymmetricKeyContext> GroupSession<KeyContext> {
     }
 }
 
-mod epoch_key {
+pub mod epoch_key {
     pub const KLENGTH_BYTES: usize = crate::chip::crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES;
 }
 
@@ -307,6 +307,7 @@ pub trait GroupDataProvider {
     fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
 
     fn iter_group_keys(&self, fabric_index: FabricIndex) -> Option<Self::GroupKeyIterator>;
+    fn release_iter_group_key(&self);
 
     //
     // Key Sets
