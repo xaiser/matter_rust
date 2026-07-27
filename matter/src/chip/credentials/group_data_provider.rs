@@ -159,6 +159,7 @@ pub mod epoch_key {
 
 /// EpochKey
 // An EpochKey is a single key usable to determine an operational group key
+#[derive(Clone)]
 pub struct EpochKey {
     // Validity start time in microseconds since 2000-01-01T00:00:00 UTC ("the Epoch")
     pub start_time: u64,
@@ -191,6 +192,7 @@ pub mod key_set {
     pub const KEPOCH_KEYS_MAX: usize = 3;
 }
 
+#[derive(Clone)]
 pub struct KeySet {
     // The actual keys for the group key set
     pub epoch_keys: [EpochKey; key_set::KEPOCH_KEYS_MAX],
@@ -262,6 +264,7 @@ pub trait GroupDataProvider {
     type EndpointIterator;
     type KeySetIterator;
     type GroupSessionIterator;
+    type KeyContext: crate::chip::crypto::SymmetricKeyContext;
     type Listener: GroupListener;
 
     fn new() -> Self where Self: Sized{
@@ -331,11 +334,13 @@ pub trait GroupDataProvider {
     fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<&KeySet, ChipError>;
 
     fn iter_key_sets(&self, fabric_index: FabricIndex) -> Option<Self::KeySetIterator>;
+    fn release_iter_keyset(&self);
 
     fn remove_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
 
     fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator>;
-    fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
+    //fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
+    fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError>;
 
     fn set_listener(&mut self, listener: Option<NonNull<Self::Listener>>);
     fn remove_listener(&mut self);
