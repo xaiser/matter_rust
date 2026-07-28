@@ -341,6 +341,7 @@ pub trait GroupDataProvider {
     fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator>;
     //fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError>;
+    fn release_key_context(&self);
 
     fn set_listener(&mut self, listener: Option<NonNull<Self::Listener>>);
     fn remove_listener(&mut self);

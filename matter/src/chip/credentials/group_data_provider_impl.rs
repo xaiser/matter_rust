@@ -1988,6 +1988,7 @@ pub mod iter_impl {
     pub const ENDPOINT_MAX: u8 = 2;
     pub const GROUP_KEY_MAX: u8 = 2;
     pub const KEYSET_MAX: u8 = 2;
+    pub const GROUP_KEY_CONTEXT_MAX: u8 = 2;
 
     pub trait GroupDataProviderIterImpl: GroupDataProvider + Storage {}
 
@@ -2463,6 +2464,18 @@ pub mod iter_impl {
         }
 
         fn release(&mut self) {
+            self.release_keys();
+            if let Some(ptr) = self.m_provider {
+                unsafe {
+                    ptr.as_ref().release_key_context();
+                }
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore> Drop for  GroupKeyContext<Provider> {
+        fn drop(&mut self) {
+            self.release()
         }
     }
 
@@ -2572,7 +2585,7 @@ pub mod iter_impl {
     }
 
 
-    pub struct GroupSessionIteratorImpl<Provider: GroupDataProviderIterImpl>
+    pub struct GroupSessionIteratorImpl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore>
     {
         m_provider: Option<NonNull<Provider>>,
         m_first_fabric: FabricIndex,
@@ -2587,7 +2600,7 @@ pub mod iter_impl {
         m_group_key_context: GroupKeyContext<Provider>,
     }
 
-    impl<Provider: GroupDataProviderIterImpl> GroupSessionIteratorImpl<Provider>
+    impl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore> GroupSessionIteratorImpl<Provider>
     {
         pub const fn new() -> Self {
             Self {
@@ -2606,7 +2619,7 @@ pub mod iter_impl {
         }
     }
 
-    impl<Provider: GroupDataProviderIterImpl> Iterator for GroupSessionIteratorImpl<Provider>
+    impl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore> Iterator for GroupSessionIteratorImpl<Provider>
     {
         type Item = GroupSession<GroupKeyContext<Provider>>;
 
@@ -2678,6 +2691,7 @@ where
     m_group_key_iterators: Cell<u8>,
     m_endpoint_iterators: Cell<u8>,
     m_key_set_iterators: Cell<u8>,
+    m_group_key_context_pool: Cell<u8>,
     m_group_session_iterators: Cell<u8>,
 }
 
@@ -2742,6 +2756,7 @@ where
             m_group_key_iterators: Cell::new(0),
             m_endpoint_iterators: Cell::new(0),
             m_key_set_iterators: Cell::new(0),
+            m_group_key_context_pool: Cell::new(0),
             m_group_session_iterators: Cell::new(0),
         }
     }
@@ -2868,6 +2883,7 @@ where
             m_group_key_iterators: Cell::new(0),
             m_endpoint_iterators: Cell::new(0),
             m_key_set_iterators: Cell::new(0),
+            m_group_key_context_pool: Cell::new(0),
             m_group_session_iterators: Cell::new(0),
         }
     }
@@ -2896,6 +2912,7 @@ where
         self.m_endpoint_iterators.set(0);
         self.m_key_set_iterators.set(0);
         self.m_group_session_iterators.set(0);
+        self.m_group_key_context_pool.set(0);
     }
 
     // By id
@@ -3572,7 +3589,48 @@ where
     }
 
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError> {
-        Err(chip_error_not_implemented!())
+        let storage_ptr = unsafe {
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
+        };
+
+        verify_or_return_error!(self.m_group_key_context_pool.get() < iter_impl::GROUP_KEY_CONTEXT_MAX, Err(chip_error_invalid_list_length!()));
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        let mut mapping = key_map_data::new_with(fabric.fabric_index, fabric.first_map, KUNDEFINED_GROUP_ID, 0);
+
+        // Look for the target group in the fabric's keyset-group pairs
+        for i in 0..fabric.map_count {
+            KeyMapData::load_from(&mut mapping, storage_ptr)?;
+            // GroupKeySetID of 0 is reserved for the Identity Protection Key (IPK),
+            // it cannot be used for operational group communication.
+
+            if mapping.group_key.keyset_id > 0 && mapping.group_key.group_id == group_id {
+                // Group found, get the keyset
+                let mut keyset: KeySetData = key_set_data::new();
+                verify_or_return_error!(key_set_data::find(&mut keyset, self.m_storage.clone().unwrap(), 
+                        &fabric, mapping.group_key.keyset_id.into()), Err(chip_error_not_found!()));
+                if let Some(creds) = keyset.get_current_group_credentials() {
+                    let c = self.m_group_key_context_pool.get();
+                    self.m_group_key_context_pool.set(c + 1);
+
+                    return Ok(Self::KeyContext::new_with(
+                            Some(NonNull::from_ref(self)), &creds.m_encryption_key, creds.m_hash, &creds.m_privacy_key));
+                }
+            }
+
+            mapping.linked_data.id = mapping.linked_data.next;
+        }
+
+        Err(chip_error_not_found!())
+    }
+
+    fn release_key_context(&self) {
+        let c = self.m_group_key_context_pool.get();
+        if c > 0 {
+            self.m_group_key_context_pool.set(c - 1);
+        }
     }
 
     fn set_listener(&mut self, listener: Option<NonNull<LIS>>) {
@@ -4871,17 +4929,6 @@ mod tests {
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
 
-        /*
-        let group_key = GroupKey::new_with(group_id, keyset_id);
-        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
-
-        let group_info = GroupInfo::new_with(group_id, "tg");
-        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
-
-        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 3);
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
-        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
-        */
         assert!(!p.remove_fabric(fabric_index).is_ok());
     }
 
@@ -4900,18 +4947,225 @@ mod tests {
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
 
-        /*
-        let group_key = GroupKey::new_with(group_id, keyset_id);
-        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
-
-        let group_info = GroupInfo::new_with(group_id, "tg");
-        assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
-        */
-
         let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 3);
         let compressed_fabric_id = u16::to_be_bytes(1u16);
         assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
 
         assert!(p.remove_fabric(fabric_index).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        assert!(p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_too_many() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        let k = p.get_key_context(fabric_index, group_id);
+        let k_2 = p.get_key_context(fabric_index, group_id);
+        assert!(k.is_ok());
+        assert!(k_2.is_ok());
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_no_fabric() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_no_map() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_no_keyset() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_invalid_keyset_id() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 0;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_incorrect_group_id() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id + 1).is_ok());
+    }
+
+    #[test]
+    fn get_group_key_context_no_creds() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 3);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        assert!(!p.get_key_context(fabric_index, group_id).is_ok());
     }
 } // end of tests
