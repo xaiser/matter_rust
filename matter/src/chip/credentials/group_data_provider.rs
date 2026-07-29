@@ -331,7 +331,7 @@ pub trait GroupDataProvider {
      * @return CHIP_NO_ERROR on success, CHIP_ERROR_NOT_FOUND if the IPK keyset is somehow unavailable
      *         or another CHIP_ERROR value if an internal storage error occurs.
      */
-    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<&KeySet, ChipError>;
+    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<KeySet, ChipError>;
 
     fn iter_key_sets(&self, fabric_index: FabricIndex) -> Option<Self::KeySetIterator>;
     fn release_iter_keyset(&self);

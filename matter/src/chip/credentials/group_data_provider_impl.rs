@@ -11,15 +11,17 @@ use crate::{
                 chip_persistent_storage_delegate::NopPersistentStorage,
             },
             support::{
-                pool::{BitMapObjectPool, ObjectPool},
-                default_string::DefaultString,
+                //pool::{BitMapObjectPool, ObjectPool},
+                //default_string::DefaultString,
                 persistent_data::{PersistentData, DataAccessor},
                 common_persistent_data::{stored_data_list::StoredDataList, fabric_list},
                 default_storage_key_allocator::{DefaultStorageKeyAllocator, StorageKeyName},
             },
         },
         credentials::group_data_provider::{
-            GroupDataProvider, GroupListener, GroupInfo, GroupKey, KeySet, GroupEndpoint, GroupSession, key_set},
+            GroupDataProvider, GroupListener, GroupInfo, GroupKey, KeySet, GroupEndpoint, GroupSession, key_set,
+            KIDENTITY_PROTECTION_KEY_SET_ID,
+        },
         crypto::{
             GroupOperationalCredentials,
             self, session_keystore::SessionKeystore, Aes128KeyHandle, Symmetric128BitsKeyByteArray, SymmetricKeyContext,
@@ -113,7 +115,7 @@ pub mod fabric_list_impl {
 type FabricList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;
 
 pub mod linked_data {
-    use super::*;
+    //use super::*;
 
     const K_MIN_LINK_ID: u16 = 1;
 
@@ -534,8 +536,8 @@ pub mod group_data {
         },
         chip_error_invalid_fabric_index,
         chip_error_internal,
-        chip_error_not_found,
-        chip_ok,
+        //chip_error_not_found,
+        //chip_ok,
     };
     /*
     use crate::chip_internal_log;
@@ -920,7 +922,7 @@ pub mod key_map_data {
                 core::{
                     tlv_tags::{Tag, context_tag, anonymous_tag},
                     tlv_types::TlvType,
-                    data_model_types::KINVALID_KEYSET_ID,
+                    //data_model_types::KINVALID_KEYSET_ID,
                 },
             },
             credentials::group_data_provider::GroupKey,
@@ -1977,10 +1979,10 @@ pub mod iter_impl {
     use crate::chip_internal_log_impl;
     use crate::chip_log_error;
     use core::{
-        str::{self, FromStr},
+        str::FromStr,
     };
 
-    use core::marker::PhantomData;
+    //use core::marker::PhantomData;
     //use core::cell::Cell;
     //use core::sync::atomic::{AtomicU8, Ordering};
 
@@ -2397,7 +2399,7 @@ pub mod iter_impl {
                          Ok(key) => {
                              self.m_encryption_key = key;
                          },
-                         Err(e) => {
+                         Err(_e) => {
                             chip_log_error!(
                                 SecureChannel,
                                 "group key contexet failed to create key 1"
@@ -2408,7 +2410,7 @@ pub mod iter_impl {
                          Ok(key) => {
                              self.m_privacy_key = key;
                          },
-                         Err(e) => {
+                         Err(_e) => {
                             chip_log_error!(
                                 SecureChannel,
                                 "group key contexet failed to create key 2"
@@ -2447,20 +2449,20 @@ pub mod iter_impl {
             self.m_key_hash
         }
 
-        fn message_encrypt(&self, _plaintext: &[u8], _aad: &[u8], _nonce: &[u8], _mic: &mut [u8], _ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
-            Err(chip_error_not_implemented!())
+        fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+            crypto::aes_ccm_encrypt(plaintext, aad, &self.m_encryption_key, nonce, ciphertext, mic)
         }
 
-        fn message_decrypt(&self, _ciphertext: &[u8], _aad: &[u8], _nonce: &[u8], _mic: &[u8], _plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
-            Err(chip_error_not_implemented!())
+        fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
+            crypto::aes_ccm_decrypt(ciphertext, aad, mic, &self.m_encryption_key, nonce, plaintext)
         }
 
-        fn privacy_encrypt(&self, _input: &[u8], _nonce: &[u8], _output: &mut [u8]) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+            crypto::aes_ctr_encrypt(input, &self.m_privacy_key, nonce, output)
         }
 
-        fn privacy_decrypt(&self, _input: &[u8], _nonce: &[u8], _output: &mut [u8]) -> ChipErrorResult {
-            Err(chip_error_not_implemented!())
+        fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+            crypto::aes_ctr_encrypt(input, &self.m_privacy_key, nonce, output)
         }
 
         fn release(&mut self) {
@@ -2588,6 +2590,7 @@ pub mod iter_impl {
     pub struct GroupSessionIteratorImpl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore>
     {
         m_provider: Option<NonNull<Provider>>,
+        m_session_id: u16,
         m_first_fabric: FabricIndex,
         m_fabric: FabricIndex,
         m_fabric_count: u16,
@@ -2605,6 +2608,7 @@ pub mod iter_impl {
         pub const fn new() -> Self {
             Self {
                 m_provider: None,
+                m_session_id: 0,
                 m_first_fabric: KUNDEFINED_FABRIC_INDEX,
                 m_fabric: KUNDEFINED_FABRIC_INDEX,
                 m_fabric_count: 0,
@@ -2616,6 +2620,25 @@ pub mod iter_impl {
                 m_first_map: true,
                 m_group_key_context: GroupKeyContext::<Provider>::new(),
             }
+        }
+
+        pub fn new_with(provider: Option<NonNull<Provider>>, session_id: u16) -> Self {
+            let mut s = Self {
+                m_provider: provider,
+                m_session_id: session_id,
+                m_first_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_fabric: KUNDEFINED_FABRIC_INDEX,
+                m_fabric_count: 0,
+                m_fabric_total: 0,
+                m_mapping: 0,
+                m_map_count: 0,
+                m_key_index: 0,
+                m_key_count: 0,
+                m_first_map: true,
+                m_group_key_context: GroupKeyContext::new_with_provider(provider),
+            };
+
+            s
         }
     }
 
@@ -2782,7 +2805,7 @@ where
 
             let mut endpoint: EndpointData = endpoint_data::new_with(fabric_index, group.group_info.group_id, group.first_endpoint);
 
-            for endpoint_index in 0..group.endpoint_count {
+            for _endpoint_index in 0..group.endpoint_count {
                 EndpointData::load_from(&mut endpoint, storage_ptr)?;
                 EndpointData::delete_from(&mut endpoint, storage_ptr)?;
                 endpoint.group_endpoint.endpoint_id = endpoint.next;
@@ -2811,9 +2834,8 @@ where
     }
 
     fn remove_endpoint_at(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -2917,9 +2939,8 @@ where
 
     // By id
     fn set_group_info(&mut self, fabric_index: FabricIndex, info: &GroupInfo) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -2945,9 +2966,8 @@ where
     }
 
     fn get_group_info(&self, fabric_index: FabricIndex, group_id: GroupId) -> Result<GroupInfo, ChipError> {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -2959,9 +2979,8 @@ where
     }
 
     fn remove_group_info(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -3043,9 +3062,8 @@ where
     }
 
     fn get_group_info_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupInfo, ChipError> {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -3060,9 +3078,8 @@ where
     }
 
     fn remove_group_info_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -3075,7 +3092,7 @@ where
 
         let mut endpoint: EndpointData = endpoint_data::new_with(fabric_index, group.group_info.group_id, group.first_endpoint);
 
-        for endpoint_index in 0..group.endpoint_count {
+        for _endpoint_index in 0..group.endpoint_count {
             if EndpointData::load_from(&mut endpoint, storage_ptr).is_err() {
                 break;
             }
@@ -3108,13 +3125,12 @@ where
 
     // Endpoints
     fn has_endpoint(&self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> bool {
-        let storage_ptr = unsafe {
+        let storage_ptr = 
             if let Some(ptr) = self.m_storage.as_ref() {
                 ptr.as_ptr()
             } else {
                 return false;
-            }
-        };
+            };
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -3129,9 +3145,8 @@ where
     }
 
     fn add_endpoint(&mut self, fabric_index: FabricIndex, group_id: GroupId, endpoint_id: EndpointId) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut group: GroupData = group_data::new();
@@ -3198,9 +3213,8 @@ where
             return self.remove_endpoint_at(fabric_index, gid, endpoint_id);
         }
 
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         FabricData::load_from(&mut fabric, storage_ptr)?;
@@ -3210,7 +3224,7 @@ where
         let mut endpoint: EndpointData = endpoint_data::new();
 
         // Loop through all the groups
-        for group_index in 0..fabric.group_count {
+        for _group_index in 0..fabric.group_count {
             if GroupData::load_from(&mut group, storage_ptr).is_err() {
                 break;
             }
@@ -3263,9 +3277,8 @@ where
     // Group-Key map
     //
     fn set_group_key_at(&mut self, fabric_index: FabricIndex, index: usize, in_map: &GroupKey) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut map: KeyMapData = key_map_data::new_with_fabric(fabric_index);
@@ -3313,9 +3326,8 @@ where
     }
 
     fn get_group_key_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupKey, ChipError> {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut map: KeyMapData = key_map_data::new();
@@ -3328,9 +3340,8 @@ where
     }
 
     fn remove_group_key_at(&mut self, fabric_index: FabricIndex, index: usize) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut map: KeyMapData = key_map_data::new();
@@ -3358,16 +3369,15 @@ where
     }
 
     fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
 
         FabricData::load_from(&mut fabric, storage_ptr)?;
 
         let mut map: KeyMapData = key_map_data::new();
-        for count in 0..fabric.map_count {
+        for _count in 0..fabric.map_count {
             if KeyMapData::load_from(&mut map, storage_ptr).is_err() {
                 break;
             }
@@ -3404,9 +3414,8 @@ where
     // Key Sets
     //
     fn set_key_set(&mut self, fabric_index: FabricIndex, compressed_fabric_id: &[u8], in_keyset: &KeySet) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut keyset: KeySetData = key_set_data::new();
@@ -3451,9 +3460,8 @@ where
     }
 
     fn get_key_set(&self, fabric_index: FabricIndex, target_id: KeysetId) -> Result<KeySet, ChipError> {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut keyset: KeySetData = key_set_data::new();
@@ -3478,9 +3486,8 @@ where
     }
 
     fn remove_key_set(&mut self, fabric_index: FabricIndex, target_id: KeysetId) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut keyset: KeySetData = key_set_data::new();
@@ -3505,7 +3512,7 @@ where
         // Removing a key set also removes the associated group mappings
         let mut map: KeyMapData = key_map_data::new();
         let original_count = fabric.map_count;
-        for i in 0..original_count {
+        for _i in 0..original_count {
             if FabricData::load_from(&mut fabric, storage_ptr).is_err() {
                 chip_log_error!(
                     SecureChannel,
@@ -3527,8 +3534,37 @@ where
         chip_ok!()
     }
 
-    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<&KeySet, ChipError> {
-        Err(chip_error_not_implemented!())
+    fn get_ipk_key_set(&self, fabric_index: FabricIndex) -> Result<KeySet, ChipError> {
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
+
+        let mut fabric: FabricData = fabric_data::new_with(fabric_index);
+        FabricData::load_from(&mut fabric, storage_ptr)?;
+
+        let mut _mapping: KeyMapData = key_map_data::new_with(fabric.fabric_index, fabric.first_map, KUNDEFINED_GROUP_ID, 0);
+
+        // Fabric found, get the keyset
+        let mut keyset: KeySetData = key_set_data::new();
+        verify_or_return_error!(key_set_data::find(&mut keyset, self.m_storage.clone().unwrap(), 
+                &fabric, KIDENTITY_PROTECTION_KEY_SET_ID.into()), Err(chip_error_not_found!()));
+
+        // If the keyset ID doesn't match, we have a ... problem.
+        verify_or_return_error!(keyset.keyset_id == KIDENTITY_PROTECTION_KEY_SET_ID, Err(chip_error_internal!()));
+
+        let mut out_keyset: KeySet = KeySet::new();
+        out_keyset.keyset_id = keyset.keyset_id;
+        out_keyset.num_keys_used = keyset.keys_count;
+        out_keyset.policy = keyset.policy;
+
+        for key_idx in 0..key_set::KEPOCH_KEYS_MAX {
+            out_keyset.epoch_keys[key_idx].key.fill(0);
+            if key_idx < keyset.keys_count.into() {
+                out_keyset.epoch_keys[key_idx].start_time = keyset.operational_keys[key_idx].m_start_time;
+                out_keyset.epoch_keys[key_idx].key.copy_from_slice(&keyset.operational_keys[key_idx].m_encryption_key[..]);
+            }
+        }
+
+        Ok(out_keyset)
     }
 
     fn iter_key_sets(&self, fabric_index: FabricIndex) -> Option<Self::KeySetIterator> {
@@ -3549,9 +3585,8 @@ where
     }
 
     fn remove_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         // Fabric data defaults to zero, so if not entry is found, no mappings, or keys are removed
@@ -3573,7 +3608,7 @@ where
 
         // Remove Keyset
         let mut keyset: KeySetData = key_set_data::new_with_fabric_keyset(fabric_index, fabric.first_keyset);
-        for keyset_count in 0..fabric.keyset_count {
+        for _keyset_count in 0..fabric.keyset_count {
             if KeySetData::load_from(&mut keyset, storage_ptr).is_err() {
                 break;
             }
@@ -3589,9 +3624,8 @@ where
     }
 
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError> {
-        let storage_ptr = unsafe {
-            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr()
-        };
+        let storage_ptr = 
+            self.m_storage.as_ref().ok_or(chip_error_internal!())?.as_ptr();
 
         verify_or_return_error!(self.m_group_key_context_pool.get() < iter_impl::GROUP_KEY_CONTEXT_MAX, Err(chip_error_invalid_list_length!()));
 
@@ -3601,7 +3635,7 @@ where
         let mut mapping = key_map_data::new_with(fabric.fabric_index, fabric.first_map, KUNDEFINED_GROUP_ID, 0);
 
         // Look for the target group in the fabric's keyset-group pairs
-        for i in 0..fabric.map_count {
+        for _i in 0..fabric.map_count {
             KeyMapData::load_from(&mut mapping, storage_ptr)?;
             // GroupKeySetID of 0 is reserved for the Identity Protection Key (IPK),
             // it cannot be used for operational group communication.
@@ -4819,13 +4853,10 @@ mod tests {
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-
-        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 3);
 
         assert!(!p.remove_key_set(fabric_index, keyset_id).is_ok());
     }
@@ -4895,7 +4926,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -4921,9 +4951,6 @@ mod tests {
         let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
-        let group_id: GroupId = 1;
-        let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -4939,9 +4966,7 @@ mod tests {
         let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
-        let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -4963,7 +4988,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -4992,7 +5016,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5024,8 +5047,6 @@ mod tests {
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
-        let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5043,7 +5064,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5068,7 +5088,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5093,7 +5112,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 0;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5122,7 +5140,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5151,7 +5168,6 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         p.set_listener(Some(NonNull::from_ref(&l)));
@@ -5167,5 +5183,68 @@ mod tests {
         assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
 
         assert!(!p.get_key_context(fabric_index, group_id).is_ok());
+    }
+
+    #[test]
+    fn get_ipk_key_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let keyset_id: KeysetId = KIDENTITY_PROTECTION_KEY_SET_ID;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 2);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        assert!(p.get_ipk_key_set(fabric_index).is_ok_and(|k| k.keyset_id == KIDENTITY_PROTECTION_KEY_SET_ID && k.num_keys_used == 2));
+    }
+
+    #[test]
+    fn get_ipk_key_no_fabric() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        //let keyset_id: KeysetId = KIDENTITY_PROTECTION_KEY_SET_ID;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        //let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 2);
+        //let compressed_fabric_id = u16::to_be_bytes(1u16);
+        //assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        assert!(!p.get_ipk_key_set(fabric_index).is_ok());
+    }
+
+    #[test]
+    fn get_ipk_key_no_key() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let keyset_id: KeysetId = KIDENTITY_PROTECTION_KEY_SET_ID;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        let keyset = KeySet::new_with(keyset_id + 1, SecurityPolicy::KcacheAndSync, 2);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        assert!(!p.get_ipk_key_set(fabric_index).is_ok());
     }
 } // end of tests

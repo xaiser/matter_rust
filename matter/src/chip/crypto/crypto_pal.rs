@@ -937,8 +937,8 @@ pub fn aes_ccm_encrypt(
     nonce: &[u8],
     ciphertext: &mut [u8],
     tag: &mut [u8],
-) -> ChipErrorResult {
-    chip_ok!()
+) -> Result<SymmetricEncryptResult, ChipError> {
+    crate::chip::crypto::aes::key_128::mode_ccm::encrypt_autosize(plaintext, aad, key, nonce, tag, ciphertext)
 }
 
 pub fn aes_ccm_decrypt(
@@ -948,17 +948,17 @@ pub fn aes_ccm_decrypt(
     key: &Aes128KeyHandle,
     nonce: &[u8],
     plaintext: &mut [u8],
-) -> ChipErrorResult {
-    chip_ok!()
+) -> Result<SymmetricDecryptResult, ChipError> {
+    crate::chip::crypto::aes::key_128::mode_ccm::decrypt_autosize(ciphertext, aad, tag, key, nonce, plaintext)
 }
 
-pub fn aes_ctr_crypt(
+pub fn aes_ctr_encrypt(
     input: &[u8],
     key: &Aes128KeyHandle,
     nonce: &[u8],
     output: &mut [u8],
 ) -> ChipErrorResult {
-    chip_ok!()
+    crate::chip::crypto::aes::key_128::mode_ctr::encrypt::<ctr::Ctr32LE<aes::Aes128>>(input, key, nonce, output)
 }
 
 pub fn generate_certificate_signing_request(
