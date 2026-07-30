@@ -67,6 +67,8 @@ pub mod fabric_list_impl {
         pub m_entry_count: u16,
     }
 
+    pub type PersistentFabricList = PersistentData<FabricList, {fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX}, NopPersistentStorage>;
+
     impl StoredDataList for FabricList {
         fn first_entry(&self) -> u16 {
             self.m_first_entry
@@ -110,9 +112,13 @@ pub mod fabric_list_impl {
             }
         }
     }
+
+    pub const fn new() -> PersistentFabricList {
+        PersistentFabricList::new(FabricList::new(), None)
+    }
 }
 
-type FabricList = PersistentData<fabric_list_impl::FabricList, { fabric_list::K_PERSISTENT_FABRIC_BUFFER_MAX }, NopPersistentStorage>;
+type FabricList = fabric_list_impl::PersistentFabricList;
 
 pub mod linked_data {
     //use super::*;
@@ -2622,7 +2628,20 @@ pub mod iter_impl {
             }
         }
 
-        pub fn new_with(provider: Option<NonNull<Provider>>, session_id: u16) -> Self {
+        pub fn new_with(provider: Option<NonNull<Provider>>, session_id: u16) -> Option<Self> {
+            let storage_ptr = unsafe {
+                if let Some(provider_ptr) = provider {
+                    let provider = provider_ptr.as_ref();
+                    if let Some(storage_ptr) = provider.get_storage() {
+                        storage_ptr.as_ptr()
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            };
+
             let mut s = Self {
                 m_provider: provider,
                 m_session_id: session_id,
@@ -2638,7 +2657,17 @@ pub mod iter_impl {
                 m_group_key_context: GroupKeyContext::new_with_provider(provider),
             };
 
-            s
+            let mut fabric_list = fabric_list_impl::new();
+            FabricList::load_from(&mut fabric_list, storage_ptr).ok()?;
+
+            s.m_first_fabric = fabric_list.m_first_entry as FabricIndex;
+            s.m_fabric = fabric_list.m_first_entry as FabricIndex;
+            s.m_fabric_count = 0;
+            s.m_fabric_total = fabric_list.m_entry_count;
+            s.m_map_count = 0;
+            s.m_first_map = true;
+
+            Some(s)
         }
     }
 
@@ -2647,6 +2676,22 @@ pub mod iter_impl {
         type Item = GroupSession<GroupKeyContext<Provider>>;
 
         fn next(&mut self) -> Option<Self::Item> {
+            let storage_ptr = unsafe {
+                if let Some(provider_ptr) = self.m_provider {
+                    let provider = provider_ptr.as_ref();
+                    if let Some(storage_ptr) = provider.get_storage() {
+                        storage_ptr.as_ptr()
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            };
+
+            while self.m_fabric_count < self.m_fabric_total {
+            }
+
             None
         }
     }
