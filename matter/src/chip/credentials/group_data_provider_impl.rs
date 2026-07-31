@@ -3764,7 +3764,9 @@ where
         self.m_listener = listener;
     }
 
-    fn remove_listener(&mut self) {}
+    fn remove_listener(&mut self) {
+        self.m_listener = None;
+    }
 }
 
 #[cfg(test)]
@@ -5377,6 +5379,130 @@ mod tests {
             unsafe {
                 assert!(s.next().is_some_and(|gs| gs.group_id == group_id && gs.fabric_index == fabric_index && 
                         gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id)));
+            }
+        }
+    }
+
+    #[test]
+    fn iter_multiple_group_session_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let mut session_id: u16 = 0;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // fabric 1
+        let session_id_1 = {
+            let fabric_index: FabricIndex = 1;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+
+            // create keyset
+            // number of keys must be < 3, otherwise the get_current_group_credentials would return
+            // error
+            let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+            let compressed_fabric_id = u16::to_be_bytes(1u16);
+            assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+            let keyset_2 = KeySet::new_with(keyset_id + 1, SecurityPolicy::KcacheAndSync, 2);
+            let compressed_fabric_id = u16::to_be_bytes(1u16);
+            assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset_2).is_ok());
+
+            // group 1
+            {
+                let group_key = GroupKey::new_with(group_id, keyset_id);
+                assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+            }
+
+            // group 2
+            {
+                let group_key = GroupKey::new_with(group_id + 1, keyset_id + 1);
+                assert!(p.set_group_key_at(fabric_index, 1, &group_key).is_ok());
+            }
+
+            // since the epoch key is all empty and the comparessed fabric id is the same.
+            // therefore, the session id of both group should be the same
+            let key = p.get_key_context(fabric_index, group_id);
+            assert!(key.is_ok());
+            let mut key = key.unwrap();
+
+            key.get_key_hash()
+        };
+
+        // fabric 2
+        let session_id_2 = {
+            let fabric_index: FabricIndex = 2;
+            let group_id: GroupId = 1;
+            let keyset_id: KeysetId = 1;
+
+            // create keyset
+            // number of keys must be < 3, otherwise the get_current_group_credentials would return
+            // error
+            let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+            let compressed_fabric_id = u16::to_be_bytes(2u16);
+            assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+            let keyset_2 = KeySet::new_with(keyset_id + 1, SecurityPolicy::KcacheAndSync, 2);
+            let compressed_fabric_id = u16::to_be_bytes(2u16);
+            assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset_2).is_ok());
+
+            // group 1
+            {
+                let group_key = GroupKey::new_with(group_id, keyset_id);
+                assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+            }
+            // group 2
+            {
+                let group_key = GroupKey::new_with(group_id + 1, keyset_id + 1);
+                assert!(p.set_group_key_at(fabric_index, 1, &group_key).is_ok());
+            }
+
+            // since the epoch key is all empty and the comparessed fabric id is the same.
+            // therefore, the session id of both group should be the same
+            let key = p.get_key_context(fabric_index, group_id);
+            assert!(key.is_ok());
+            let mut key = key.unwrap();
+
+            key.get_key_hash()
+        };
+
+        // iter fabric 1
+        {
+            let s = p.iter_group_session(session_id_1);
+            assert!(s.is_some());
+            let mut s = s.unwrap();
+            unsafe {
+                // group 1 key 1
+                assert!(s.next().is_some_and(|gs| gs.group_id == 1 && gs.fabric_index == 1 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_1)));
+                // group 2 key 1
+                assert!(s.next().is_some_and(|gs| gs.group_id == 2 && gs.fabric_index == 1 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_1)));
+                // group 2 key 2
+                assert!(s.next().is_some_and(|gs| gs.group_id == 2 && gs.fabric_index == 1 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_1)));
+                assert!(s.next().is_none());
+            }
+        }
+
+        // iter fabric 2
+        {
+            let s = p.iter_group_session(session_id_2);
+            assert!(s.is_some());
+            let mut s = s.unwrap();
+            unsafe {
+                // group 1 key 1
+                assert!(s.next().is_some_and(|gs| gs.group_id == 1 && gs.fabric_index == 2 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_2)));
+                // group 2 key 1
+                assert!(s.next().is_some_and(|gs| gs.group_id == 2 && gs.fabric_index == 2 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_2)));
+                // group 2 key 2
+                assert!(s.next().is_some_and(|gs| gs.group_id == 2 && gs.fabric_index == 2 && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id_2)));
+                assert!(s.next().is_none());
             }
         }
     }
