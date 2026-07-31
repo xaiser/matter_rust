@@ -339,6 +339,7 @@ pub trait GroupDataProvider {
     fn remove_fabric(&mut self, fabric_index: FabricIndex) -> ChipErrorResult;
 
     fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator>;
+    fn release_iter_group_session(&self);
     //fn get_key_context<C: crate::chip::crypto::SymmetricKeyContext>(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<&C, ChipError>;
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError>;
     fn release_key_context(&self);

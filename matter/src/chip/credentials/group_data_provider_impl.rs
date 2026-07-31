@@ -1993,6 +1993,7 @@ pub mod iter_impl {
     //use core::sync::atomic::{AtomicU8, Ordering};
 
     pub const GROUP_INFO_MAX: u8 = 2;
+    pub const GROUP_SESSION_MAX: u8 = 2;
     pub const ENDPOINT_MAX: u8 = 2;
     pub const GROUP_KEY_MAX: u8 = 2;
     pub const KEYSET_MAX: u8 = 2;
@@ -2690,31 +2691,88 @@ pub mod iter_impl {
             };
 
             while self.m_fabric_count < self.m_fabric_total {
-            }
+                let mut fabric: FabricData = fabric_data::new_with(self.m_fabric);
+                FabricData::load_from(&mut fabric, storage_ptr).ok()?;
+
+                if self.m_map_count >= fabric.map_count {
+                    // No more keyset/group mappings on the current fabric, try next fabric
+                    self.m_fabric = fabric.next;
+                    self.m_fabric_count += 1;
+                    self.m_first_map = true;
+                    self.m_map_count = 0;
+                    continue;
+                }
+
+                if self.m_first_map {
+                    self.m_mapping = fabric.first_map;
+                    self.m_first_map = false;
+                }
+
+                let mut mapping: KeyMapData = key_map_data::new_with(self.m_fabric, self.m_mapping, KUNDEFINED_GROUP_ID, 0);
+                KeyMapData::load_from(&mut mapping, storage_ptr).ok()?;
+
+                // Group found, get the keyset
+                let mut keyset: KeySetData = key_set_data::new();
+                unsafe {
+                    verify_or_return_error!(key_set_data::find(&mut keyset, 
+                           NonNull::new_unchecked(storage_ptr), &fabric, mapping.group_key.keyset_id.into()), None);
+                }
+
+                if self.m_key_index >= keyset.keys_count.into() {
+                    // No more keys in current keyset, try next
+                    self.m_mapping = mapping.linked_data.next;
+                    self.m_map_count += 1;
+                    self.m_key_index = 0;
+                    continue;
+                }
+
+                let creds = &keyset.operational_keys[usize::from(self.m_key_index)];
+                self.m_key_index += 1;
+
+                if creds.m_hash == self.m_session_id {
+                    self.m_group_key_context.initialize(&creds.m_encryption_key, self.m_session_id, &creds.m_privacy_key);
+                    let mut output = Self::Item::new();
+                    output.fabric_index = fabric.fabric_index;
+                    output.group_id = mapping.group_key.group_id;
+                    output.security_policy = keyset.policy;
+                    output.key_context = Some(NonNull::from_ref(&self.m_group_key_context));
+
+                    return Some(output);
+                }
+            } // end of while loop
 
             None
         }
     }
+
+    impl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore> Release for GroupSessionIteratorImpl<Provider> {
+        fn release(&mut self) {
+            if let Some(ptr) = self.m_provider {
+                unsafe {
+                    ptr.as_ref().release_iter_group_session();
+                }
+            }
+        }
+    }
+
+    impl<Provider: GroupDataProviderIterImpl + UpdateSessionKeystore> Drop for  GroupSessionIteratorImpl<Provider> {
+        fn drop(&mut self) {
+            self.release()
+        }
+    }
 } // end of iter_impl
 
-//type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<PSD, GroupDataProviderImpl<PSD, SKS, LIS>>;
 type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-//type GroupInfoIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupInfoIterator<PSD, SKS, LIS>, 2>;
 
 type GroupKeyIterator<PSD, SKS, LIS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-//type GroupKeyIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupKeyIterator<PSD, SKS, LIS>, 2>;
 
-//type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<PSD, GroupDataProviderImpl<PSD, SKS, LIS>>;
 type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-//type EndpointIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<EndpointIterator<PSD, SKS, LIS>, 2>;
 
 type KeySetIterator<PSD, SKS, LIS> = iter_impl::KeySetIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-//type KeySetIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<KeySetIterator<PSD, SKS, LIS>, 2>;
 
 type KeyContext<PSD, SKS, LIS> = iter_impl::GroupKeyContext<GroupDataProviderImpl<PSD, SKS, LIS>>;
 
 type GroupSessionIterator<PSD, SKS, LIS> = iter_impl::GroupSessionIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
-//type GroupSessionIteratorPool<PSD, SKS, LIS> = BitMapObjectPool<GroupSessionIterator<PSD, SKS, LIS>, 2>;
 
 type FabricData = fabric_data::PersistentFabricData<NopPersistentStorage>;
 type GroupData = group_data::PersistentGroupData<NopPersistentStorage>;
@@ -2748,13 +2806,6 @@ where
     m_max_groups_per_fabric: u16,
     m_max_group_keys_per_fabric: u16,
     m_listener: Option<NonNull<LIS>>,
-    /*
-    m_group_info_iterators: GroupInfoIteratorPool<PSD, SKS, LIS>,
-    m_group_key_iterators: GroupKeyIteratorPool<PSD, SKS, LIS>,
-    m_endpoint_iterators: EndpointIteratorPool<PSD, SKS, LIS>,
-    m_key_set_iterators: KeySetIteratorPool<PSD, SKS, LIS>,
-    m_group_session_iterators: GroupSessionIteratorPool<PSD, SKS, LIS>,
-    */
     m_group_info_iterators: Cell<u8>,
     m_group_key_iterators: Cell<u8>,
     m_endpoint_iterators: Cell<u8>,
@@ -2813,13 +2864,6 @@ where
             m_max_groups_per_fabric: 0,
             m_max_group_keys_per_fabric: 0,
             m_listener: None,
-            /*
-            m_group_info_iterators: GroupInfoIteratorPool::<PSD, SKS, LIS>::new(),
-            m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
-            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
-            m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
-            m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
-            */
             m_group_info_iterators: Cell::new(0),
             m_group_key_iterators: Cell::new(0),
             m_endpoint_iterators: Cell::new(0),
@@ -2939,13 +2983,6 @@ where
             m_max_groups_per_fabric: max_group_per_fabric,
             m_max_group_keys_per_fabric: max_group_keys_per_fabric,
             m_listener: None,
-            /*
-            m_group_info_iterators: GroupInfoIteratorPool::<PSD, SKS, LIS>::new(),
-            m_group_key_iterators: GroupKeyIteratorPool::<PSD, SKS, LIS>::new(),
-            m_endpoint_iterators: EndpointIteratorPool::<PSD, SKS, LIS>::new(),
-            m_key_set_iterators: KeySetIteratorPool::<PSD, SKS, LIS>::new(),
-            m_group_session_iterators: GroupSessionIteratorPool::<PSD, SKS, LIS>::new(),
-            */
             m_group_info_iterators: Cell::new(0),
             m_group_key_iterators: Cell::new(0),
             m_endpoint_iterators: Cell::new(0),
@@ -2956,11 +2993,11 @@ where
     }
 
     fn get_max_groups_per_fabric(&self) -> u16 {
-        0
+        self.m_max_groups_per_fabric
     }
 
     fn get_max_group_keys_per_fabric(&self) -> u16 {
-        0
+        self.m_max_group_keys_per_fabric
     }
 
     fn init(&mut self) -> ChipErrorResult {
@@ -2972,9 +3009,7 @@ where
     }
 
     fn finish(&mut self) {
-        //self.m_group_info_iterators.release_all();
         self.m_group_info_iterators.set(0);
-
         self.m_group_key_iterators.set(0);
         self.m_endpoint_iterators.set(0);
         self.m_key_set_iterators.set(0);
@@ -3100,7 +3135,7 @@ where
             }
 
             // Update fabric
-            FabricData::save_to(&mut fabric, storage_ptr)?;
+            fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())?;
             self.group_added(fabric_index, &group.group_info);
         }
         chip_ok!()
@@ -3163,7 +3198,7 @@ where
         }
 
         // Update fabric
-        FabricData::save_to(&mut fabric, storage_ptr)?;
+        fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())?;
         self.group_removed(fabric_index, &group.group_info);
         chip_ok!()
     }
@@ -3221,7 +3256,7 @@ where
             // Update fabric
             fabric.first_group = group.group_info.group_id;
             fabric.group_count += 1;
-            FabricData::save_to(&mut fabric, storage_ptr)?;
+            fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())?;
             self.group_added(fabric_index, &group.group_info);
             return chip_ok!();
         }
@@ -3367,7 +3402,7 @@ where
         // Update fabric
         fabric.map_count += 1;
 
-        FabricData::save_to(&mut fabric, storage_ptr)
+        fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())
     }
 
     fn get_group_key_at(&self, fabric_index: FabricIndex, index: usize) -> Result<GroupKey, ChipError> {
@@ -3410,7 +3445,7 @@ where
         }
 
         // Update fabric
-        FabricData::save_to(&mut fabric, storage_ptr)
+        fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())
     }
 
     fn remove_group_keys(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
@@ -3435,7 +3470,7 @@ where
         fabric.first_map = 0;
         fabric.map_count = 0;
 
-        FabricData::save_to(&mut fabric, storage_ptr)
+        fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())
     }
 
     fn iter_group_keys(&self, fabric_index: FabricIndex) -> Option<Self::GroupKeyIterator> {
@@ -3501,7 +3536,7 @@ where
         fabric.keyset_count += 1;
         fabric.first_keyset = in_keyset.keyset_id;
 
-        FabricData::save_to(&mut fabric, storage_ptr)
+        fabric_data::save(&mut fabric, self.m_storage.clone().unwrap())
     }
 
     fn get_key_set(&self, fabric_index: FabricIndex, target_id: KeysetId) -> Result<KeySet, ChipError> {
@@ -3665,7 +3700,20 @@ where
     }
 
     fn iter_group_session(&self, session_id: u16) -> Option<Self::GroupSessionIterator> {
-        None
+        verify_or_return_error!(self.is_initialized(), None);
+        verify_or_return_error!(self.m_group_session_iterators.get() < iter_impl::GROUP_SESSION_MAX, None);
+
+        let c = self.m_group_session_iterators.get();
+        self.m_group_session_iterators.set(c + 1);
+
+        Some(GroupSessionIterator::new_with(Some(NonNull::from_ref(self)), session_id)?)
+    }
+
+    fn release_iter_group_session(&self) {
+        let c = self.m_group_session_iterators.get();
+        if c > 0 {
+            self.m_group_session_iterators.set(c - 1);
+        }
     }
 
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError> {
@@ -5264,11 +5312,6 @@ mod tests {
         p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
 
-        // create keyset
-        //let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 2);
-        //let compressed_fabric_id = u16::to_be_bytes(1u16);
-        //assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
-
         assert!(!p.get_ipk_key_set(fabric_index).is_ok());
     }
 
@@ -5291,5 +5334,50 @@ mod tests {
         assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
 
         assert!(!p.get_ipk_key_set(fabric_index).is_ok());
+    }
+
+    #[test]
+    fn iter_group_session_successfully() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let l = TestGroupListener::new();
+        let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
+        let fabric_index: FabricIndex = 1;
+        let group_id: GroupId = 1;
+        let keyset_id: KeysetId = 1;
+        let mut session_id: u16 = 0;
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        p.set_listener(Some(NonNull::from_ref(&l)));
+        assert!(p.init().is_ok());
+
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 1);
+        let compressed_fabric_id = u16::to_be_bytes(1u16);
+        assert!(p.set_key_set(fabric_index, &compressed_fabric_id[..], &keyset).is_ok());
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        assert!(p.set_group_key_at(fabric_index, 0, &group_key).is_ok());
+
+        // get session id
+        {
+            let key = p.get_key_context(fabric_index, group_id);
+            assert!(key.is_ok());
+            let mut key = key.unwrap();
+            session_id = key.get_key_hash();
+        }
+
+        {
+            let s = p.iter_group_session(session_id);
+            assert!(s.is_some());
+            let mut s = s.unwrap();
+            unsafe {
+                assert!(s.next().is_some_and(|gs| gs.group_id == group_id && gs.fabric_index == fabric_index && 
+                        gs.key_context.is_some_and(|mut k| k.as_mut().get_key_hash() == session_id)));
+            }
+        }
     }
 } // end of tests
