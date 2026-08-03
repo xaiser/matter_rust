@@ -10,3 +10,5 @@ pub mod group_data_provider;
 pub mod group_data_provider_impl;
 
 pub use operational_certificate_store::OperationalCertificateStore;
+pub use group_data_provider_impl::GroupDataProviderImpl;
+

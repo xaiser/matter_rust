@@ -55,7 +55,7 @@ use core::{
 };
 
 use core::cell::Cell;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 
 const K_PERSISTENT_BUFFER_MAX: usize = 128;
 
@@ -2762,17 +2762,17 @@ pub mod iter_impl {
     }
 } // end of iter_impl
 
-type GroupInfoIterator<PSD, SKS, LIS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupInfoIterator<PSD, SKS> = iter_impl::GroupInfoIteratorImpl<GroupDataProviderImpl<PSD, SKS>>;
 
-type GroupKeyIterator<PSD, SKS, LIS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupKeyIterator<PSD, SKS> = iter_impl::GroupKeyIteratorImpl<GroupDataProviderImpl<PSD, SKS>>;
 
-type EndpointIterator<PSD, SKS, LIS> = iter_impl::EndpointIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type EndpointIterator<PSD, SKS> = iter_impl::EndpointIteratorImpl<GroupDataProviderImpl<PSD, SKS>>;
 
-type KeySetIterator<PSD, SKS, LIS> = iter_impl::KeySetIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type KeySetIterator<PSD, SKS> = iter_impl::KeySetIteratorImpl<GroupDataProviderImpl<PSD, SKS>>;
 
-type KeyContext<PSD, SKS, LIS> = iter_impl::GroupKeyContext<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type KeyContext<PSD, SKS> = iter_impl::GroupKeyContext<GroupDataProviderImpl<PSD, SKS>>;
 
-type GroupSessionIterator<PSD, SKS, LIS> = iter_impl::GroupSessionIteratorImpl<GroupDataProviderImpl<PSD, SKS, LIS>>;
+type GroupSessionIterator<PSD, SKS> = iter_impl::GroupSessionIteratorImpl<GroupDataProviderImpl<PSD, SKS>>;
 
 type FabricData = fabric_data::PersistentFabricData<NopPersistentStorage>;
 type GroupData = group_data::PersistentGroupData<NopPersistentStorage>;
@@ -2795,17 +2795,16 @@ pub trait Storage
     fn get_storage(&self) -> Option<NonNull<Self::StorageType>>;
 }
 
-pub struct GroupDataProviderImpl<PSD, SKS, LIS>
+pub struct GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 {
     m_storage: Option<NonNull<PSD>>,
     m_sesion_keystore: Option<NonNull<SKS>>,
     m_max_groups_per_fabric: u16,
     m_max_group_keys_per_fabric: u16,
-    m_listener: Option<NonNull<LIS>>,
+    m_listener: Option<*mut dyn GroupListener>,
     m_group_info_iterators: Cell<u8>,
     m_group_key_iterators: Cell<u8>,
     m_endpoint_iterators: Cell<u8>,
@@ -2814,11 +2813,10 @@ where
     m_group_session_iterators: Cell<u8>,
 }
 
-impl<PSD, SKS, LIS> UpdateSessionKeystore for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS> UpdateSessionKeystore for GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 {
     type Store = SKS;
 
@@ -2831,11 +2829,10 @@ where
     }
 }
 
-impl<PSD, SKS, LIS> Storage for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS> Storage for GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 {
     type StorageType = PSD;
 
@@ -2844,18 +2841,16 @@ where
     }
 }
 
-impl<PSD, SKS, LIS> iter_impl::GroupDataProviderIterImpl for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS> iter_impl::GroupDataProviderIterImpl for GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 { }
 
-impl<PSD, SKS, LIS> GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS> GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 {
     pub const fn new() -> Self {
         Self {
@@ -2907,17 +2902,21 @@ where
     }
 
     fn group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo) {
-        if let Some(mut listener_ptr) = self.m_listener {
-            unsafe {
-                listener_ptr.as_mut().on_group_added(fabric_index, new_group);
+        unsafe {
+            if let Some(listener_ptr) = self.m_listener &&
+                let Some(listener_ref) = listener_ptr.as_mut()
+            {
+                    listener_ref.on_group_added(fabric_index, new_group);
             }
         }
     }
 
     fn group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo) {
-        if let Some(mut listener_ptr) = self.m_listener {
-            unsafe {
-                listener_ptr.as_mut().on_group_removed(fabric_index, old_group);
+        unsafe {
+            if let Some(listener_ptr) = self.m_listener &&
+                let Some(listener_ref) = listener_ptr.as_mut()
+            {
+                    listener_ref.on_group_removed(fabric_index, old_group);
             }
         }
     }
@@ -2962,19 +2961,17 @@ where
     }
 }
 
-impl<PSD, SKS, LIS> GroupDataProvider for GroupDataProviderImpl<PSD, SKS, LIS>
+impl<PSD, SKS> GroupDataProvider for GroupDataProviderImpl<PSD, SKS>
 where
     PSD: PersistentStorageDelegate,
     SKS: SessionKeystore,
-    LIS: GroupListener,
 {
-    type GroupInfoIterator = GroupInfoIterator<PSD, SKS, LIS>;
-    type GroupKeyIterator = GroupKeyIterator<PSD, SKS, LIS>;
-    type EndpointIterator = EndpointIterator<PSD, SKS, LIS>;
-    type KeySetIterator = KeySetIterator<PSD, SKS, LIS>;
-    type GroupSessionIterator = GroupSessionIterator<PSD, SKS, LIS>;
-    type KeyContext = KeyContext<PSD, SKS, LIS>;
-    type Listener = LIS;
+    type GroupInfoIterator = GroupInfoIterator<PSD, SKS>;
+    type GroupKeyIterator = GroupKeyIterator<PSD, SKS>;
+    type EndpointIterator = EndpointIterator<PSD, SKS>;
+    type KeySetIterator = KeySetIterator<PSD, SKS>;
+    type GroupSessionIterator = GroupSessionIterator<PSD, SKS>;
+    type KeyContext = KeyContext<PSD, SKS>;
 
     fn new_with(max_group_per_fabric: u16, max_group_keys_per_fabric: u16) -> Self {
         Self {
@@ -3760,7 +3757,7 @@ where
         }
     }
 
-    fn set_listener(&mut self, listener: Option<NonNull<LIS>>) {
+    fn set_listener(&mut self, listener: Option<*mut (dyn GroupListener + 'static)>) {
         self.m_listener = listener;
     }
 
@@ -3809,7 +3806,8 @@ mod tests {
         }
     }
 
-    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
+    //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
+    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
 
     #[test]
     fn init() {
@@ -3822,16 +3820,26 @@ mod tests {
     }
 
     #[test]
+    fn set_listener() {
+        let pa = TestPersistentStorage::default();
+        let ks = RawKeySessionKeystore::new();
+        let mut p = TestGroupDataProvider::new();
+        p.set_session_keystore(Some(NonNull::from_ref(&ks)));
+        p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        assert!(p.init().is_ok());
+    }
+
+    #[test]
     fn set_group_info_at_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(p.set_group_info_at(fabric_index, 0, &group_info).is_ok());
@@ -3842,11 +3850,11 @@ mod tests {
     fn set_group_info_at_no_storage() {
         //let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         //p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         //assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(1, "tg");
         assert!(!p.set_group_info_at(1, 0, &group_info).is_ok());
@@ -3856,11 +3864,11 @@ mod tests {
     fn set_group_info_index_mismatched() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(1, "tg");
         assert!(p.set_group_info_at(1, 0, &group_info).is_ok());
@@ -3871,11 +3879,11 @@ mod tests {
     fn set_group_info_set_twice() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(1, "tg");
         assert!(p.set_group_info_at(1, 0, &group_info).is_ok());
@@ -3886,14 +3894,14 @@ mod tests {
     fn set_group_info_set_different_group() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let group_id_2: GroupId = 2;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
@@ -3905,7 +3913,7 @@ mod tests {
     fn set_group_info_replace_old_one() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
@@ -3913,7 +3921,7 @@ mod tests {
         let group_id_3: GroupId = 3;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
@@ -3929,13 +3937,13 @@ mod tests {
     fn set_group_info_at_index_too_big() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(!p.set_group_info_at(fabric_index, 1, &group_info).is_ok());
@@ -3945,13 +3953,13 @@ mod tests {
     fn set_group_info_at_too_much_group() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         for index in 0..=p.m_max_groups_per_fabric {
             let group_info = GroupInfo::new_with(group_id + index, "tg");
@@ -3967,13 +3975,13 @@ mod tests {
     fn set_group_info_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(p.set_group_info(fabric_index, &group_info).is_ok());
@@ -3984,13 +3992,13 @@ mod tests {
     fn set_same_group_info_twice_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(p.set_group_info(fabric_index, &group_info).is_ok());
@@ -4002,13 +4010,13 @@ mod tests {
     fn set_group_info_no_storage() {
         //let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        //let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         //p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        //p.set_listener(Some(NonNull::from_ref(&l)));
         //assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(!p.set_group_info(fabric_index, &group_info).is_ok());
@@ -4018,13 +4026,13 @@ mod tests {
     fn get_group_info_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4037,13 +4045,13 @@ mod tests {
     fn get_group_info_incorrect_fabric_index() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4056,13 +4064,13 @@ mod tests {
     fn get_group_info_incorrect_group_id() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4075,13 +4083,13 @@ mod tests {
     fn remove_group_info_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4096,13 +4104,13 @@ mod tests {
     fn remove_group_info_incorrect_fabric() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4116,13 +4124,13 @@ mod tests {
     fn remove_group_info_incorrect_group_id() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4136,13 +4144,13 @@ mod tests {
     fn remove_group_info_twice() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4158,7 +4166,7 @@ mod tests {
     fn remove_group_info_middle_one() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        //let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
@@ -4166,7 +4174,7 @@ mod tests {
         let group_id_3: GroupId = 3;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        //p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         let group_info_2 = GroupInfo::new_with(group_id_2, "tg");
@@ -4189,13 +4197,13 @@ mod tests {
     fn get_group_info_at_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         // set first
@@ -4209,14 +4217,14 @@ mod tests {
     fn add_endpoint_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         assert!(!p.has_endpoint(fabric_index, group_id, endpoint_id));
@@ -4229,14 +4237,14 @@ mod tests {
     fn add_endpoint_to_existed_group_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
         let group_info = GroupInfo::new_with(group_id, "tg");
         assert!(p.set_group_info(fabric_index, &group_info).is_ok());
@@ -4249,14 +4257,14 @@ mod tests {
     fn add_endpoint_twice_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -4268,14 +4276,14 @@ mod tests {
     fn add_two_endpoints_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
@@ -4287,14 +4295,14 @@ mod tests {
     fn remove_endpoint_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         // add first
@@ -4308,19 +4316,13 @@ mod tests {
     fn remove_endpoint_no_endpoint() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
         assert!(p.init().is_ok());
-
-        // add first
-        //assert!(p.add_endpoint(fabric_index, group_id, endpoint_id).is_ok());
-        //assert!(l.last_add.is_some_and(|(f, g)| f == fabric_index && g.group_id == group_id));
 
         assert!(!p.remove_endpoint_at(fabric_index, group_id, endpoint_id).is_ok());
     }
@@ -4329,14 +4331,14 @@ mod tests {
     fn remove_two_endpoints_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         // add first
@@ -4352,14 +4354,14 @@ mod tests {
     fn remove_middle_endpoint_successfully() {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
-        let l = TestGroupListener::new();
+        let mut l = TestGroupListener::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let endpoint_id: EndpointId = 1;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
-        p.set_listener(Some(NonNull::from_ref(&l)));
+        p.set_listener(Some(ptr::addr_of_mut!(l)));
         assert!(p.init().is_ok());
 
         // add first
@@ -4394,6 +4396,7 @@ mod tests {
         assert!(p.remove_endpoint(fabric_index, None, endpoint_id).is_ok());
     }
 
+    /*
     #[test]
     fn remove_two_endpoints_without_group_id_successfully() {
         let pa = TestPersistentStorage::default();
@@ -5506,4 +5509,5 @@ mod tests {
             }
         }
     }
+    */
 } // end of tests

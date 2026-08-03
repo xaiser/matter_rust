@@ -265,7 +265,6 @@ pub trait GroupDataProvider {
     type KeySetIterator;
     type GroupSessionIterator;
     type KeyContext: crate::chip::crypto::SymmetricKeyContext;
-    type Listener: GroupListener;
 
     fn new() -> Self where Self: Sized{
         <Self as GroupDataProvider>::new_with(CHIP_CONFIG_MAX_GROUPS_PER_FABRIC as u16, CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC as u16)
@@ -344,6 +343,6 @@ pub trait GroupDataProvider {
     fn get_key_context(&mut self, fabric_index: FabricIndex, group_id: GroupId) -> Result<Self::KeyContext, ChipError>;
     fn release_key_context(&self);
 
-    fn set_listener(&mut self, listener: Option<NonNull<Self::Listener>>);
+    fn set_listener(&mut self, listener: Option<*mut (dyn GroupListener + 'static)>);
     fn remove_listener(&mut self);
 }

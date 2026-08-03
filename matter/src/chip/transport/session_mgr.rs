@@ -11,7 +11,13 @@ use crate::{
             },
         },
         credentials::{
+                GroupDataProviderImpl,
             self, fabric_table::{self , FabricTable},
+            group_data_provider::{
+                GroupInfo,
+                GroupDataProvider,
+                GroupListener,
+            },
         },
         crypto::{
             self, session_keystore::SessionKeystore, P256PublicKey, crypto_pal::ECPKey,
@@ -169,6 +175,7 @@ where
     m_global_unencrypted_message_counter: MessageCounter,
     // TODO: use linkedlist
     m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>,
+    //m_group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS, Self>>>,
 }
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
@@ -185,6 +192,25 @@ where
         self.shutdown();
     }
 }
+
+/*
+impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> GroupListener for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
+where
+    PSD: PersistentStorageDelegate + 'd,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
+{
+    fn on_group_added(&mut self, _fabric_index: FabricIndex, _new_group: &GroupInfo) {
+    }
+
+    fn on_group_removed(&mut self, _fabric_index: FabricIndex, _old_group: &GroupInfo) {
+    }
+}
+*/
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
@@ -210,13 +236,16 @@ where
             m_message_counter_manager: None,
             m_global_unencrypted_message_counter: MessageCounter::new_global_unencrypted(),
             m_next_table_delegate: None,
+            //m_group_data_provider: None,
         }
     }
 
     pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<TMB>>, 
         message_counter_manager: Option<NonNull<MCMI>>,
         storage_delegate: Option<NonNull<PSD>>, mut fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>, 
-        session_keystore: Option<NonNull<SKS>>) -> ChipErrorResult
+        session_keystore: Option<NonNull<SKS>>,
+        ) -> ChipErrorResult
+        //group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS, Self>>>) -> ChipErrorResult
     {
         verify_or_return_error!(self.m_state == State::KnotReady, Err(chip_error_incorrect_state!()));
 
@@ -234,6 +263,7 @@ where
         self.m_message_counter_manager = message_counter_manager;
         self.m_fabric_table = fabric_table;
         self.m_session_key_storage = session_keystore;
+        //self.m_group_data_provider = group_data_provider;
 
         self.m_secure_sessions.init();
 
@@ -646,7 +676,14 @@ mod tests {
                     test_persistent_storage::TestPersistentStorage,
                 },
             },
-            credentials::persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+            credentials::{
+                GroupDataProviderImpl,
+                persistent_storage_op_cert_store::PersistentStorageOpCertStore,
+                group_data_provider::{
+                    GroupListener,
+                    GroupInfo,
+                },
+            },
             crypto::{
                 raw_session_keystore::RawKeySessionKeystore,
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
@@ -740,7 +777,34 @@ mod tests {
 
     type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
+    struct TestGroupListener {
+        pub last_add: Option<(FabricIndex, GroupInfo)>,
+        pub last_remove: Option<(FabricIndex, GroupInfo)>,
+    }
+
+    impl TestGroupListener {
+        const fn new() -> Self {
+            Self {
+                last_add: None,
+                last_remove: None,
+            }
+        }
+    }
+
+    impl GroupListener for TestGroupListener {
+        fn on_group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo) {
+            self.last_add = Some((fabric_index, new_group.clone()));
+        }
+        fn on_group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo) {
+            self.last_remove = Some((fabric_index, old_group.clone()));
+        }
+    }
+
+    //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
+    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
+
     fn setup<'a>() -> Result<(*mut crate::chip::system::LayerImpl, TestEndPointManager, TestTransportMgr<'a>, TestMessageCounterMgr,
+        //TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestSessionManager<'a>, TestGroupDataProvider), ChipError>
         TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestSessionManager<'a>), ChipError>
     {
         let system = system_layer();
@@ -758,11 +822,26 @@ mod tests {
         let mut table = TestFabricTable::default();
         let mut session_key_store = RawKeySessionKeystore::new();
 
+        /*
+        let mut group_data = TestGroupDataProvider::new();
+        group_data.set_session_keystore(Some(NonNull::from_ref(&session_key_store)));
+        group_data.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        group_data.init();
+        */
+
         let mut sm = TestSessionManager::new();
 
+        /*
         sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
            NonNull::new(ptr::addr_of_mut!(pa)), NonNull::new(ptr::addr_of_mut!(table)), 
-           NonNull::new(ptr::addr_of_mut!(session_key_store)))?;
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           NonNull::new(ptr::addr_of_mut!(group_data)))?;
+        */
+        sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           NonNull::new(ptr::addr_of_mut!(pa)), NonNull::new(ptr::addr_of_mut!(table)), 
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           //None
+        )?;
 
         return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, sm));
     }
@@ -789,11 +868,27 @@ mod tests {
         //let mut table = TestFabricTable::default();
         let mut session_key_store = RawKeySessionKeystore::new();
 
+        /*
+        let mut group_data = TestGroupDataProvider::new();
+        group_data.set_session_keystore(Some(NonNull::from_ref(&session_key_store)));
+        group_data.set_storage_delegate(Some(NonNull::from_ref(&pa)));
+        group_data.init();
+        */
+
         let mut sm = TestSessionManager::new();
 
+        /*
         assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
            NonNull::new(ptr::addr_of_mut!(pa)), None,
-           NonNull::new(ptr::addr_of_mut!(session_key_store))).is_ok());
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           NonNull::new(ptr::addr_of_mut!(group_data))
+           ).is_ok());
+        */
+        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           NonNull::new(ptr::addr_of_mut!(pa)), None,
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           //None
+           ).is_ok());
     }
 
     #[test]
@@ -813,10 +908,24 @@ mod tests {
         let mut table = TestFabricTable::default();
         let mut session_key_store = RawKeySessionKeystore::new();
 
+        /*
+        let mut group_data = TestGroupDataProvider::new();
+        group_data.set_session_keystore(Some(NonNull::from_ref(&session_key_store)));
+        */
+
         let mut sm = TestSessionManager::new();
 
+        /*
         assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
            None, NonNull::new(ptr::addr_of_mut!(table)), 
-           NonNull::new(ptr::addr_of_mut!(session_key_store))).is_ok());
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           NonNull::new(ptr::addr_of_mut!(group_data))
+           ).is_ok());
+        */
+        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
+           None, NonNull::new(ptr::addr_of_mut!(table)), 
+           NonNull::new(ptr::addr_of_mut!(session_key_store)),
+           //None
+           ).is_ok());
     }
 } // end of mod tests
