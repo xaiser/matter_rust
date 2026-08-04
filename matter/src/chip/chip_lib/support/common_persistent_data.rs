@@ -2,24 +2,22 @@ use crate::{
     chip::{
         chip_lib::{
             core::{
-                chip_persistent_storage_delegate::PersistentStorageDelegate,
-                tlv_writer::{TlvContiguousBufferWriter, TlvWriter},
-                tlv_reader::{TlvContiguousBufferReader, TlvReader},
+                //chip_persistent_storage_delegate::PersistentStorageDelegate,
+                tlv_writer::{TlvWriter},
+                tlv_reader::{TlvReader},
             },
-            support::persistent_data::DataAccessor,
+            //support::persistent_data::DataAccessor,
         },
     },
-    ChipError,
+    //ChipError,
     ChipErrorResult,
-    chip_ok,
+    //chip_ok,
     chip_sdk_error,
     chip_core_error,
     chip_error_internal,
     verify_or_return_value,
     verify_or_return_error,
 };
-
-use core::ptr::NonNull;
 
 pub mod stored_data_list {
     use super::*;

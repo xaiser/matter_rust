@@ -35,7 +35,7 @@ use crate::{
     verify_or_return_error,
     verify_or_return_value,
     verify_or_die,
-    chip_error_not_implemented,
+    //chip_error_not_implemented,
     chip_error_incorrect_state,
     chip_error_internal,
     chip_error_invalid_fabric_index,
@@ -55,7 +55,7 @@ use core::{
 };
 
 use core::cell::Cell;
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 
 const K_PERSISTENT_BUFFER_MAX: usize = 128;
 
@@ -3782,6 +3782,8 @@ mod tests {
             credentials::group_data_provider::{SecurityPolicy, key_set},
         },
     };
+
+    use core::ptr;
 
     struct TestGroupListener {
         pub last_add: Option<(FabricIndex, GroupInfo)>,

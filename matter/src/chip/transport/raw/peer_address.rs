@@ -1,4 +1,6 @@
-use crate::chip::NodeId;
+use crate::chip::{
+    NodeId, FabricId, GroupId,
+};
 
 use crate::chip::inet::inet_interface::InterfaceId;
 use crate::chip::inet::ip_address::IPAddress;
@@ -145,6 +147,25 @@ impl PeerAddress {
 
     pub fn udp_addr_port_interface(addr: IPAddress, port: u16, interface: InterfaceId) -> Self {
         Self::udp(addr).set_port(port).set_interface(interface)
+    }
+
+    pub fn multicast(fabric: FabricId, group: GroupId) -> Self {
+        // Site-Local
+        const SCOPE: u8 = 0x05u8;
+        // 64-bit long network prefix field
+        const PREFIX_LENGTH: u8 = 0x40;
+
+        // The network prefix portion of the Multicast Address is the 64-bit bitstring formed by concatenating:
+        // * 0xFD to designate a locally assigned ULA prefix
+        // * The upper 56-bits of the Fabric ID for the network in big-endian order
+        let prefix: u64 = 0xFD00000000000000u64 | (((fabric >> 8) as u64)& 0x00FFFFFFFFFFFFFFu64);
+        // The 32-bit group identifier portion of the Multicast Address is the 32-bits formed by:
+        // * The lower 8-bits of the Fabric ID
+        // * 0x00
+        // * The 16-bits Group Identifier in big-endian order
+        let group_id: u32 = (((fabric << 24) as u32) & 0xFF000000u32) | (group as u32);
+
+        Self::udp(IPAddress::make_ipv6_prefix_multicast(SCOPE, PREFIX_LENGTH, prefix, group_id))
     }
 }
 
