@@ -40,6 +40,23 @@ impl<Pointer> Default for DefaultPointerOps<Pointer> {
     }
 }
 
+impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<&'a T> {
+    type Value = T;
+    type Pointer = &'a T;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> &'a T {
+        unsafe {
+            &*raw
+        }
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: &'a T) -> *const T {
+        ptr
+    }
+}
+
 impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
     type Value = T;
     type Pointer = UnsafeRef<T>;

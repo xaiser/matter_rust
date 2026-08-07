@@ -5264,7 +5264,7 @@ mod tests {
         let fabric_index: FabricIndex = 1;
         let group_id: GroupId = 1;
         let keyset_id: KeysetId = 1;
-        let mut session_id: u16 = 0;
+        let session_id: u16;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         assert!(p.init().is_ok());
@@ -5304,7 +5304,6 @@ mod tests {
         let pa = TestPersistentStorage::default();
         let ks = RawKeySessionKeystore::new();
         let mut p = <TestGroupDataProvider as GroupDataProvider>::new();
-        let mut session_id: u16 = 0;
         p.set_session_keystore(Some(NonNull::from_ref(&ks)));
         p.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         assert!(p.init().is_ok());

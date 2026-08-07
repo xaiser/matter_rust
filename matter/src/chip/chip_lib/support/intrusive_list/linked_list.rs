@@ -1545,13 +1545,25 @@ mod tests {
 
     #[test]
     fn linked_list_push_front_one_node_and_pop_unsafe_ref() {
-        //type UnsafeRefTestLinkedList = LinkedList<DefaultAdapter<TestNode, TestPool>>;
         type UnsafeRefTestLinkedList = LinkedList<adapter::linked_list::unsafe_ref::DefaultAdapter<TestNode>>;
         let mut pool = create_object_pool!(TestNode, POOL_SIZE);
         let mut linked_list = UnsafeRefTestLinkedList::new(adapter::linked_list::unsafe_ref::DefaultAdapter::new());
         unsafe {
             let node = UnsafeRef::from_raw(pool.allocate(TestNode::new_with(1)));
             assert!(linked_list.push_front(node).is_ok());
+            assert!(linked_list.front().get().is_some_and(|v| v.value == 1));
+            assert!(linked_list.pop_front().is_some_and(|v| v.value == 1));
+            assert!(linked_list.pop_front().is_none());
+        }
+    }
+
+    #[test]
+    fn linked_list_push_front_one_node_and_pop_static_ref() {
+        type RefTestLinkedList<'a> = LinkedList<adapter::linked_list::a_ref::DefaultAdapter<'a, TestNode>>;
+        let node = TestNode::new_with(1);
+        {
+            let mut linked_list = RefTestLinkedList::new(adapter::linked_list::a_ref::DefaultAdapter::new());
+            assert!(linked_list.push_front(&node).is_ok());
             assert!(linked_list.front().get().is_some_and(|v| v.value == 1));
             assert!(linked_list.pop_front().is_some_and(|v| v.value == 1));
             assert!(linked_list.pop_front().is_none());

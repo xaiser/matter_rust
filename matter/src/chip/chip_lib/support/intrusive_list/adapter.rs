@@ -186,4 +186,70 @@ pub mod linked_list {
             }
         }
     }
+
+    pub mod a_ref {
+        use super::super::super::{
+            linked_list::Link,
+            link_ops::{LinkOps, DefaultLinkOps},
+            pointer_ops::{PointerOps, DefaultPointerOps},
+        };
+
+        #[derive(Copy, Clone)]
+        pub struct DefaultAdapter<'a, T>
+        {
+            link_ops: <Link as DefaultLinkOps>::Ops,
+            pointer_ops: DefaultPointerOps<&'a T>,
+        }
+
+        #[allow(dead_code)]
+        impl<'a, T> DefaultAdapter<'a, T> {
+            pub const NEW: Self = DefaultAdapter {
+                link_ops: <Link as DefaultLinkOps>::NEW,
+                pointer_ops: DefaultPointerOps::<&'a T>::new(),
+            };
+
+            #[inline]
+            pub const fn new() -> Self {
+                Self::NEW
+            }
+        }
+
+        #[allow(dead_code)]
+        unsafe impl<'a, T> super::super::Adapter for DefaultAdapter<'a, T> {
+            type LinkOps = <Link as DefaultLinkOps>::Ops;
+            type PointerOps = DefaultPointerOps<&'a T>;
+
+            #[inline]
+            unsafe fn get_value(&self, link: <Self::LinkOps as LinkOps>::LinkPtr) -> * const <Self::PointerOps as PointerOps>::Value {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+                link.as_ptr() as * const T
+            }
+
+            #[inline]
+            unsafe fn get_link(&self, value: * const <Self::PointerOps as PointerOps>::Value) -> <Self::LinkOps as LinkOps>::LinkPtr {
+                // the assumption is the link is always the first element in the value. So just
+                // convert the pointer directly
+
+                unsafe {
+                    core::ptr::NonNull::new_unchecked(value as * mut _)
+                }
+            }
+
+            #[inline]
+            fn link_ops(&self) -> &Self::LinkOps {
+                &self.link_ops
+            }
+
+            #[inline]
+            fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                &mut self.link_ops
+            }
+
+            #[inline]
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.pointer_ops
+            }
+        }
+    } // end of ref
 }

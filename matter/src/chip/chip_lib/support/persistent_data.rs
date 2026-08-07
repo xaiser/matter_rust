@@ -11,7 +11,6 @@ use crate::{
     },
     ChipError,
     ChipErrorResult,
-    chip_ok,
     chip_sdk_error,
     chip_core_error,
     chip_error_invalid_argument,
@@ -75,7 +74,7 @@ impl<const KMAX_SERIALIZED_SIZE: usize> PersistentStore<KMAX_SERIALIZED_SIZE> {
         // Set data to defaults
         persistent.clear();
 
-        let mut read_len: usize = 0;
+        let read_len: usize;
 
         // Load the serialized data
         unsafe {
@@ -202,6 +201,7 @@ mod tests {
                 },
             },
         },
+        chip_ok,
     };
 
     use core::ptr;
@@ -411,7 +411,7 @@ mod tests {
 
         #[test]
         fn save_successfully() {
-            let mut storage = TestPersistentStorage::default();
+            let storage = TestPersistentStorage::default();
             let mut data = TestPersistentData::new(
                 TestData::new_with("123", 1, 2),
                 Some(NonNull::from_ref(&storage)),
@@ -434,7 +434,7 @@ mod tests {
         #[test]
         fn load_successfully() {
             // save first
-            let mut storage = TestPersistentStorage::default();
+            let storage = TestPersistentStorage::default();
             let mut data = TestPersistentData::new(
                 TestData::new_with("123", 1, 2),
                 Some(NonNull::from_ref(&storage)),

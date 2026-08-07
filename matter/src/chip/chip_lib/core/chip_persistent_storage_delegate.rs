@@ -57,11 +57,11 @@ impl PersistentStorageDelegate for NopPersistentStorage {
         chip_ok!()
     }
 
-    fn sync_set_key_value(&mut self, key: &str, buffer: &[u8]) -> ChipErrorResult {
+    fn sync_set_key_value(&mut self, _key: &str, _buffer: &[u8]) -> ChipErrorResult {
         chip_ok!()
     }
 
-    fn sync_delete_key_value(&mut self, key: &str) -> ChipErrorResult {
+    fn sync_delete_key_value(&mut self, _key: &str) -> ChipErrorResult {
         chip_ok!()
     }
 }
