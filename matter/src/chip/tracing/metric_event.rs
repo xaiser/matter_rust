@@ -12,6 +12,7 @@ pub mod internal {
     // This specifies the different categories of metric events that can created. In addition to
     // emitting an event, events paired with a kBeginEvent and kEndEvent can be used to track
     // duration for the event. A kInstantEvent represents a one shot event.
+    #[derive(Debug, Clone, Copy)]
     pub enum Type {
         // This specifies an event marked to track the Begin of an operation
         KbeginEvent,
@@ -24,6 +25,7 @@ pub mod internal {
     }
 
     // This defines the different types of values that can stored when a metric is emitted
+    #[derive(Debug, Clone, Copy)]
     pub enum Value {
         Undefined,
         Signed(i32),
@@ -49,6 +51,30 @@ pub mod internal {
         }
     }
 
+    impl From<i8> for Value {
+        fn from(value: i8) -> Self {
+            Value::Signed(i32::from(value))
+        }
+    }
+
+    impl From<u8> for Value {
+        fn from(value: u8) -> Self {
+            Value::Unsigned(u32::from(value))
+        }
+    }
+
+    impl From<i16> for Value {
+        fn from(value: i16) -> Self {
+            Value::Signed(i32::from(value))
+        }
+    }
+
+    impl From<u16> for Value {
+        fn from(value: u16) -> Self {
+            Value::Unsigned(u32::from(value))
+        }
+    }
+
     impl From<ChipError> for Value {
         fn from(value: ChipError) -> Self {
             Value::ChipError(value)
@@ -65,6 +91,7 @@ use internal::{Type, Value};
  * Additionally a metric is tagged as either an instant event or marked with a begin/end
  * for the event. When the latter is used, a duration can be associated between the two events.
  */
+#[derive(Debug, Clone, Copy)]
 pub struct MetricEvent {
     m_type: Type,
     m_key: MetricKey,
@@ -80,13 +107,26 @@ impl MetricEvent {
         }
     }
 
-    /*
-    pub fn new_with<T>(the_type: Type, key: MetricKey, value: T) -> Self {
+    pub fn new_with<T>(the_type: Type, key: MetricKey, value: T) -> Self 
+        where
+            T: Into<Value>,
+    {
         Self {
             m_type: the_type,
             m_key: key,
-            m_value: Value::from(value),
+            m_value: value.into(),
         }
     }
-    */
+
+    pub fn the_type(&self) -> Type {
+        self.m_type
+    }
+
+    pub fn key(&self) -> MetricKey {
+        self.m_key
+    }
+
+    pub fn value(&self) -> Value {
+        self.m_value
+    }
 }

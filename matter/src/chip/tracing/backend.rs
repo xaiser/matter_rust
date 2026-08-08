@@ -7,11 +7,15 @@ use crate::{
             address_resolve::{
                 tracing_structs::{NodeLookupInfo, NodeDiscoveredInfo, NodeDiscoveryFailedInfo},
             },
-        }
+        },
+        tracing::{
+            event::Event,
+            metric_event::MetricEvent,
+        },
     },
 };
 
-pub trait Backend {
+pub trait BackendOps {
     // Guaranteed to be called before registering
     fn open(&self) {}
     // Guaranteed to be called after un-registering.
@@ -59,4 +63,12 @@ pub trait Backend {
     fn log_node_discovery_failed(&self, _info: &NodeDiscoveryFailedInfo) {
         self.trace_instant("Discovery Failed", "DNSSD");
     }
+
+    fn log_metric_event(&self, _event: &MetricEvent) {
+        self.trace_instant("Metric Event", "Metric");
+    }
+}
+
+pub struct BackendSubscriber {
+    channel: fn(event: Event),
 }
