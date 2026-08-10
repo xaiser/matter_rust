@@ -17,6 +17,9 @@ pub mod intrusive_list;
 pub mod bitset;
 pub mod persistent_data;
 pub mod common_persistent_data;
+pub mod thread_mode_cell;
+
+pub type SyncCell<T> = thread_mode_cell::ThreadModeCell<T>;
 
 #[cfg(test)]
 pub mod test_persistent_storage;

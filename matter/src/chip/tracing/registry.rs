@@ -6,21 +6,45 @@ use crate::{
                     linked_list::{self, Link},
                     adapter,
                 },
+                SyncCell,
             },
         },
         tracing::{
             backend::{BackendSubscriber, BackendOps},
         },
+        platform::assert_chip_stack_locked_by_current_thread,
     },
 };
 
-type Adapter = adapter::linked_list::a_ref::DefaultAdapter<'static, BackendSubscriber>;
-type BackendList = linked_list::LinkedList<Adapter>;
+use static_cell::StaticCell;
 
-static g_tracning_backends: BackendList = BackendList::new(Adapter::new());
+pub type Adapter = adapter::linked_list::a_ref::DefaultAdapter<'static, BackendSubscriber>;
+pub type BackendList = linked_list::LinkedList<Adapter>;
 
-/*
-pub fn register<P: BackendOps>(backedn: &Backend<P>);
+static TRACNING_BACKENDS: SyncCell<Option<&'static BackendList>> = SyncCell::new(None);
 
-pub fn unregister<P: BackendOps>(backedn: &Backend<P>);
-*/
+fn is_in_list(backend: &BackendSubscriber, list: &'static BackendList) -> bool {
+    false
+}
+
+pub fn init_tracing_service(list: &'static BackendList) {
+    TRACNING_BACKENDS.set(Some(list))
+}
+
+pub fn register(backend: &BackendSubscriber) {
+    assert_chip_stack_locked_by_current_thread();
+    if let Some(list) = TRACNING_BACKENDS.get() {
+        if !is_in_list(backend, list) {
+            list.push_back(backend);
+        }
+    }
+}
+
+pub fn unregister(backend: &BackendSubscriber) {
+    assert_chip_stack_locked_by_current_thread();
+    if let Some(list) = TRACNING_BACKENDS.get() {
+        if is_in_list(backend, list) {
+            list.remove(backend);
+        }
+    }
+}

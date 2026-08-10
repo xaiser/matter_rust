@@ -70,5 +70,9 @@ pub trait BackendOps {
 }
 
 pub struct BackendSubscriber {
+    name: &'static str,
     channel: fn(event: Event),
+}
+
+impl BackendSubscriber {
 }
