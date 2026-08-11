@@ -7,6 +7,11 @@ use crate::{
             address_resolve::{
                 tracing_structs::{NodeLookupInfo, NodeDiscoveredInfo, NodeDiscoveryFailedInfo},
             },
+            support::{
+                intrusive_list::{
+                    linked_list::Link,
+                },
+            },
         },
         tracing::{
             event::Event,
@@ -70,9 +75,18 @@ pub trait BackendOps {
 }
 
 pub struct BackendSubscriber {
+    #[allow(dead_code)]
+    link: Link,
     name: &'static str,
     channel: fn(event: Event),
 }
 
 impl BackendSubscriber {
+    pub const fn new(name: &'static str, channel: fn(event: Event)) -> Self {
+        Self {
+            link: Link::new(),
+            name,
+            channel,
+        }
+    }
 }
