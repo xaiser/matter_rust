@@ -78,15 +78,25 @@ pub struct BackendSubscriber {
     #[allow(dead_code)]
     link: Link,
     name: &'static str,
-    channel: fn(event: Event),
+    channel: fn(event: Event<'static>),
 }
 
 impl BackendSubscriber {
-    pub const fn new(name: &'static str, channel: fn(event: Event)) -> Self {
+    pub const fn new(name: &'static str, channel: fn(event: Event<'static>)) -> Self {
         Self {
             link: Link::new(),
             name,
             channel,
         }
     }
+
+    pub fn send(&self, event: Event<'static>) {
+        (self.channel)(event);
+    }
+
+    /*
+    pub const fn name(&self) -> &str {
+        self.name
+    }
+    */
 }
