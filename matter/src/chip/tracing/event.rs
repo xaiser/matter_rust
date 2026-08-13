@@ -44,4 +44,27 @@ impl<'a> Event<'a> {
             _ => None,
         }
     }
+
+    pub fn get_end(&self) -> Option<LableGroup<'a>> {
+        match self {
+            Event::<'a>::End(lg) => Some(lg.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_instant(&self) -> Option<LableGroup<'a>> {
+        match self {
+            Event::<'a>::Instant(lg) => Some(lg.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_count(&self) -> Option<&'a str> {
+        match self {
+            Event::<'a>::Count(s) => Some(s),
+            _ => None,
+        }
+    }
 }
+
+pub type TracingEvent = Event<'static>;

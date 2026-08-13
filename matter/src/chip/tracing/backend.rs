@@ -14,7 +14,7 @@ use crate::{
             },
         },
         tracing::{
-            event::Event,
+            event::TracingEvent,
             metric_event::MetricEvent,
         },
     },
@@ -74,15 +74,17 @@ pub trait BackendOps {
     }
 }
 
+// In order to keep the order, must add repr(c)
+#[repr(C)]
 pub struct BackendSubscriber {
     #[allow(dead_code)]
     link: Link,
     name: &'static str,
-    channel: fn(event: Event<'static>),
+    channel: fn(event: TracingEvent),
 }
 
 impl BackendSubscriber {
-    pub const fn new(name: &'static str, channel: fn(event: Event<'static>)) -> Self {
+    pub const fn new(name: &'static str, channel: fn(event: TracingEvent)) -> Self {
         Self {
             link: Link::new(),
             name,
@@ -90,7 +92,7 @@ impl BackendSubscriber {
         }
     }
 
-    pub fn send(&self, event: Event<'static>) {
+    pub fn send(&self, event: TracingEvent) {
         (self.channel)(event);
     }
 

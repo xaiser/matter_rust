@@ -10,7 +10,7 @@ use crate::{
             },
         },
         tracing::{
-            backend::{BackendSubscriber, BackendOps},
+            backend::BackendSubscriber,
         },
         platform::assert_chip_stack_locked_by_current_thread,
     },
@@ -91,58 +91,58 @@ pub mod internal {
     use crate::{
         chip::{
             tracing::{
-                event::{LableGroup, Event},
+                event::{LableGroup, TracingEvent},
             },
         },
     };
 
-    pub fn begin(label: &str, group: &str) {
+    pub fn begin(label: &'static str, group: &'static str) {
         let list = get_list!();
 
         let mut b = list.front();
 
         while !b.is_null() {
             if let Some(bs) = b.get() {
-                bs.send(Event::begin(label, group));
+                bs.send(TracingEvent::begin(label, group));
             }
             b.move_next();
         }
     }
 
-    pub fn end(label: &str, group: &str) {
+    pub fn end(label: &'static str, group: &'static str) {
         let list = get_list!();
 
         let mut b = list.front();
 
         while !b.is_null() {
             if let Some(bs) = b.get() {
-                bs.send(Event::end(label, group));
+                bs.send(TracingEvent::end(label, group));
             }
             b.move_next();
         }
     }
 
-    pub fn instant(label: &str, group: &str) {
+    pub fn instant(label: &'static str, group: &'static str) {
         let list = get_list!();
 
         let mut b = list.front();
 
         while !b.is_null() {
             if let Some(bs) = b.get() {
-                bs.send(Event::instant(label, group));
+                bs.send(TracingEvent::instant(label, group));
             }
             b.move_next();
         }
     }
 
-    pub fn count(label: &str) {
+    pub fn count(label: &'static str) {
         let list = get_list!();
 
         let mut b = list.front();
 
         while !b.is_null() {
             if let Some(bs) = b.get() {
-                bs.send(Event::count(label));
+                bs.send(TracingEvent::count(label));
             }
             b.move_next();
         }
@@ -166,22 +166,24 @@ mod tests {
         chip::{
             tracing::{
                 backend::BackendSubscriber,
-                event::Event,
+                event::TracingEvent,
             },
         },
     };
     use std::sync::{LazyLock, Mutex};
 
-    static TRACE_EVENTS: LazyLock<Mutex<Vec<Event>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+    static TRACE_EVENTS: LazyLock<Mutex<Vec<TracingEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
     static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event));
 
-    fn add_event(event: Event<'static>) {
+    fn add_event(event: TracingEvent) {
         TRACE_EVENTS.lock().unwrap().push(event);
     }
 
-    fn get_event(index: usize) -> Option<&'static Event<'static>> {
+    /*
+    fn get_event(index: usize) -> Option<&'static TracingEvent> {
         TRACE_EVENTS.lock().unwrap().get(index)
     }
+    */
 
     fn setup() {
         unsafe {
@@ -202,8 +204,52 @@ mod tests {
     fn send_begin_successfull() {
         setup();
         begin("1", "2");
-        assert!(get_event(0).is_some_and(|e| 
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_end_successfull() {
+        setup();
+        end("1", "2");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_instant_successfull() {
+        setup();
+        instant("1", "2");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_instant().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_count_successfull() {
+        setup();
+        count("1");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_count().is_some_and(|s| s == "1")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_begin_end_successfull() {
+        setup();
+        begin("1", "2");
+        end("3", "4");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
         ));
         tear_down();
     }
