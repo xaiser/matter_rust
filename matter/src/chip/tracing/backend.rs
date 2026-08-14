@@ -14,7 +14,11 @@ use crate::{
             },
         },
         tracing::{
-            event::TracingEvent,
+            event::{
+                TracingEvent,
+                MsgTracingEvent,
+                AddrResolveTracingEvent,
+            },
             metric_event::MetricEvent,
         },
     },
@@ -81,19 +85,44 @@ pub struct BackendSubscriber {
     link: Link,
     name: &'static str,
     channel: fn(event: TracingEvent),
+    message_channel: Option<fn(event: MsgTracingEvent)>,
+    address_solve_channel: Option<fn(event: AddrResolveTracingEvent)>,
+    metric_channel: Option<fn(event: MetricEvent)>,
 }
 
 impl BackendSubscriber {
-    pub const fn new(name: &'static str, channel: fn(event: TracingEvent)) -> Self {
+    pub const fn new(name: &'static str, channel: fn(event: TracingEvent), message_channel: Option<fn(event: MsgTracingEvent)>,
+        address_solve_channel: Option<fn(event: AddrResolveTracingEvent)>, metric_channel: Option<fn(event: MetricEvent)>) -> Self {
         Self {
             link: Link::new(),
             name,
             channel,
+            message_channel,
+            address_solve_channel,
+            metric_channel,
         }
     }
 
     pub fn send(&self, event: TracingEvent) {
         (self.channel)(event);
+    }
+
+    pub fn send_msg(&self, event: MsgTracingEvent) {
+        if let Some(c) = self.message_channel {
+            (c)(event);
+        }
+    }
+
+    pub fn send_addr_resolve(&self, event: AddrResolveTracingEvent) {
+        if let Some(c) = self.address_solve_channel {
+            (c)(event);
+        }
+    }
+
+    pub fn send_metric(&self, event: MetricEvent) {
+        if let Some(c) = self.metric_channel {
+            (c)(event);
+        }
     }
 
     /*

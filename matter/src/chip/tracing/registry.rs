@@ -16,9 +16,6 @@ use crate::{
     },
 };
 
-//use static_cell::StaticCell;
-use core::cell::RefCell;
-
 pub type Adapter = adapter::linked_list::a_ref::DefaultAdapter<'static, BackendSubscriber>;
 pub type BackendList = linked_list::LinkedList<Adapter>;
 
@@ -91,7 +88,13 @@ pub mod internal {
     use crate::{
         chip::{
             tracing::{
-                event::{LableGroup, TracingEvent},
+                MessageReceivedInfo,
+                MessageSendInfo,
+                NodeLookupInfo,
+                NodeDiscoveredInfo,
+                NodeDiscoveryFailedInfo,
+                event::{LableGroup, TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
+                metric_event::MetricEvent,
             },
         },
     };
@@ -147,6 +150,84 @@ pub mod internal {
             b.move_next();
         }
     }
+
+    pub fn log_message_send<'a>(info: MessageSendInfo<'a>) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_msg(MsgTracingEvent::send_info(info));
+            }
+            b.move_next();
+        }
+    }
+
+    pub fn log_message_received<'a>(info: MessageReceivedInfo<'a>) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_msg(MsgTracingEvent::received_info(info));
+            }
+            b.move_next();
+        }
+    }
+
+    pub fn log_node_lookup<'a>(info: NodeLookupInfo<'a>) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_addr_resolve(AddrResolveTracingEvent::node_lookup_info(info.clone()));
+            }
+            b.move_next();
+        }
+    }
+
+    pub fn log_node_discovered<'a>(info: NodeDiscoveredInfo<'a>) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_addr_resolve(AddrResolveTracingEvent::node_discovered_info(info.clone()));
+            }
+            b.move_next();
+        }
+    }
+
+    pub fn log_node_discovery_failed<'a>(info: NodeDiscoveryFailedInfo<'a>) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_addr_resolve(AddrResolveTracingEvent::node_discovery_failed_info(info.clone()));
+            }
+            b.move_next();
+        }
+    }
+
+    pub fn log_metric_event(event: MetricEvent) {
+        let list = get_list!();
+
+        let mut b = list.front();
+
+        while !b.is_null() {
+            if let Some(bs) = b.get() {
+                bs.send_metric(event);
+            }
+            b.move_next();
+        }
+    }
 } // end of internal
 
 #[cfg(not(feature = "matter_tracing_enabled"))]
@@ -173,7 +254,7 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     static TRACE_EVENTS: LazyLock<Mutex<Vec<TracingEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event));
+    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event, None, None, None));
 
     fn add_event(event: TracingEvent) {
         TRACE_EVENTS.lock().unwrap().push(event);

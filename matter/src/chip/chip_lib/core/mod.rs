@@ -16,4 +16,5 @@ pub mod tlv_reader;
 pub mod tlv_tags;
 pub mod tlv_types;
 pub mod tlv_writer;
+pub mod peer_id;
 mod layout;

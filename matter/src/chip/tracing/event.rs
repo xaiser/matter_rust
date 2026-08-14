@@ -1,3 +1,13 @@
+
+/*
+use crate::chip::{
+    chip_lib::address_resolve::tracing_structs::{NodeLookupInfo, NodeDiscoveredInfo, NodeDiscoveryFailedInfo},
+    transport::tracing_structs::{MessageSendInfo, MessageReceivedInfo},
+};
+*/
+use crate::chip::tracing::{NodeLookupInfo, NodeDiscoveredInfo, NodeDiscoveryFailedInfo, 
+    MessageSendInfo, MessageReceivedInfo};
+
 #[derive(Debug, Clone, Copy)]
 pub struct LableGroup<'a> {
     pub label: &'a str,
@@ -67,4 +77,78 @@ impl<'a> Event<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum MessageEvent<'a> {
+    SendInfo(MessageSendInfo<'a>),
+    ReceivedInfo(MessageReceivedInfo<'a>),
+}
+
+impl<'a> MessageEvent<'a> {
+    pub const fn send_info(i: MessageSendInfo<'a>) -> Self {
+        MessageEvent::SendInfo(i)
+    }
+
+    pub const fn received_info(r: MessageReceivedInfo<'a>) -> Self {
+        MessageEvent::ReceivedInfo(r)
+    }
+
+    pub fn get_send_info(&self) -> Option<MessageSendInfo<'a>> {
+        match self {
+            MessageEvent::<'a>::SendInfo(i) => Some(i.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_received_info(&self) -> Option<MessageReceivedInfo<'a>> {
+        match self {
+            MessageEvent::<'a>::ReceivedInfo(r) => Some(r.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum AddressResolveEvent<'a> {
+    NodeLookupInfo(NodeLookupInfo<'a>),
+    NodeDiscoveredInfo(NodeDiscoveredInfo<'a>),
+    NodeDiscoveryFailedInfo(NodeDiscoveryFailedInfo<'a>),
+}
+
+impl<'a> AddressResolveEvent<'a> {
+    pub const fn node_lookup_info(i: NodeLookupInfo<'a>) -> Self {
+        AddressResolveEvent::NodeLookupInfo(i)
+    }
+
+    pub const fn node_discovered_info(i: NodeDiscoveredInfo<'a>) -> Self {
+        AddressResolveEvent::NodeDiscoveredInfo(i)
+    }
+
+    pub const fn node_discovery_failed_info(i: NodeDiscoveryFailedInfo<'a>) -> Self {
+        AddressResolveEvent::NodeDiscoveryFailedInfo(i)
+    }
+
+    pub fn get_node_lookup_info(&self) -> Option<NodeLookupInfo<'a>> {
+        match self {
+            AddressResolveEvent::NodeLookupInfo(i) => Some(i.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_node_discovered_info(&self) -> Option<NodeDiscoveredInfo<'a>> {
+        match self {
+            AddressResolveEvent::NodeDiscoveredInfo(i) => Some(i.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_node_discovery_failed_info(&self) -> Option<NodeDiscoveryFailedInfo<'a>> {
+        match self {
+            AddressResolveEvent::NodeDiscoveryFailedInfo(i) => Some(i.clone()),
+            _ => None,
+        }
+    }
+}
+
 pub type TracingEvent = Event<'static>;
+pub type MsgTracingEvent<'a> = MessageEvent<'a>;
+pub type AddrResolveTracingEvent<'a> = AddressResolveEvent<'a>;

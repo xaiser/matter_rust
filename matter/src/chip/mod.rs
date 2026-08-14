@@ -21,6 +21,7 @@ pub use chip_lib::core::data_model_types::EndpointId;
 pub use chip_lib::core::group_id::GroupId;
 pub use chip_lib::core::node_id::NodeId;
 pub use chip_lib::core::scoped_node_id::ScopedNodeId;
+pub use chip_lib::core::peer_id::PeerId;
 pub use chip_lib::support::logging;
 
 // replace with real random
