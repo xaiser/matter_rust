@@ -247,17 +247,43 @@ mod tests {
         chip::{
             tracing::{
                 backend::BackendSubscriber,
-                event::TracingEvent,
+                event::{TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
+                OutgoingMessageType, IncomingMessageType,
+            },
+            transport::{
+                raw::{
+                    message_header::{PayloadHeader, PacketHeader},
+                    peer_address::PeerAddress,
+                },
+                session::SessionHandle,
             },
         },
     };
     use std::sync::{LazyLock, Mutex};
 
+    #[derive(Debug, Clone, Copy)]
+    enum MsgType {
+        MsgOut(OutgoingMessageType),
+        MsgIn(IncomingMessageType),
+    }
+
     static TRACE_EVENTS: LazyLock<Mutex<Vec<TracingEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event, None, None, None));
+    static MSG_TRACE_EVENTS: LazyLock<Mutex<Vec<MsgType>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event, Some(add_msg_event), None, None));
 
     fn add_event(event: TracingEvent) {
         TRACE_EVENTS.lock().unwrap().push(event);
+    }
+
+    fn add_msg_event(event: MsgTracingEvent) {
+        match event {
+            MsgTracingEvent::SendInfo(i) => {
+                MSG_TRACE_EVENTS.lock().unwrap().push(MsgType::MsgOut(i.message_type));
+            },
+            MsgTracingEvent::ReceivedInfo(i) => {
+                MSG_TRACE_EVENTS.lock().unwrap().push(MsgType::MsgIn(i.message_type));
+            },
+        }
     }
 
     /*
@@ -277,6 +303,7 @@ mod tests {
             unregister(BACKEND.as_ptr().as_ref().unwrap());
         }
         TRACE_EVENTS.lock().unwrap().clear();
+        MSG_TRACE_EVENTS.lock().unwrap().clear();
         let list = get_list!();
         list.clear();
     }
@@ -332,6 +359,33 @@ mod tests {
         assert!(TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
                 e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
         ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_log_message_send_successfully() {
+        setup();
+        let payload_header = PayloadHeader::default();
+        let packet_header = PacketHeader::default();
+        let payload = [0];
+        let info = MessageSendInfo::new(OutgoingMessageType::KgroupMessage, &payload_header, &packet_header, &payload[..]);
+
+        log_message_send(&info);
+
+        let info_2 = MessageSendInfo::new(OutgoingMessageType::KsecureSession, &payload_header, &packet_header, &payload[..]);
+
+        log_message_send(&info_2);
+
+        /*
+        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
+        ));
+        */
+        assert!(false);
+
         tear_down();
     }
 } // end of tests

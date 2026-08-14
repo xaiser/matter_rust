@@ -30,6 +30,18 @@ pub struct MessageSendInfo<'a> {
     pub payload: &'a [u8],
 }
 
+impl<'a> MessageSendInfo<'a> {
+    pub const fn new(message_type: OutgoingMessageType, payload_header: &'a PayloadHeader, packet_header: &'a PacketHeader,
+        payload: &'a [u8]) -> Self {
+        Self {
+            message_type,
+            payload_header,
+            packet_header,
+            payload,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum IncomingMessageType {
     KgroupMessage,
@@ -40,7 +52,7 @@ pub enum IncomingMessageType {
 // A message has been received
 #[derive(Clone, Copy)]
 pub struct MessageReceivedInfo<'a> {
-    pub messageType: IncomingMessageType,
+    pub message_type: IncomingMessageType,
     pub payload_header: &'a PayloadHeader,
     pub packet_header: &'a PacketHeader,
     pub session: &'a SessionHandle,
