@@ -14,7 +14,7 @@ use crate::{
 
 // Concrete definitions of the message tracing info that session managers
 // report
-#[derive(Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum OutgoingMessageType {
     KgroupMessage,
     KsecureSession,
@@ -42,7 +42,7 @@ impl<'a> MessageSendInfo<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum IncomingMessageType {
     KgroupMessage,
     KsecureUnicast,
@@ -58,4 +58,18 @@ pub struct MessageReceivedInfo<'a> {
     pub session: &'a SessionHandle,
     pub peer_address: &'a PeerAddress,
     pub payload: &'a [u8],
+}
+
+impl<'a> MessageReceivedInfo<'a> {
+    pub const fn new(message_type: IncomingMessageType, payload_header: &'a PayloadHeader, packet_header: &'a PacketHeader, session: &'a SessionHandle,
+        peer_address: &'a PeerAddress, payload: &'a [u8]) -> Self {
+        Self {
+            message_type,
+            payload_header,
+            packet_header,
+            session,
+            peer_address,
+            payload,
+        }
+    }
 }

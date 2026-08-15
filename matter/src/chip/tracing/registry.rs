@@ -245,34 +245,56 @@ mod tests {
     use super::*;
     use crate::{
         chip::{
+            chip_lib::{
+                address_resolve::address_resolve::{
+                    NodeLookupRequest,
+                },
+            },
             tracing::{
                 backend::BackendSubscriber,
                 event::{TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
                 OutgoingMessageType, IncomingMessageType,
+                MessageSendInfo, MessageReceivedInfo,
+                DiscoveryInfoType, NodeLookupInfo,
             },
             transport::{
                 raw::{
                     message_header::{PayloadHeader, PacketHeader},
                     peer_address::PeerAddress,
                 },
-                session::SessionHandle,
+                session::{Session, SessionHandle, new_session_alloactor},
             },
+            PeerId,
         },
     };
     use std::sync::{LazyLock, Mutex};
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy)]
     enum MsgType {
         MsgOut(OutgoingMessageType),
         MsgIn(IncomingMessageType),
     }
 
+    #[derive(PartialEq, Eq, Debug, Clone)]
+    enum AddrResolveType {
+        Lookup(u32),
+        Discovered(DiscoveryInfoType),
+        Failed(PeerId),
+    }
+
     static TRACE_EVENTS: LazyLock<Mutex<Vec<TracingEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+    static TRACE_EVENTS_2: LazyLock<Mutex<Vec<TracingEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
     static MSG_TRACE_EVENTS: LazyLock<Mutex<Vec<MsgType>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event, Some(add_msg_event), None, None));
+    static ADDR_TRACE_EVENTS: LazyLock<Mutex<Vec<AddrResolveType>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+    static BACKEND: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend", add_event, Some(add_msg_event), Some(add_addr_resolve_event), None));
+    static BACKEND_2: SyncCell<BackendSubscriber> = SyncCell::new(BackendSubscriber::new("test_backend_2", add_event_2, None, None, None));
 
     fn add_event(event: TracingEvent) {
         TRACE_EVENTS.lock().unwrap().push(event);
+    }
+
+    fn add_event_2(event: TracingEvent) {
+        TRACE_EVENTS_2.lock().unwrap().push(event);
     }
 
     fn add_msg_event(event: MsgTracingEvent) {
@@ -286,6 +308,20 @@ mod tests {
         }
     }
 
+    fn add_addr_resolve_event(event: AddrResolveTracingEvent) {
+        match event {
+            AddrResolveTracingEvent::NodeLookupInfo(info) => {
+                ADDR_TRACE_EVENTS.lock().unwrap().push(AddrResolveType::Lookup(info.request as * const NodeLookupRequest as u32));
+            },
+            AddrResolveTracingEvent::NodeDiscoveredInfo(info) => {
+                ADDR_TRACE_EVENTS.lock().unwrap().push(AddrResolveType::Discovered(info.info_type));
+            },
+            AddrResolveTracingEvent::NodeDiscoveryFailedInfo(info) => {
+                ADDR_TRACE_EVENTS.lock().unwrap().push(AddrResolveType::Failed(info.peer_id.clone()));
+            },
+        }
+    }
+
     /*
     fn get_event(index: usize) -> Option<&'static TracingEvent> {
         TRACE_EVENTS.lock().unwrap().get(index)
@@ -295,15 +331,19 @@ mod tests {
     fn setup() {
         unsafe {
             register(BACKEND.as_ptr().as_ref().unwrap());
+            register(BACKEND_2.as_ptr().as_ref().unwrap());
         }
     }
 
     fn tear_down() {
         unsafe {
             unregister(BACKEND.as_ptr().as_ref().unwrap());
+            unregister(BACKEND_2.as_ptr().as_ref().unwrap());
         }
         TRACE_EVENTS.lock().unwrap().clear();
+        TRACE_EVENTS_2.lock().unwrap().clear();
         MSG_TRACE_EVENTS.lock().unwrap().clear();
+        ADDR_TRACE_EVENTS.lock().unwrap().clear();
         let list = get_list!();
         list.clear();
     }
@@ -313,6 +353,9 @@ mod tests {
         setup();
         begin("1", "2");
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
         ));
         tear_down();
@@ -325,6 +368,9 @@ mod tests {
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
         ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
         tear_down();
     }
 
@@ -335,6 +381,9 @@ mod tests {
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_instant().is_some_and(|lg| lg.label == "1" && lg.group == "2")
         ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_instant().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
         tear_down();
     }
 
@@ -343,6 +392,9 @@ mod tests {
         setup();
         count("1");
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_count().is_some_and(|s| s == "1")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_count().is_some_and(|s| s == "1")
         ));
         tear_down();
@@ -359,6 +411,12 @@ mod tests {
         assert!(TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
                 e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
         ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(1).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
+        ));
         tear_down();
     }
 
@@ -370,21 +428,69 @@ mod tests {
         let payload = [0];
         let info = MessageSendInfo::new(OutgoingMessageType::KgroupMessage, &payload_header, &packet_header, &payload[..]);
 
-        log_message_send(&info);
+        log_message_send(info);
 
         let info_2 = MessageSendInfo::new(OutgoingMessageType::KsecureSession, &payload_header, &packet_header, &payload[..]);
 
-        log_message_send(&info_2);
+        log_message_send(info_2);
 
-        /*
-        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
-                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
-        ));
-        assert!(TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
-                e.get_end().is_some_and(|lg| lg.label == "3" && lg.group == "4")
-        ));
-        */
-        assert!(false);
+        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|s| 
+                *s == MsgType::MsgOut(OutgoingMessageType::KgroupMessage))
+        );
+        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|s| 
+                *s == MsgType::MsgOut(OutgoingMessageType::KsecureSession))
+        );
+
+        tear_down();
+    }
+
+    #[test]
+    fn send_log_message_received_successfully() {
+        setup();
+        let payload_header = PayloadHeader::default();
+        let packet_header = PacketHeader::default();
+        let peer_address = PeerAddress::default();
+        let mut session_pool = new_session_alloactor();
+        let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), core::ptr::addr_of_mut!(session_pool)).unwrap();
+        let payload = [0];
+        let info = MessageReceivedInfo::new(IncomingMessageType::KgroupMessage, &payload_header, &packet_header, &session, &peer_address, &payload[..]);
+
+        log_message_received(info);
+
+        let info_2 = MessageReceivedInfo::new(IncomingMessageType::KsecureUnicast, &payload_header, &packet_header, &session, &peer_address, &payload[..]);
+
+        log_message_received(info_2);
+
+        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|s| 
+                *s == MsgType::MsgIn(IncomingMessageType::KgroupMessage))
+        );
+        assert!(MSG_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|s| 
+                *s == MsgType::MsgIn(IncomingMessageType::KsecureUnicast))
+        );
+
+        tear_down();
+    }
+
+    #[test]
+    fn send_node_lookup_successfully() {
+        setup();
+        let request = NodeLookupRequest;
+        let request_2 = NodeLookupRequest;
+        let info = NodeLookupInfo::new(&request);
+
+        log_node_lookup(info);
+
+        let info_2 = NodeLookupInfo::new(&request_2);
+
+        log_node_lookup(info_2);
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                *e == AddrResolveType::Lookup(core::ptr::addr_of!(request) as u32))
+        );
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
+                *e == AddrResolveType::Lookup(core::ptr::addr_of!(request_2) as u32))
+        );
 
         tear_down();
     }
