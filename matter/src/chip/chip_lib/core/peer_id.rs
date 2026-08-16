@@ -39,7 +39,7 @@ impl PeerId {
         self.m_node_id
     }
 
-    pub fn set_node_id(&mut self, id: NodeId) -> &Self {
+    pub fn set_node_id(mut self, id: NodeId) -> Self {
         self.m_node_id = id;
 
         self
@@ -49,7 +49,7 @@ impl PeerId {
         self.m_compressed_fabric_id
     }
 
-    pub fn set_compressed_fabric_id(&mut self, id: CompressedFabricId) -> &Self {
+    pub fn set_compressed_fabric_id(mut self, id: CompressedFabricId) -> Self {
         self.m_compressed_fabric_id = id;
 
         self

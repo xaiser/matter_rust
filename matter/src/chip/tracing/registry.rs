@@ -247,15 +247,16 @@ mod tests {
         chip::{
             chip_lib::{
                 address_resolve::address_resolve::{
-                    NodeLookupRequest,
+                    NodeLookupRequest, ResolveResult,
                 },
+                core::node_id::KUNDEFINED_NODE_ID,
             },
             tracing::{
                 backend::BackendSubscriber,
                 event::{TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
                 OutgoingMessageType, IncomingMessageType,
                 MessageSendInfo, MessageReceivedInfo,
-                DiscoveryInfoType, NodeLookupInfo,
+                DiscoveryInfoType, NodeLookupInfo, NodeDiscoveredInfo, NodeDiscoveryFailedInfo,
             },
             transport::{
                 raw::{
@@ -266,6 +267,10 @@ mod tests {
             },
             PeerId,
         },
+        ChipError,
+        chip_sdk_error,
+        chip_core_error,
+        chip_error_message_counter_exhausted,
     };
     use std::sync::{LazyLock, Mutex};
 
@@ -491,6 +496,51 @@ mod tests {
         assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
                 *e == AddrResolveType::Lookup(core::ptr::addr_of!(request_2) as u32))
         );
+
+        tear_down();
+    }
+
+    #[test]
+    fn send_node_discovered_successfully() {
+        setup();
+        let result = ResolveResult;
+        let result_2 = ResolveResult;
+        let peer_id = PeerId::new();
+        let info = NodeDiscoveredInfo::new(DiscoveryInfoType::KintermediateResult, &peer_id, &result);
+
+        log_node_discovered(info);
+
+        let info_2 = NodeDiscoveredInfo::new(DiscoveryInfoType::KresolutionDone, &peer_id, &result_2);
+
+        log_node_discovered(info_2);
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                *e == AddrResolveType::Discovered(DiscoveryInfoType::KintermediateResult)));
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
+                *e == AddrResolveType::Discovered(DiscoveryInfoType::KresolutionDone)));
+
+        tear_down();
+    }
+
+    #[test]
+    fn send_node_discovery_failed_successfully() {
+        setup();
+        let peer_id = PeerId::new();
+        let peer_id_2 = PeerId::new().set_node_id(1);
+        let info = NodeDiscoveryFailedInfo::new(&peer_id, chip_error_message_counter_exhausted!());
+
+        log_node_discovery_failed(info);
+
+        let info_2 = NodeDiscoveryFailedInfo::new(&peer_id_2, chip_error_message_counter_exhausted!());
+
+        log_node_discovery_failed(info_2);
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                *e == AddrResolveType::Failed(peer_id.clone())));
+
+        assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(1).is_some_and(|e| 
+                *e == AddrResolveType::Failed(peer_id_2.clone())));
 
         tear_down();
     }

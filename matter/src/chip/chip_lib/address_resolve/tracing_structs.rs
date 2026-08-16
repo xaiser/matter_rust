@@ -38,8 +38,27 @@ pub struct NodeDiscoveredInfo<'a> {
     pub result: &'a ResolveResult,
 }
 
+impl<'a> NodeDiscoveredInfo<'a> {
+    pub const fn new(info_type: DiscoveryInfoType, peer_id: &'a PeerId, result: &'a ResolveResult) -> Self {
+        Self {
+            info_type,
+            peer_id,
+            result,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct NodeDiscoveryFailedInfo<'a> {
     pub peer_id: &'a PeerId,
     pub error: ChipError,
+}
+
+impl<'a> NodeDiscoveryFailedInfo<'a> {
+    pub const fn new(peer_id: &'a PeerId, error: ChipError) -> Self {
+        Self {
+            peer_id,
+            error,
+        }
+    }
 }
