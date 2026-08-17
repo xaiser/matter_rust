@@ -5,6 +5,8 @@ pub mod metric_keys;
 pub mod event;
 pub mod registry;
 
+pub use registry::Scoped;
+
 // re-export trace structs
 pub use crate::chip::chip_lib::address_resolve::tracing_structs::{
     NodeLookupInfo,

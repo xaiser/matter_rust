@@ -99,6 +99,31 @@ pub mod internal {
         },
     };
 
+    pub struct Scoped {
+        pub label: &'static str,
+        pub group: &'static str,
+    }
+
+    impl Scoped {
+        pub fn new(label: &'static str, group: &'static str) -> Self {
+            let s = Self {
+                label,
+                group,
+            };
+            
+            begin(label, group);
+
+            s
+        }
+    }
+
+
+    impl Drop for Scoped {
+        fn drop(&mut self) {
+            end(self.label, self.group);
+        }
+    }
+
     pub fn begin(label: &'static str, group: &'static str) {
         let list = get_list!();
 
@@ -232,6 +257,7 @@ pub mod internal {
 
 #[cfg(not(feature = "matter_tracing_enabled"))]
 pub mod internal {
+    pub struct Scoped;
     pub fn begin(_label: &str, _group: &str) { }
     pub fn end(_label: &str, _group: &str) { }
     pub fn instant(_label: &str, _group: &str) { }
@@ -240,7 +266,7 @@ pub mod internal {
 
 pub use internal::*;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "matter_tracing_enabled"))]
 mod tests {
     use super::*;
     use crate::{
