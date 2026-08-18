@@ -1,5 +1,4 @@
 use crate::{
-    verify_or_die,
     chip::{
         transport::{
             raw::{

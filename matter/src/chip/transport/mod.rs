@@ -14,5 +14,6 @@ pub mod session_message_delegate;
 pub mod message_counter;
 pub mod message_counter_manager_interface;
 pub mod tracing_structs;
+pub(super) mod secure_message_codec;
 
 pub use raw::peer_address::PeerAddress;

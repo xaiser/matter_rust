@@ -53,6 +53,8 @@ pub struct CryptoContext {
     m_key_context: Option<NonNull<dyn SymmetricKeyContext>>,
 }
 
+pub const NONCE_LENGTH: usize = CryptoContext::KAESCCM_NONCE_LEN;
+
 type NonceStorage = [u8; CryptoContext::KAESCCM_NONCE_LEN];
 // Somehow rustc melt down on this define
 

@@ -3,7 +3,7 @@ use crate::{
         chip_lib::{
             support::{
                 intrusive_list::{
-                    linked_list::{self, Link},
+                    linked_list,
                     adapter,
                 },
                 SyncCell,
@@ -93,7 +93,7 @@ pub mod internal {
                 NodeLookupInfo,
                 NodeDiscoveredInfo,
                 NodeDiscoveryFailedInfo,
-                event::{LableGroup, TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
+                event::{TracingEvent, MsgTracingEvent, AddrResolveTracingEvent},
                 metric_event::MetricEvent,
             },
         },
