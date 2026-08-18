@@ -163,14 +163,14 @@ pub mod internal {
         }
     }
 
-    pub fn count(label: &'static str) {
+    pub fn counter(label: &'static str) {
         let list = get_list!();
 
         let mut b = list.front();
 
         while !b.is_null() {
             if let Some(bs) = b.get() {
-                bs.send(TracingEvent::count(label));
+                bs.send(TracingEvent::counter(label));
             }
             b.move_next();
         }
@@ -261,7 +261,7 @@ pub mod internal {
     pub fn begin(_label: &str, _group: &str) { }
     pub fn end(_label: &str, _group: &str) { }
     pub fn instant(_label: &str, _group: &str) { }
-    pub fn count(_label: &str) { }
+    pub fn counter(_label: &str) { }
 }
 
 pub use internal::*;
@@ -297,6 +297,15 @@ mod tests {
         chip_sdk_error,
         chip_core_error,
         chip_error_message_counter_exhausted,
+        matter_log_message_send,
+        matter_log_message_received,
+        matter_log_node_lookup,
+        matter_log_node_discovered,
+        matter_log_node_discovery_failed,
+        matter_trace_begin,
+        matter_trace_end,
+        matter_trace_instant,
+        matter_trace_counter,
     };
     use std::sync::{LazyLock, Mutex};
 
@@ -393,9 +402,35 @@ mod tests {
     }
 
     #[test]
+    fn send_begin_macro_successfull() {
+        setup();
+        matter_trace_begin!("1", "2");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_begin().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
     fn send_end_successfull() {
         setup();
         end("1", "2");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_end_macro_successfull() {
+        setup();
+        matter_trace_end!("1", "2");
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 e.get_end().is_some_and(|lg| lg.label == "1" && lg.group == "2")
         ));
@@ -419,14 +454,40 @@ mod tests {
     }
 
     #[test]
-    fn send_count_successfull() {
+    fn send_instant_macro_successfull() {
         setup();
-        count("1");
+        matter_trace_instant!("1", "2");
         assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
-                e.get_count().is_some_and(|s| s == "1")
+                e.get_instant().is_some_and(|lg| lg.label == "1" && lg.group == "2")
         ));
         assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
-                e.get_count().is_some_and(|s| s == "1")
+                e.get_instant().is_some_and(|lg| lg.label == "1" && lg.group == "2")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_counter_successfull() {
+        setup();
+        counter("1");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_counter().is_some_and(|s| s == "1")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_counter().is_some_and(|s| s == "1")
+        ));
+        tear_down();
+    }
+
+    #[test]
+    fn send_counter_macro_successfull() {
+        setup();
+        matter_trace_counter!("1");
+        assert!(TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_counter().is_some_and(|s| s == "1")
+        ));
+        assert!(TRACE_EVENTS_2.lock().unwrap().get(0).is_some_and(|e| 
+                e.get_counter().is_some_and(|s| s == "1")
         ));
         tear_down();
     }
@@ -461,9 +522,7 @@ mod tests {
 
         log_message_send(info);
 
-        let info_2 = MessageSendInfo::new(OutgoingMessageType::KsecureSession, &payload_header, &packet_header, &payload[..]);
-
-        log_message_send(info_2);
+        matter_log_message_send!(OutgoingMessageType::KsecureSession, &payload_header, &packet_header, &payload[..]);
 
         assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|s| 
                 *s == MsgType::MsgOut(OutgoingMessageType::KgroupMessage))
@@ -488,9 +547,7 @@ mod tests {
 
         log_message_received(info);
 
-        let info_2 = MessageReceivedInfo::new(IncomingMessageType::KsecureUnicast, &payload_header, &packet_header, &session, &peer_address, &payload[..]);
-
-        log_message_received(info_2);
+        matter_log_message_received!(IncomingMessageType::KsecureUnicast, &payload_header, &packet_header, &session, &peer_address, &payload[..]);
 
         assert!(MSG_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|s| 
                 *s == MsgType::MsgIn(IncomingMessageType::KgroupMessage))
@@ -511,9 +568,7 @@ mod tests {
 
         log_node_lookup(info);
 
-        let info_2 = NodeLookupInfo::new(&request_2);
-
-        log_node_lookup(info_2);
+        matter_log_node_lookup!(&request_2);
 
         assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 *e == AddrResolveType::Lookup(core::ptr::addr_of!(request) as u32))
@@ -536,9 +591,7 @@ mod tests {
 
         log_node_discovered(info);
 
-        let info_2 = NodeDiscoveredInfo::new(DiscoveryInfoType::KresolutionDone, &peer_id, &result_2);
-
-        log_node_discovered(info_2);
+        matter_log_node_discovered!(DiscoveryInfoType::KresolutionDone, &peer_id, &result_2);
 
         assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 *e == AddrResolveType::Discovered(DiscoveryInfoType::KintermediateResult)));
@@ -558,9 +611,7 @@ mod tests {
 
         log_node_discovery_failed(info);
 
-        let info_2 = NodeDiscoveryFailedInfo::new(&peer_id_2, chip_error_message_counter_exhausted!());
-
-        log_node_discovery_failed(info_2);
+        matter_log_node_discovery_failed!(&peer_id_2, chip_error_message_counter_exhausted!());
 
         assert!(ADDR_TRACE_EVENTS.lock().unwrap().get(0).is_some_and(|e| 
                 *e == AddrResolveType::Failed(peer_id.clone())));

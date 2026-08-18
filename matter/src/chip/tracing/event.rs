@@ -28,7 +28,7 @@ pub enum Event<'a> {
     Begin(LableGroup<'a>),
     End(LableGroup<'a>),
     Instant(LableGroup<'a>),
-    Count(&'a str),
+    Counter(&'a str),
 }
 
 impl<'a> Event<'a> {
@@ -44,8 +44,8 @@ impl<'a> Event<'a> {
         Event::Instant(LableGroup::new(l, g))
     }
 
-    pub const fn count(l: &'a str) -> Self {
-        Event::Count(l)
+    pub const fn counter(l: &'a str) -> Self {
+        Event::Counter(l)
     }
 
     pub fn get_begin(&self) -> Option<LableGroup<'a>> {
@@ -69,9 +69,9 @@ impl<'a> Event<'a> {
         }
     }
 
-    pub fn get_count(&self) -> Option<&'a str> {
+    pub fn get_counter(&self) -> Option<&'a str> {
         match self {
-            Event::<'a>::Count(s) => Some(s),
+            Event::<'a>::Counter(s) => Some(s),
             _ => None,
         }
     }
