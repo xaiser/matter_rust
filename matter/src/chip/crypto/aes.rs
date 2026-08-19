@@ -1,7 +1,30 @@
 #![allow(deprecated)]
 //type Aes128Ccm = Ccm<Aes128, U8, U13>;
 
+pub enum Text<'a> {
+    B2B(&'a [u8], &'a mut [u8]),
+    InPlace(&'a mut [u8]),
+}
+
+impl<'a> Text<'a> {
+    pub const fn new_b2b(p: &'a [u8], c: &'a mut [u8]) -> Self {
+        Text::B2B(p, c)
+    }
+
+    pub const fn new_in_place(t: &'a mut [u8]) -> Self {
+        Text::InPlace(t)
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Text::B2B(plaintext, _) => plaintext.len(),
+            Text::InPlace(t) => t.len(),
+        }
+    }
+}
+
 pub mod key_128 {
+    use super::Text;
     use crate::{
         chip::{
             crypto::{
@@ -37,9 +60,9 @@ pub mod key_128 {
 
     // re-export
     pub type RawSymmetricKeyContext<T, N> = SymmetricKeyContext<ccm::Ccm<Aes128, T, N>, ctr::Ctr32LE<Aes128>>;
-
     pub mod mode_ccm {
         use super::*;
+        use super::super::Text;
         use ccm::{
             Nonce,
             Tag,
@@ -56,15 +79,15 @@ pub mod key_128 {
 
         macro_rules! dispatch_encrypt_tag {
             ($nonce_ty:ty, $tag_len:expr,
-             $plaintext:expr, $aad:expr, $key:expr, $nonce:expr, $mic:expr, $ciphertext:expr) => {
+             $text:expr, $aad:expr, $key:expr, $nonce:expr, $mic:expr) => {
                 match $tag_len {
-                    4  => encrypt::<Ccm<Aes128, U4,  $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    6  => encrypt::<Ccm<Aes128, U6,  $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    8  => encrypt::<Ccm<Aes128, U8,  $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    10 => encrypt::<Ccm<Aes128, U10, $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    12 => encrypt::<Ccm<Aes128, U12, $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    14 => encrypt::<Ccm<Aes128, U14, $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    16 => encrypt::<Ccm<Aes128, U16, $nonce_ty>>($plaintext, $aad, $key, $nonce, $mic, $ciphertext),
+                    4  => encrypt::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    6  => encrypt::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    8  => encrypt::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    10 => encrypt::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    12 => encrypt::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    14 => encrypt::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    16 => encrypt::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
@@ -72,15 +95,15 @@ pub mod key_128 {
 
         macro_rules! dispatch_encrypt {
             ($nonce_len:expr, $tag_len:expr,
-             $plaintext:expr, $aad:expr, $key:expr, $nonce:expr, $mic:expr, $ciphertext:expr) => {
+             $text:expr, $aad:expr, $key:expr, $nonce:expr, $mic:expr) => {
                 match $nonce_len {
-                    7  => dispatch_encrypt_tag!(U7,  $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    8  => dispatch_encrypt_tag!(U8,  $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    9  => dispatch_encrypt_tag!(U9,  $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    10 => dispatch_encrypt_tag!(U10, $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    11 => dispatch_encrypt_tag!(U11, $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    12 => dispatch_encrypt_tag!(U12, $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
-                    13 => dispatch_encrypt_tag!(U13, $tag_len, $plaintext, $aad, $key, $nonce, $mic, $ciphertext),
+                    7  => dispatch_encrypt_tag!(U7,  $tag_len, $text, $aad, $key, $nonce, $mic),
+                    8  => dispatch_encrypt_tag!(U8,  $tag_len, $text, $aad, $key, $nonce, $mic),
+                    9  => dispatch_encrypt_tag!(U9,  $tag_len, $text, $aad, $key, $nonce, $mic),
+                    10 => dispatch_encrypt_tag!(U10, $tag_len, $text, $aad, $key, $nonce, $mic),
+                    11 => dispatch_encrypt_tag!(U11, $tag_len, $text, $aad, $key, $nonce, $mic),
+                    12 => dispatch_encrypt_tag!(U12, $tag_len, $text, $aad, $key, $nonce, $mic),
+                    13 => dispatch_encrypt_tag!(U13, $tag_len, $text, $aad, $key, $nonce, $mic),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
@@ -88,15 +111,15 @@ pub mod key_128 {
 
         macro_rules! dispatch_decrypt_tag {
             ($nonce_ty:ty, $tag_len:expr,
-             $ciphertext:expr, $aad:expr, $mic:expr, $key:expr, $nonce:expr, $plaintext:expr) => {
+             $text:expr, $aad:expr, $mic:expr, $key:expr, $nonce:expr) => {
                 match $tag_len {
-                    4  => decrypt::<Ccm<Aes128, U4,  $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    6  => decrypt::<Ccm<Aes128, U6,  $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    8  => decrypt::<Ccm<Aes128, U8,  $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    10 => decrypt::<Ccm<Aes128, U10, $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    12 => decrypt::<Ccm<Aes128, U12, $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    14 => decrypt::<Ccm<Aes128, U14, $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    16 => decrypt::<Ccm<Aes128, U16, $nonce_ty>>($ciphertext, $aad, $mic, $key, $nonce, $plaintext),
+                    4  => decrypt::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    6  => decrypt::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    8  => decrypt::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    10 => decrypt::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    12 => decrypt::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    14 => decrypt::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    16 => decrypt::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
@@ -104,43 +127,65 @@ pub mod key_128 {
 
         macro_rules! dispatch_decrypt {
             ($nonce_len:expr, $tag_len:expr,
-             $ciphertext:expr, $aad:expr, $mic:expr, $key:expr, $nonce:expr, $plaintext:expr) => {
+             $text:expr, $aad:expr, $mic:expr, $key:expr, $nonce:expr) => {
                 match $nonce_len {
-                    7  => dispatch_decrypt_tag!(U7,  $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    8  => dispatch_decrypt_tag!(U8,  $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    9  => dispatch_decrypt_tag!(U9,  $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    10 => dispatch_decrypt_tag!(U10, $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    11 => dispatch_decrypt_tag!(U11, $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    12 => dispatch_decrypt_tag!(U12, $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
-                    13 => dispatch_decrypt_tag!(U13, $tag_len, $ciphertext, $aad, $mic, $key, $nonce, $plaintext),
+                    7  => dispatch_decrypt_tag!(U7,  $tag_len, $text, $aad, $mic, $key, $nonce),
+                    8  => dispatch_decrypt_tag!(U8,  $tag_len, $text, $aad, $mic, $key, $nonce),
+                    9  => dispatch_decrypt_tag!(U9,  $tag_len, $text, $aad, $mic, $key, $nonce),
+                    10 => dispatch_decrypt_tag!(U10, $tag_len, $text, $aad, $mic, $key, $nonce),
+                    11 => dispatch_decrypt_tag!(U11, $tag_len, $text, $aad, $mic, $key, $nonce),
+                    12 => dispatch_decrypt_tag!(U12, $tag_len, $text, $aad, $mic, $key, $nonce),
+                    13 => dispatch_decrypt_tag!(U13, $tag_len, $text, $aad, $mic, $key, $nonce),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
         }
 
         pub fn encrypt_autosize(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
-            dispatch_encrypt!(nonce.len(), mic.len(), plaintext, aad, key, nonce, mic, ciphertext)
+            let text = Text::new_b2b(plaintext, ciphertext);
+            dispatch_encrypt!(nonce.len(), mic.len(), text, aad, key, nonce, mic)
+        }
+
+        pub fn encrypt_in_place_autosize(text: &mut [u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+            let text = Text::new_in_place(text);
+            dispatch_encrypt!(nonce.len(), mic.len(), text, aad, key, nonce, mic)
         }
 
         pub fn decrypt_autosize(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
-            dispatch_decrypt!(nonce.len(), tag.len(), ciphertext, aad, tag, key, nonce, plaintext)
+            let text = Text::new_b2b(ciphertext, plaintext);
+            dispatch_decrypt!(nonce.len(), tag.len(), text, aad, tag, key, nonce)
         }
 
-        pub fn encrypt<C: KeyInit + AeadInPlace + AeadCore>(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+        pub fn decrypt_in_place_autosize(text: &mut [u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
+            let text = Text::new_in_place(text);
+            dispatch_decrypt!(nonce.len(), tag.len(), text, aad, tag, key, nonce)
+        }
+
+        pub fn encrypt<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
             verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
 
             let ccm = create_aes128_ccm::<C>(key).map_err(|_| chip_error_invalid_argument!())?;
-            let input_size = plaintext.len();
+            let input_size = text.len();
             let tag;
             
-            if let Some(text) = ciphertext.get_mut(..input_size) {
-                text.copy_from_slice(plaintext);
-                tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| {
-                    text.fill(0);
-                    chip_error_internal!()
-                })?;
-            } else {
-                return Err(chip_error_invalid_argument!());
+            match text {
+                Text::B2B(plaintext, ciphertext) => {
+                    if let Some(text) = ciphertext.get_mut(..input_size) {
+                        text.copy_from_slice(plaintext);
+                        tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| {
+                            text.fill(0);
+                            chip_error_internal!()
+                        })?;
+                    } else {
+                        return Err(chip_error_invalid_argument!());
+                    }
+                },
+                Text::InPlace(text) => {
+                    tag = ccm.encrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text).map_err(|_| {
+                        text.fill(0);
+                        chip_error_internal!()
+                    })?;
+                },
             }
 
             let tag_size = tag.len();
@@ -154,21 +199,31 @@ pub mod key_128 {
             Ok(SymmetricEncryptResult::new(tag_size, input_size))
         }
         
-        pub fn decrypt<C: KeyInit + AeadInPlace + AeadCore>(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
+        pub fn decrypt<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
             verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
             verify_or_return_error!(<C as AeadCore>::TagSize::to_usize() == tag.len(), Err(chip_error_invalid_argument!()));
 
             let ccm = create_aes128_ccm::<C>(key).map_err(|_| chip_error_invalid_argument!())?;
-            let cipher_text_size = ciphertext.len();
+            let cipher_text_size = text.len();
 
-            if let Some(text) = plaintext.get_mut(..cipher_text_size) {
-                text.copy_from_slice(ciphertext);
-                ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| {
-                    text.fill(0);
-                    chip_error_internal!()
-                })?;
-            } else {
-                return Err(chip_error_invalid_argument!());
+            match text {
+                Text::B2B(ciphertext, plaintext) => {
+                    if let Some(text) = plaintext.get_mut(..cipher_text_size) {
+                        text.copy_from_slice(ciphertext);
+                        ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| {
+                            text.fill(0);
+                            chip_error_internal!()
+                        })?;
+                    } else {
+                        return Err(chip_error_invalid_argument!());
+                    }
+                },
+                Text::InPlace(text) => {
+                    ccm.decrypt_in_place_detached(&Nonce::<<C as AeadCore>::NonceSize>::from_slice(nonce), aad, text, &Tag::<<C as AeadCore>::TagSize>::from_slice(tag)).map_err(|_| {
+                        text.fill(0);
+                        chip_error_internal!()
+                    })?;
+                },
             }
 
             Ok(SymmetricDecryptResult::new(cipher_text_size))
@@ -187,9 +242,16 @@ pub mod key_128 {
 
         pub fn encrypt<Ctr: KeyIvInit + StreamCipher>(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
             let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
-            //let input_size = input.len();
 
             ctr.apply_keystream_b2b(input, output).map_err(|_| chip_error_internal!())?;
+
+            chip_ok!()
+        }
+
+        pub fn encrypt_in_place<Ctr: KeyIvInit + StreamCipher>(text: &mut [u8], key: &Aes128KeyHandle, nonce: &[u8]) -> ChipErrorResult {
+            let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
+
+            ctr.try_apply_keystream(text).map_err(|_| chip_error_internal!())?;
 
             chip_ok!()
         }
@@ -242,7 +304,6 @@ pub mod key_128 {
         }
     }
 
-    //impl<C: KeyInit + AeadInPlace + AeadCore> crypto_pal::SymmetricKeyContext for SymmetricKeyContext<C> {
     impl<M, R> crypto_pal::SymmetricKeyContext for SymmetricKeyContext<M, R> 
     where
         M: KeyInit + AeadInPlace + AeadCore,
@@ -253,11 +314,13 @@ pub mod key_128 {
         }
 
         fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
-            return mode_ccm::encrypt::<M>(plaintext, aad, &self.m_encryption_key, nonce, mic, ciphertext);
+            let text = Text::new_b2b(plaintext, ciphertext);
+            return mode_ccm::encrypt::<M>(text, aad, &self.m_encryption_key, nonce, mic);
         }
 
         fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
-            return mode_ccm::decrypt::<M>(ciphertext, aad, mic, &self.m_encryption_key, nonce, plaintext);
+            let text = Text::new_b2b(ciphertext, plaintext);
+            return mode_ccm::decrypt::<M>(text, aad, mic, &self.m_encryption_key, nonce);
         }
 
         fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
@@ -292,9 +355,6 @@ pub mod key_128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chip::crypto::{
-        //simple_rand::SimpleRng,
-    };
     use aes::Aes128;
     use ccm::{
         consts::{U8, U10, U13, U16},
@@ -310,6 +370,7 @@ mod tests {
         use crate::{
             chip::{
                 crypto::{
+                    aes::Text,
                     crypto_pal::{self, Symmetric128BitsKeyByteArray, Aes128KeyHandle, SymmetricEncryptResult, SymmetricDecryptResult},
                     session_keystore::SessionKeystore,
                 },
@@ -370,7 +431,21 @@ mod tests {
             let input = [1u8; 16];
             let mut output = [1u8; 16];
 
-            let result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(&input, &aad, &key, &nonce, &mut tag, &mut output);
+            let result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn encrypt_inplace() {
+            let key = Aes128KeyHandle::new();
+            let nonce = [1u8; 13];
+            let aad = [1u8; 1];
+            let mut tag = [0u8; 16];
+
+            let mut input = [1u8; 16];
+
+            let result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_in_place(&mut input), &aad, &key, &nonce, &mut tag);
 
             assert!(result.is_ok());
         }
@@ -385,16 +460,41 @@ mod tests {
             let input = [1u8; 16];
             let mut output = [1u8; 16];
 
-            let en_result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(&input, &aad, &key, &nonce, &mut tag, &mut output);
+            let en_result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
 
             assert!(en_result.is_ok());
             let en_result = en_result.unwrap();
 
             let mut output_2 = [1u8; 16];
-            let de_result = key_128::mode_ccm::decrypt::<Ccm<Aes128, U16, U13>>(&output[..en_result.ciphertext_size], &aad, &tag[..en_result.tag_size], 
-                &key, &nonce, &mut output_2);
+            let de_result = key_128::mode_ccm::decrypt::<Ccm<Aes128, U16, U13>>(
+                Text::new_b2b(&output[..en_result.ciphertext_size], &mut output_2), &aad, &tag[..en_result.tag_size], 
+                &key, &nonce);
 
             assert!(de_result.is_ok());
+        }
+
+        #[test]
+        fn decrypt_in_place() {
+            let key = Aes128KeyHandle::new();
+            let nonce = [1u8; 13];
+            let aad = [1u8; 1];
+            let mut tag = [0u8; 16];
+
+            let input = [2u8; 16];
+            let mut output = [1u8; 16];
+
+            let en_result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
+
+            assert!(en_result.is_ok());
+            let en_result = en_result.unwrap();
+
+            let de_result = key_128::mode_ccm::decrypt::<Ccm<Aes128, U16, U13>>(
+                Text::new_in_place(&mut output[..en_result.ciphertext_size]), &aad, &tag[..en_result.tag_size], 
+                &key, &nonce);
+
+            assert!(de_result.is_ok());
+
+            assert_eq!(input, output);
         }
     } // end of test_ccm
 
@@ -428,6 +528,23 @@ mod tests {
             assert!(key_128::mode_ctr::encrypt::<Aes128Ctr>(&output, &key, &iv[..], &mut output_2).is_ok());
 
             assert_eq!(input, output_2);
+        }
+
+        #[test]
+        fn decrypt_in_place() {
+            let key = Aes128KeyHandle::new();
+            let iv = [1u8; 16];
+            let input = [1u8; 16];
+            let mut text = [3u8; 16];
+            let expected = [3u8; 16];
+
+            assert!(key_128::mode_ctr::encrypt_in_place::<Aes128Ctr>(&mut text[..], &key, &iv[..]).is_ok());
+
+            assert_ne!(text, expected);
+
+            assert!(key_128::mode_ctr::encrypt_in_place::<Aes128Ctr>(&mut text[..], &key, &iv[..]).is_ok());
+
+            assert_eq!(text, expected);
         }
     } // end of test_ctr
 } // end of tests

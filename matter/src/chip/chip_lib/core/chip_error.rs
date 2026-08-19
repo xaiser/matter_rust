@@ -324,6 +324,13 @@ macro_rules! chip_error_unsupported_signature_type {
 }
 
 #[macro_export]
+macro_rules! chip_error_invalid_message_length {
+    () => {
+        chip_core_error!(0x18)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_buffer_too_small {
     () => {
         chip_core_error!(0x19)

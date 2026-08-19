@@ -431,6 +431,18 @@ impl PacketBufferHandle {
         unsafe { (*self.m_buffer).has_chained_buffer() }
     }
 
+    pub fn start(&self) -> * mut u8 {
+        unsafe {
+            (*self.m_buffer).start()
+        }
+    }
+
+    pub fn total_length(&self) -> usize {
+        unsafe {
+            (*self.m_buffer).tot_len as usize
+        }
+    }
+
     fn hold(buffer: *mut PacketBuffer) -> Self {
         if false == buffer.is_null() {
             unsafe {
