@@ -23,6 +23,10 @@ impl<'a> Text<'a> {
     }
 }
 
+// re-export
+pub use key_128::mode_ccm;
+pub use key_128::mode_ctr;
+
 pub mod key_128 {
     use super::Text;
     use crate::{
@@ -81,13 +85,13 @@ pub mod key_128 {
             ($nonce_ty:ty, $tag_len:expr,
              $text:expr, $aad:expr, $key:expr, $nonce:expr, $mic:expr) => {
                 match $tag_len {
-                    4  => encrypt::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    6  => encrypt::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    8  => encrypt::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    10 => encrypt::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    12 => encrypt::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    14 => encrypt::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
-                    16 => encrypt::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    4  => encrypt_text::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    6  => encrypt_text::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    8  => encrypt_text::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    10 => encrypt_text::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    12 => encrypt_text::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    14 => encrypt_text::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
+                    16 => encrypt_text::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $key, $nonce, $mic),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
@@ -113,13 +117,13 @@ pub mod key_128 {
             ($nonce_ty:ty, $tag_len:expr,
              $text:expr, $aad:expr, $mic:expr, $key:expr, $nonce:expr) => {
                 match $tag_len {
-                    4  => decrypt::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    6  => decrypt::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    8  => decrypt::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    10 => decrypt::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    12 => decrypt::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    14 => decrypt::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
-                    16 => decrypt::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    4  => decrypt_text::<Ccm<Aes128, U4,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    6  => decrypt_text::<Ccm<Aes128, U6,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    8  => decrypt_text::<Ccm<Aes128, U8,  $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    10 => decrypt_text::<Ccm<Aes128, U10, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    12 => decrypt_text::<Ccm<Aes128, U12, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    14 => decrypt_text::<Ccm<Aes128, U14, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
+                    16 => decrypt_text::<Ccm<Aes128, U16, $nonce_ty>>($text, $aad, $mic, $key, $nonce),
                     _ => Err(chip_error_invalid_argument!()),
                 }
             };
@@ -141,6 +145,10 @@ pub mod key_128 {
             };
         }
 
+        pub fn encrypt(text: Text, aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+            dispatch_encrypt!(nonce.len(), mic.len(), text, aad, key, nonce, mic)
+        }
+
         pub fn encrypt_autosize(plaintext: &[u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
             let text = Text::new_b2b(plaintext, ciphertext);
             dispatch_encrypt!(nonce.len(), mic.len(), text, aad, key, nonce, mic)
@@ -149,6 +157,10 @@ pub mod key_128 {
         pub fn encrypt_in_place_autosize(text: &mut [u8], aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
             let text = Text::new_in_place(text);
             dispatch_encrypt!(nonce.len(), mic.len(), text, aad, key, nonce, mic)
+        }
+
+        pub fn decrypt(text: Text, aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
+            dispatch_decrypt!(nonce.len(), tag.len(), text, aad, tag, key, nonce)
         }
 
         pub fn decrypt_autosize(ciphertext: &[u8], aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
@@ -161,7 +173,7 @@ pub mod key_128 {
             dispatch_decrypt!(nonce.len(), tag.len(), text, aad, tag, key, nonce)
         }
 
-        pub fn encrypt<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+        pub fn encrypt_text<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], key: &Aes128KeyHandle, nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
             verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
 
             let ccm = create_aes128_ccm::<C>(key).map_err(|_| chip_error_invalid_argument!())?;
@@ -199,7 +211,7 @@ pub mod key_128 {
             Ok(SymmetricEncryptResult::new(tag_size, input_size))
         }
         
-        pub fn decrypt<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
+        pub fn decrypt_text<C: KeyInit + AeadInPlace + AeadCore>(text: Text, aad: &[u8], tag: &[u8], key: &Aes128KeyHandle, nonce: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
             verify_or_return_error!(<C as AeadCore>::NonceSize::to_usize() == nonce.len(), Err(chip_error_invalid_argument!()));
             verify_or_return_error!(<C as AeadCore>::TagSize::to_usize() == tag.len(), Err(chip_error_invalid_argument!()));
 
@@ -313,14 +325,20 @@ pub mod key_128 {
             self.m_hash
         }
 
+        fn message_encrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+        /*
         fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
             let text = Text::new_b2b(plaintext, ciphertext);
-            return mode_ccm::encrypt::<M>(text, aad, &self.m_encryption_key, nonce, mic);
+        */
+            return mode_ccm::encrypt_text::<M>(text, aad, &self.m_encryption_key, nonce, mic);
         }
 
+        fn message_decrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
+        /*
         fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
             let text = Text::new_b2b(ciphertext, plaintext);
-            return mode_ccm::decrypt::<M>(text, aad, mic, &self.m_encryption_key, nonce);
+        */
+            return mode_ccm::decrypt_text::<M>(text, aad, mic, &self.m_encryption_key, nonce);
         }
 
         fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
@@ -431,7 +449,7 @@ mod tests {
             let input = [1u8; 16];
             let mut output = [1u8; 16];
 
-            let result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
+            let result = key_128::mode_ccm::encrypt_text::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
 
             assert!(result.is_ok());
         }
@@ -445,7 +463,7 @@ mod tests {
 
             let mut input = [1u8; 16];
 
-            let result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_in_place(&mut input), &aad, &key, &nonce, &mut tag);
+            let result = key_128::mode_ccm::encrypt_text::<Ccm<Aes128, U16, U13>>(Text::new_in_place(&mut input), &aad, &key, &nonce, &mut tag);
 
             assert!(result.is_ok());
         }
@@ -460,13 +478,13 @@ mod tests {
             let input = [1u8; 16];
             let mut output = [1u8; 16];
 
-            let en_result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
+            let en_result = key_128::mode_ccm::encrypt_text::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
 
             assert!(en_result.is_ok());
             let en_result = en_result.unwrap();
 
             let mut output_2 = [1u8; 16];
-            let de_result = key_128::mode_ccm::decrypt::<Ccm<Aes128, U16, U13>>(
+            let de_result = key_128::mode_ccm::decrypt_text::<Ccm<Aes128, U16, U13>>(
                 Text::new_b2b(&output[..en_result.ciphertext_size], &mut output_2), &aad, &tag[..en_result.tag_size], 
                 &key, &nonce);
 
@@ -483,12 +501,12 @@ mod tests {
             let input = [2u8; 16];
             let mut output = [1u8; 16];
 
-            let en_result = key_128::mode_ccm::encrypt::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
+            let en_result = key_128::mode_ccm::encrypt_text::<Ccm<Aes128, U16, U13>>(Text::new_b2b(&input, &mut output), &aad, &key, &nonce, &mut tag);
 
             assert!(en_result.is_ok());
             let en_result = en_result.unwrap();
 
-            let de_result = key_128::mode_ccm::decrypt::<Ccm<Aes128, U16, U13>>(
+            let de_result = key_128::mode_ccm::decrypt_text::<Ccm<Aes128, U16, U13>>(
                 Text::new_in_place(&mut output[..en_result.ciphertext_size]), &aad, &tag[..en_result.tag_size], 
                 &key, &nonce);
 

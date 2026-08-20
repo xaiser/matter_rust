@@ -24,7 +24,7 @@ use crate::{
         },
         crypto::{
             GroupOperationalCredentials,
-            self, session_keystore::SessionKeystore, Aes128KeyHandle, Symmetric128BitsKeyByteArray, SymmetricKeyContext,
+            self, session_keystore::SessionKeystore, Aes128KeyHandle, Symmetric128BitsKeyByteArray, SymmetricKeyContext, Text,
         },
         GroupId, FabricIndex,
     },
@@ -2456,12 +2456,16 @@ pub mod iter_impl {
             self.m_key_hash
         }
 
-        fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
-            crypto::aes_ccm_encrypt(plaintext, aad, &self.m_encryption_key, nonce, ciphertext, mic)
+        //fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+        fn message_encrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError> {
+            //crypto::aes_ccm_encrypt(plaintext, aad, &self.m_encryption_key, nonce, ciphertext, mic)
+            crypto::aes::mode_ccm::encrypt(text, aad, &self.m_encryption_key, nonce, mic)
         }
 
-        fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
-            crypto::aes_ccm_decrypt(ciphertext, aad, mic, &self.m_encryption_key, nonce, plaintext)
+        //fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError> {
+        fn message_decrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &[u8]) -> Result<SymmetricDecryptResult, ChipError> {
+            //crypto::aes_ccm_decrypt(ciphertext, aad, mic, &self.m_encryption_key, nonce, plaintext)
+            crypto::aes::mode_ccm::decrypt(text, aad, mic, &self.m_encryption_key, nonce)
         }
 
         fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {

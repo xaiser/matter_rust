@@ -5,6 +5,8 @@ pub mod simple_rand;
 pub mod session_keystore;
 pub mod raw_session_keystore;
 pub mod aes;
+
+pub use aes::Text;
 //pub mod raw_symmetric_key_context;
 
 pub use operational_keystore::OperationalKeystore;

@@ -3,12 +3,13 @@ use crate::{
     chip::{
         chip_lib::support::buffer_writer::{self, BufferWriter},
         crypto::{
-            aes::key_128::{mode_ccm},
+            aes::mode_ccm,
             crypto_pal::{
                 Aes128KeyHandle, AttestationChallenge, SymmetricKeyContext, P256Keypair, P256PublicKey, HkdfKeyHandle,
                 P256EcdhDeriveSecret, ECPKeypair, SymmetricEncryptResult, SymmetricDecryptResult,
             },
             session_keystore::SessionKeystore,
+            Text,
         },
         transport::raw::message_header::{MessageAuthenticationCode, PacketHeader, KMAX_TAG_LEN},
         NodeId,
@@ -219,10 +220,11 @@ impl CryptoContext {
         }
     }
 
-    pub fn encrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &mut MessageAuthenticationCode) -> Result<SymmetricEncryptResult, ChipError> {
+    //pub fn encrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &mut MessageAuthenticationCode) -> Result<SymmetricEncryptResult, ChipError> {
+    pub fn encrypt(&self, text: Text, nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &mut MessageAuthenticationCode) -> Result<SymmetricEncryptResult, ChipError> {
         let tag_len = header.mic_tag_length();
 
-        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(text.len() > 0, Err(chip_error_invalid_argument!()));
 
         let mut aad = [0u8; Self::KMAX_AAD_LEN];
         let mut tag = [0u8; KMAX_TAG_LEN];
@@ -236,11 +238,13 @@ impl CryptoContext {
         if let Some(context_ptr) = self.m_key_context.as_ref() 
         {
             unsafe {
-                result_sizes = context_ptr.as_ref().message_encrypt(input, &aad[..aad_len], &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+                //result_sizes = context_ptr.as_ref().message_encrypt(input, &aad[..aad_len], &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+                result_sizes = context_ptr.as_ref().message_encrypt(text, &aad[..aad_len], &nonce[..], &mut tag[..tag_len as usize])?;
             }
         } else {
             verify_or_return_error!(self.m_key_available, Err(chip_error_invalid_use_of_session_key!()));
-            result_sizes = mode_ccm::encrypt_autosize(input, &aad[..aad_len], &self.m_encryption_key, &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+            //result_sizes = mode_ccm::encrypt_autosize(input, &aad[..aad_len], &self.m_encryption_key, &nonce[..], &mut tag[..tag_len as usize], &mut output[..input.len()])?;
+            result_sizes = mode_ccm::encrypt(text, &aad[..aad_len], &self.m_encryption_key, &nonce[..], &mut tag[..tag_len as usize])?;
         }
 
         if !mac.set_tag_ref(&tag[..tag_len as usize]) {
@@ -250,12 +254,14 @@ impl CryptoContext {
         Ok(result_sizes)
     }
 
-    pub fn decrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> Result<SymmetricDecryptResult, ChipError> {
+    //pub fn decrypt(&self, input: &[u8], output: &mut [u8], nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> Result<SymmetricDecryptResult, ChipError> {
+    pub fn decrypt(&self, text: Text, nonce: &[u8; Self::KAESCCM_NONCE_LEN], header: &PacketHeader, mac: &MessageAuthenticationCode) -> Result<SymmetricDecryptResult, ChipError> {
         let tag_len = header.mic_tag_length();
         let tag = mac.get_tag();
         verify_or_return_error!(usize::from(tag_len) <= tag.len(), Err(chip_error_invalid_argument!()));
 
-        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+        //verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(text.len() > 0, Err(chip_error_invalid_argument!()));
 
         let mut aad = [0u8; Self::KMAX_AAD_LEN];
 
@@ -267,11 +273,11 @@ impl CryptoContext {
         if let Some(context_ptr) = self.m_key_context.as_ref() 
         {
             unsafe {
-                result_sizes = context_ptr.as_ref().message_decrypt(input, &aad[..aad_len], &nonce[..], &tag[..tag_len as usize], &mut output[..input.len()])?;
+                result_sizes = context_ptr.as_ref().message_decrypt(text, &aad[..aad_len], &nonce[..], &tag[..tag_len as usize])?;
             }
         } else {
             verify_or_return_error!(self.m_key_available, Err(chip_error_invalid_use_of_session_key!()));
-            result_sizes = mode_ccm::decrypt_autosize(input, &aad[..aad_len], &tag[..tag_len as usize], &self.m_decryption_key, &nonce[..], &mut output[..input.len()])?;
+            result_sizes = mode_ccm::decrypt(text, &aad[..aad_len], &tag[..tag_len as usize], &self.m_decryption_key, &nonce[..])?;
         }
 
         Ok(result_sizes)
@@ -344,6 +350,7 @@ mod tests {
                 Symmetric128BitsKeyByteArray, Aes128KeyHandle, Hmac128KeyHandle, HkdfKeyHandle, Symmetric128BitsKeyHandle,
                 P256EcdhDeriveSecret, AttestationChallenge, FromOpaqueContext, OpaqueContext, HKDFSha, clear_secret_data,
                 ECPKeyTarget, P256KeypairBase,
+                Text,
             },
         },
     };
@@ -508,11 +515,13 @@ mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        //assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        assert!(context.encrypt(Text::new_b2b(&input, &mut output), &nonce, &header, &mut mac).is_ok());
 
         let mut output_2 = [0u8; 16];
 
-        assert!(context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        //assert!(context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        assert!(context.decrypt(Text::new_b2b(&output, &mut output_2), &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
     }
 
     #[test]
@@ -537,7 +546,8 @@ mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        //assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        assert!(!context.encrypt(Text::new_b2b(&input, &mut output), &nonce, &header, &mut mac).is_ok());
     }
 
     #[test]
@@ -562,7 +572,8 @@ mod tests {
         let header = PacketHeader::default();
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        //assert!(!context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        assert!(!context.encrypt(Text::new_b2b(&input, &mut output), &nonce, &header, &mut mac).is_ok());
     }
 
     #[test]
@@ -587,11 +598,13 @@ mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        //assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        assert!(context.encrypt(Text::new_b2b(&input, &mut output), &nonce, &header, &mut mac).is_ok());
 
         let mut output_2 = [];
 
-        assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        //assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        assert!(!context.decrypt(Text::new_b2b(&output, &mut output_2), &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
     }
 
     #[test]
@@ -616,12 +629,14 @@ mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        //assert!(context.encrypt(&input, &mut output, &nonce, &header, &mut mac).is_ok());
+        assert!(context.encrypt(Text::new_b2b(&input, &mut output), &nonce, &header, &mut mac).is_ok());
 
         let mut output_2 = [0u8; 16];
         let header = PacketHeader::default();
 
-        assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        //assert!(!context.decrypt(&output, &mut output_2, &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        assert!(!context.decrypt(Text::new_b2b(&output, &mut output_2), &nonce, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
     }
 
     #[test]

@@ -3,12 +3,17 @@
 // for generic_array
 #![allow(deprecated)]
 
-use crate::chip::chip_lib::core::chip_config::{
-    CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,
-};
-use crate::chip::chip_lib::support::{
-    buffer_writer::{self, BufferWriter},
-    buffer_reader as encoding,
+use crate::chip::{
+    chip_lib::{
+        core::chip_config::{
+            CHIP_CONFIG_HKDF_KEY_HANDLE_CONTEXT_SIZE, CHIP_CONFIG_SHA256_CONTEXT_SIZE,
+        },
+        support::{
+            buffer_writer::{self, BufferWriter},
+            buffer_reader as encoding,
+        },
+    },
+    crypto::Text,
 };
 use crate::chip::CryptoRng;
 use crate::chip::{VendorId, FabricId, FabricIndex};
@@ -1559,9 +1564,14 @@ impl HKDFSha {
 pub trait SymmetricKeyContext {
     fn get_key_hash(&mut self) -> u16;
 
+    /*
     fn message_encrypt(&self, plaintext: &[u8], aad: &[u8], nonce: &[u8], mic: &mut [u8], ciphertext: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError>;
 
     fn message_decrypt(&self, ciphertext: &[u8], aad: &[u8], nonce: &[u8], mic: &[u8], plaintext: &mut [u8]) -> Result<SymmetricDecryptResult, ChipError>;
+    */
+    fn message_encrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &mut [u8]) -> Result<SymmetricEncryptResult, ChipError>;
+
+    fn message_decrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &[u8]) -> Result<SymmetricDecryptResult, ChipError>;
 
     fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
 
