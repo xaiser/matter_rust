@@ -552,7 +552,7 @@ mod tests {
         fn decrypt_in_place() {
             let key = Aes128KeyHandle::new();
             let iv = [1u8; 16];
-            let input = [1u8; 16];
+            //let input = [1u8; 16];
             let mut text = [3u8; 16];
             let expected = [3u8; 16];
 

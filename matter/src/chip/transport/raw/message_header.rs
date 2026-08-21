@@ -1095,7 +1095,7 @@ impl MessageAuthenticationCode {
             Err(chip_error_invalid_argument!())
         );
 
-        data.copy_from_slice(&self.m_tag[..(tag_len as usize)]);
+        data[..tag_len as usize].copy_from_slice(&self.m_tag[..(tag_len as usize)]);
 
         *encode_size = tag_len;
 

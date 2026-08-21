@@ -1,9 +1,11 @@
-#[cfg(test)]
+//#[cfg(test)]
 use core::{mem, ptr};
+/*
 #[cfg(not(test))]
 extern crate std;
 #[cfg(not(test))]
 use std::*;
+*/
 
 use super::system_config::*;
 use crate::chip_system_align_size;
@@ -16,6 +18,17 @@ static mut S_BUFFER_POLL: [BufferPoolElement; CHIP_SYSTEM_CONFIG_PACKETBUFFER_PO
     [ZEROED_PACKETBUFFER; CHIP_SYSTEM_CONFIG_PACKETBUFFER_POOL_SIZE as usize];
 static mut S_FREE_LIST: *mut PacketBuffer = ptr::null_mut();
 static mut S_IS_POOL_INIT: bool = false;
+
+/// A test only function to reset the pool
+#[cfg(test)]
+pub fn reset_pool() {
+    unsafe {
+        // reset static memory block
+        S_BUFFER_POLL =
+            [ZEROED_PACKETBUFFER; CHIP_SYSTEM_CONFIG_PACKETBUFFER_POOL_SIZE as usize];
+        S_IS_POOL_INIT = false;
+    }
+}
 
 pub struct PacketBuffer {
     pub next: *mut PacketBuffer,
@@ -44,6 +57,14 @@ impl PacketBuffer {
         CHIP_SYSTEM_CONFIG_MAX_LARGE_BUFFER_SIZE_BYTES;
     pub const KLARGE_BUF_MAX_SIZE: u32 =
         Self::KLARGE_BUFFER_MAX_SIZE_WITHOUT_RESERVE - Self::KDEFAULT_HEADER_RESERVE as u32;
+
+    fn check(buffer: * const PacketBuffer) {
+        unsafe {
+            if (*buffer).alloc_size() < ((*buffer).reserved_size() + (*buffer).len as u16) as usize {
+                panic!("packet buffer overflow");
+            }
+        }
+    }
 
     pub fn chained_buffer(&self) -> *mut PacketBuffer {
         return self.next;
@@ -201,8 +222,12 @@ impl PacketBuffer {
         }
     }
 
-    pub fn data_len(&mut self) -> u32 {
+    pub fn data_len(&self) -> u32 {
         return self.len;
+    }
+
+    pub fn total_length(&self) -> usize {
+        self.tot_len as usize
     }
 
     pub fn reserved_size(&self) -> u16 {
@@ -232,6 +257,41 @@ impl PacketBuffer {
         }
 
         true
+    }
+
+    pub fn available_data_length(&self) -> usize {
+        self.max_data_length() - self.data_len() as usize
+    }
+
+    pub fn set_data_length(&mut self, mut a_new_len: usize) {
+        self.set_data_length_chained(a_new_len, ptr::null_mut());
+    }
+
+    pub fn set_data_length_chained(&mut self, mut a_new_len: usize, mut chain_head: * mut Self) {
+        let max_data_len = self.max_data_length();
+
+        let new_len = {
+            if a_new_len > max_data_len {
+                max_data_len
+            } else {
+                a_new_len
+            }
+        };
+
+        let l_delta: u64 = (new_len as u64) - (self.len as u64);
+
+        self.len = new_len as u32;
+        self.tot_len = (self.tot_len as u64 + l_delta) as u32;
+
+        Self::check(self as _);
+
+        while !chain_head.is_null() && !ptr::eq(self as _, chain_head) {
+            Self::check(chain_head);
+            unsafe {
+                (*chain_head).tot_len = (((*chain_head).tot_len as u64) + l_delta) as u32;
+                chain_head = (*chain_head).chained_buffer();
+            }
+        }
     }
 }
 
@@ -437,6 +497,12 @@ impl PacketBufferHandle {
         }
     }
 
+    pub fn data_len(&self) -> u32 {
+        unsafe {
+            (*self.m_buffer).data_len()
+        }
+    }
+
     pub fn total_length(&self) -> usize {
         unsafe {
             (*self.m_buffer).tot_len as usize
@@ -450,6 +516,18 @@ impl PacketBufferHandle {
             }
         }
         return PacketBufferHandle { m_buffer: buffer };
+    }
+
+    pub fn available_data_length(&self) -> usize {
+        unsafe {
+            (*self.m_buffer).available_data_length()
+        }
+    }
+
+    pub fn set_data_length(&mut self, mut a_new_len: usize) {
+        unsafe {
+            (*self.m_buffer).set_data_length(a_new_len)
+        }
     }
 }
 
@@ -792,6 +870,41 @@ mod test {
                 let after_move: *mut u8 = (*pb).start();
                 assert_ne!(before_move, after_move);
             }
+        }
+    }
+
+    mod others {
+        use super::super::*;
+        use std::*;
+
+        fn set_up() {
+            unsafe {
+                // reset static memory block
+                S_BUFFER_POLL =
+                    [ZEROED_PACKETBUFFER; CHIP_SYSTEM_CONFIG_PACKETBUFFER_POOL_SIZE as usize];
+                S_IS_POOL_INIT = false;
+            }
+        }
+
+        #[test]
+        fn push_one_and_set_length() {
+            set_up();
+            let data1: [u8; 4] = [11, 12, 13, 14];
+            let data2: [u8; 4] = [21, 22, 23, 24];
+            let mut b1 = PacketBufferHandle::new_with_data(&data1[0..4], 0, 8).unwrap();
+            let b2 = PacketBufferHandle::new_with_data(&data2[0..3], 0, 8).unwrap();
+            let b2_raw = b2.get_raw();
+            let b1_raw = b1.get_raw();
+            b1.add_to_end(b2);
+            assert_eq!(4, b1.data_len());
+            assert_eq!(7, b1.total_length());
+            unsafe {
+                assert_eq!(3, (*b2_raw).total_length());
+                (*b2_raw).set_data_length_chained(4, b1_raw);
+                assert_eq!(4, (*b2_raw).total_length());
+            }
+            assert_eq!(4, b1.data_len());
+            assert_eq!(8, b1.total_length());
         }
     }
 }
