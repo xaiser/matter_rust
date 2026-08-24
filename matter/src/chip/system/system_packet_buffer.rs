@@ -278,17 +278,20 @@ impl PacketBuffer {
             }
         };
 
-        let l_delta: u64 = (new_len as u64) - (self.len as u64);
+        //let l_delta: u64 = (new_len as u64) - (self.len as u64);
+        let l_delta: u64 = (new_len as u64).wrapping_sub(self.len as u64);
 
         self.len = new_len as u32;
-        self.tot_len = (self.tot_len as u64 + l_delta) as u32;
+        //self.tot_len = (self.tot_len as u64 + l_delta) as u32;
+        self.tot_len = (self.tot_len as u64).wrapping_add(l_delta) as u32;
 
         Self::check(self as _);
 
         while !chain_head.is_null() && !ptr::eq(self as _, chain_head) {
             Self::check(chain_head);
             unsafe {
-                (*chain_head).tot_len = (((*chain_head).tot_len as u64) + l_delta) as u32;
+                //(*chain_head).tot_len = (((*chain_head).tot_len as u64) + l_delta) as u32;
+                (*chain_head).tot_len = ((*chain_head).tot_len as u64).wrapping_add(l_delta) as u32;
                 chain_head = (*chain_head).chained_buffer();
             }
         }
@@ -905,6 +908,27 @@ mod test {
             }
             assert_eq!(4, b1.data_len());
             assert_eq!(8, b1.total_length());
+        }
+
+        #[test]
+        fn push_one_and_set_length_shorter() {
+            set_up();
+            let data1: [u8; 4] = [11, 12, 13, 14];
+            let data2: [u8; 4] = [21, 22, 23, 24];
+            let mut b1 = PacketBufferHandle::new_with_data(&data1[0..4], 0, 8).unwrap();
+            let b2 = PacketBufferHandle::new_with_data(&data2[0..3], 0, 8).unwrap();
+            let b2_raw = b2.get_raw();
+            let b1_raw = b1.get_raw();
+            b1.add_to_end(b2);
+            assert_eq!(4, b1.data_len());
+            assert_eq!(7, b1.total_length());
+            unsafe {
+                assert_eq!(3, (*b2_raw).total_length());
+                (*b2_raw).set_data_length_chained(2, b1_raw);
+                assert_eq!(2, (*b2_raw).total_length());
+            }
+            assert_eq!(4, b1.data_len());
+            assert_eq!(6, b1.total_length());
         }
     }
 }
