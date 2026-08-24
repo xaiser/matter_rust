@@ -263,11 +263,11 @@ impl PacketBuffer {
         self.max_data_length() - self.data_len() as usize
     }
 
-    pub fn set_data_length(&mut self, mut a_new_len: usize) {
+    pub fn set_data_length(&mut self, a_new_len: usize) {
         self.set_data_length_chained(a_new_len, ptr::null_mut());
     }
 
-    pub fn set_data_length_chained(&mut self, mut a_new_len: usize, mut chain_head: * mut Self) {
+    pub fn set_data_length_chained(&mut self, a_new_len: usize, mut chain_head: * mut Self) {
         let max_data_len = self.max_data_length();
 
         let new_len = {
@@ -527,7 +527,7 @@ impl PacketBufferHandle {
         }
     }
 
-    pub fn set_data_length(&mut self, mut a_new_len: usize) {
+    pub fn set_data_length(&mut self, a_new_len: usize) {
         unsafe {
             (*self.m_buffer).set_data_length(a_new_len)
         }
