@@ -57,7 +57,7 @@ pub(crate) const KMAX_TAG_LEN: usize = 16;
 // This is somewhat of an under-estimate, because in practice any time we have a
 // tag we will not have source/destination node IDs, but above we are including
 // those in the header sizes.
-const KMAX_APP_MESSAGE_LEN: usize = KMAX_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES - KMAX_TAG_LEN;
+pub const KMAX_APP_MESSAGE_LEN: usize = KMAX_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES - KMAX_TAG_LEN;
 
 pub const KMSG_UNICAST_SESSION_ID_UNSECURED: u16 = 0x0000;
 
@@ -69,7 +69,7 @@ const KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES: usize =
     crate::chip::system::system_packet_buffer::PacketBuffer::KLARGE_BUF_MAX_SIZE as usize
         - KMAX_TCP_AND_IP_HEADER_SIZE_BYTES;
 
-const KMAX_LARGE_APP_MESSAGE_LEN: usize =
+pub const KMAX_LARGE_APP_MESSAGE_LEN: usize =
     KMAX_LARGE_APPLICATION_PAYLOAD_AND_MIC_SIZE_BYTES - KMAX_TAG_LEN;
 
 pub type PacketHeaderFlags = i32;

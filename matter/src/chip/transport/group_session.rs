@@ -238,4 +238,4 @@ pub mod outgoing {
     }
 }
 
-pub use outgoing::OutgoingGroupSession;
+pub use outgoing::{OutgoingGroupSession, AsRef, AsMut};

@@ -29,6 +29,7 @@ use crate::{
             raw::{
                 peer_address::PeerAddress,
                 base::MessageTransportContext,
+                message_header::{PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN},
             },
             secure_session_table::SecureSessionTable,
             unauthenticated_session::UnauthenticatedSessionTable,
@@ -38,8 +39,9 @@ use crate::{
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::MessageCounter,
-            session::{SharedSession, SessionHandle, SessionBase},
-            secure_session::{SecureSession, AsRef, mark_for_evication},
+            session::{SharedSession, SessionHandle, SessionBase, SessionType},
+            secure_session::{SecureSession, AsRef as SecureSessionAsRef, mark_for_evication},
+            group_session::{OutgoingGroupSession, AsRef as OutgoginGroupSessionAsRef},
         },
         ScopedNodeId, FabricIndex, FabricId, NodeId,
     },
@@ -51,14 +53,16 @@ use crate::{
     chip_error_invalid_fabric_index,
     chip_error_incorrect_state,
     chip_error_invalid_argument,
+    chip_error_message_too_long,
+    chip_error_internal,
     verify_or_return_error,
     verify_or_return_value,
+    matter_trace_scope,
     //verify_or_die,
 };
 
 use crate::chip::system::system_packet_buffer::PacketBufferHandle;
 use crate::chip::system::LayerImpl;
-use crate::chip::transport::raw::message_header::{PacketHeader, PayloadHeader};
 
 use core::ptr::{self, NonNull};
 
@@ -356,7 +360,8 @@ where
         self.m_secure_sessions.for_each_session(|session| {
             if let Ok(session_ref) = session.try_borrow() {
                 let (is_case_session, peer_node_id) = {
-                    let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
                         (ss.is_case_session(), ss.get_peer_node_id())
                     } else {
@@ -406,7 +411,8 @@ where
         self.m_secure_sessions.for_each_session_const(|session| {
             if let Ok(session_ref) = session.try_borrow() {
                 let (is_case_session, peer_node_id) = {
-                    let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
                         (ss.is_case_session(), ss.get_peer_node_id())
                     } else {
@@ -456,7 +462,8 @@ where
         self.m_secure_sessions.for_each_session(|session| {
             if let Ok(session_ref) = session.try_borrow() {
                 let (is_case_session, peer_node_id) = {
-                    let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
                         (ss.is_case_session(), ss.get_peer_node_id())
                     } else {
@@ -505,7 +512,8 @@ where
         self.m_secure_sessions.for_each_session_const(|session| {
             if let Ok(session_ref) = session.try_borrow() {
                 let (is_case_session, peer_node_id) = {
-                    let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
                         (ss.is_case_session(), ss.get_peer_node_id())
                     } else {
@@ -553,6 +561,57 @@ where
         }
 
         return self.m_unauthenticated_sessions.alloc_initiator(ephemeral_initiator_node_id, peer_address, config).ok();
+    }
+
+    pub fn prepare_message(&self, session_handle: &SessionHandle, payload_header: &PayloadHeader, message: PacketBufferHandle) -> Result<EncryptedPacketBufferHandle, ChipError> {
+        matter_trace_scope!("PrepareMessage", "SessionManager");
+
+        let mut packet_header = PacketHeader::default();
+        let is_control_msg = Self::is_control_message(payload_header);
+
+        if is_control_msg {
+            packet_header = packet_header.set_secure_session_control_msg(true);
+        }
+
+        if session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.allow_large_payload() {
+            verify_or_return_error!(message.total_length() <= KMAX_LARGE_APP_MESSAGE_LEN, Err(chip_error_message_too_long!()));
+        } else {
+            verify_or_return_error!(message.total_length() <= KMAX_APP_MESSAGE_LEN, Err(chip_error_message_too_long!()));
+        }
+
+        #[cfg(feature = "chip_progress_logging")]
+        //let destination;
+        #[cfg(feature = "chip_progress_logging")]
+        //let fabric_index;
+
+        //let source_node_id;
+        //let destination_address;
+
+        match session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type() {
+            SessionType::KGroupOutgoing => {
+                let (group_id, fabric_index) = {
+                    if let Ok(session_ref) = session_handle.try_ref() {
+                        if let Some(group_session) = OutgoginGroupSessionAsRef::as_ref(&(*session_ref)) {
+                            (group_session.get_group_id(), group_session.get_fabric_index())
+                        } else {
+                            return Err(chip_error_incorrect_state!());
+                        }
+                    } else {
+                        return Err(chip_error_incorrect_state!());
+                    }
+                };
+            },
+            SessionType::KSecure => {
+            },
+            SessionType::KUnauthenticated => {
+            },
+            _ => {
+                return Err(chip_error_internal!());
+            }
+        }
+
+
+        Err(chip_error_incorrect_state!())
     }
 
     fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, FabricId), ChipError> {

@@ -718,6 +718,19 @@ impl group_session::outgoing::AsRef for Session {
     }
 }
 
+impl group_session::outgoing::AsRef for &Session {
+    fn as_ref(&self) -> Option<&OutgoingGroupSession> {
+        match self {
+            Session::OutgoingGroupSession(session) => {
+                Some(session)
+            },
+            _ => {
+                None
+            }
+        }
+    }
+}
+
 impl SessionBasePrivate for Session {
     fn holders(&mut self) -> &mut SessionHolderList {
         match self {

@@ -276,7 +276,7 @@ pub trait GroupDataProvider {
 
     fn get_max_group_keys_per_fabric(&self) -> u16;
 
-    fn init(&mut self) -> ChipErrorResult;
+    fn init(&self) -> ChipErrorResult;
 
     fn finish(&mut self);
 

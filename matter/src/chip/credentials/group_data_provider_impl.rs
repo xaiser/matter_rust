@@ -3001,7 +3001,7 @@ where
         self.m_max_group_keys_per_fabric
     }
 
-    fn init(&mut self) -> ChipErrorResult {
+    fn init(&self) -> ChipErrorResult {
         if self.m_storage.is_none() || self.m_sesion_keystore.is_none() {
             return Err(chip_error_incorrect_state!());
         }
