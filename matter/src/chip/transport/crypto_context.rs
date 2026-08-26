@@ -194,6 +194,10 @@ impl CryptoContext {
         chip_ok!()
     }
 
+    pub fn new_nonce() -> [u8; Self::KAESCCM_NONCE_LEN] {
+        [0u8; Self::KAESCCM_NONCE_LEN]
+    }
+
     pub fn build_nonce(nonce: &mut [u8; Self::KAESCCM_NONCE_LEN], security_flags: u8, message_counter: u32, node_id: NodeId) -> ChipErrorResult {
         let mut bbuf = buffer_writer::little_endian::BufferWriter::default_with_buf(&mut nonce[..]);
         bbuf.put_u8(security_flags);

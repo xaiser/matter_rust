@@ -25,12 +25,14 @@ use crate::{
         messaging::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
         },
+        tracing,
         transport::{
             raw::{
                 peer_address::PeerAddress,
                 base::MessageTransportContext,
-                message_header::{PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN},
+                message_header::{header, PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN},
             },
+            crypto_context::CryptoContext,
             secure_session_table::SecureSessionTable,
             unauthenticated_session::UnauthenticatedSessionTable,
             group_peer_message_counter::{GroupOutgoingCounters, GroupPeerTable},
@@ -42,6 +44,7 @@ use crate::{
             session::{SharedSession, SessionHandle, SessionBase, SessionType},
             secure_session::{SecureSession, AsRef as SecureSessionAsRef, mark_for_evication},
             group_session::{OutgoingGroupSession, AsRef as OutgoginGroupSessionAsRef},
+            secure_message_codec,
         },
         ScopedNodeId, FabricIndex, FabricId, NodeId,
     },
@@ -58,6 +61,7 @@ use crate::{
     verify_or_return_error,
     verify_or_return_value,
     matter_trace_scope,
+    matter_log_message_send,
     //verify_or_die,
 };
 
@@ -563,7 +567,7 @@ where
         return self.m_unauthenticated_sessions.alloc_initiator(ephemeral_initiator_node_id, peer_address, config).ok();
     }
 
-    pub fn prepare_message(&self, session_handle: &SessionHandle, payload_header: &PayloadHeader, message: PacketBufferHandle) -> Result<EncryptedPacketBufferHandle, ChipError> {
+    pub fn prepare_message(&mut self, session_handle: &SessionHandle, payload_header: &PayloadHeader, message: PacketBufferHandle) -> Result<EncryptedPacketBufferHandle, ChipError> {
         matter_trace_scope!("PrepareMessage", "SessionManager");
 
         let mut packet_header = PacketHeader::default();
@@ -584,8 +588,8 @@ where
         #[cfg(feature = "chip_progress_logging")]
         //let fabric_index;
 
-        //let source_node_id;
-        //let destination_address;
+        let source_node_id;
+        let destination_address;
 
         match session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type() {
             SessionType::KGroupOutgoing => {
@@ -600,6 +604,53 @@ where
                         return Err(chip_error_incorrect_state!());
                     }
                 };
+                let fabric_id;
+                (source_node_id, fabric_id) = {
+                    if let Some(table_ptr) = self.m_fabric_table {
+                        unsafe {
+                            let fabric = table_ptr.as_ref().find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_argument!())?;
+                            (fabric.get_node_id(), fabric.get_fabric_id())
+                        }
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                };
+                let key_context = {
+                    if let Some(mut groups_ptr) = self.m_group_data_provider {
+                        unsafe {
+                            groups_ptr.as_mut().get_key_context(fabric_index, group_id)?
+                        }
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                };
+                packet_header = packet_header.set_destination_group_id(group_id);
+                packet_header = packet_header.set_message_counter(self.m_group_clinent_counter.get_counter(is_control_msg));
+                let _ = self.m_group_clinent_counter.increment_counter(is_control_msg).inspect_err(|e|
+                    chip_log_error!(ExchangeManager, "cannot increment counter {:?}", e)
+                );
+                packet_header = packet_header.set_session_type(header::SessionType::KGroupSession);
+                packet_header = packet_header.set_source_node_id(source_node_id);
+
+                verify_or_return_error!(packet_header.is_valid_group_msg(), Err(chip_error_internal!()));
+
+                destination_address = PeerAddress::multicast(fabric_id, group_id);
+
+                unsafe {
+                    matter_log_message_send!(tracing::OutgoingMessageType::KgroupMessage, payload_header, &packet_header, 
+                        core::slice::from_raw_parts(message.start(), message.total_length()));
+                }
+
+                packet_header = packet_header.set_session_id(key_context.get_key_hash());
+                let nonce = CryptoContext::new_nonce();
+                {
+                    let key_context = key_context;
+                    CryptoContext::build_nonce(&mut nonce, packet_header.get_security_flags(), packet_header.get_message_counter(), 
+                        source_node_id)?;
+                    let crypto_context = CryptoContext::new_with_key_contxt(NonNull::from_ref(&key_context));
+                    secure_message_codec::encrypt(&crypto_context, &nonce, payload_header, &packet_header, &mut message)
+                }?
+                
             },
             SessionType::KSecure => {
             },

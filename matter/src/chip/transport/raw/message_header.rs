@@ -315,6 +315,13 @@ impl PacketHeader {
         self
     }
 
+    pub fn set_destination_group_id(mut self, id: GroupId) -> Self {
+        self.m_destination_group_id = Some(id);
+        self.m_msg_flags
+            .insert(header::MsgFlagValues::KDestinationGroupIdPresent);
+        self
+    }
+
     pub fn set_source_node_id_option(mut self, id: Option<NodeId>) -> Self {
         self.m_source_node_id = id;
         self.m_msg_flags
