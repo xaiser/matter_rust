@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn encrypt_chained_buffer() {
         let mut msg = PacketBufferHandle::new(0,0).unwrap();
-        let mut msg_1 = PacketBufferHandle::new(0,0).unwrap();
+        let msg_1 = PacketBufferHandle::new(0,0).unwrap();
         let nonce = [1u8; NONCE_LENGTH];
         let payload_header = PayloadHeader::default();
         let mut packet_header = PacketHeader::default()

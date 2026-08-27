@@ -3,8 +3,8 @@ use crate::{
         chip_lib::{
             core::{
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
-                data_model_types::KUNDEFINED_FABRIC_INDEX,
-                node_id::{KUNDEFINED_NODE_ID, is_operational_node_id},
+                data_model_types::{KUNDEFINED_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID},
+                node_id::{KUNDEFINED_NODE_ID, is_operational_node_id, node_id_from_group_id},
             },
             support::{
                 iterators::Loop,
@@ -20,7 +20,7 @@ use crate::{
             },
         },
         crypto::{
-            self, session_keystore::SessionKeystore, P256PublicKey, crypto_pal::ECPKey,
+            self, session_keystore::SessionKeystore, P256PublicKey, crypto_pal::ECPKey, SymmetricKeyContext,
         },
         messaging::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
@@ -162,10 +162,10 @@ impl EncryptedPacketBufferHandle {
 
 pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate + 'd,
+    PSD: PersistentStorageDelegate + 'd + 'static,
     OK: crypto::OperationalKeystore + 'd,
     OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd,
+    SKS: SessionKeystore + 'd + 'static,
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
@@ -188,10 +188,10 @@ where
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate + 'd,
+    PSD: PersistentStorageDelegate + 'd + 'static,
     OK: crypto::OperationalKeystore + 'd,
     OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd,
+    SKS: SessionKeystore + 'd + 'static,
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
@@ -203,10 +203,10 @@ where
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate + 'd,
+    PSD: PersistentStorageDelegate + 'd + 'static,
     OK: crypto::OperationalKeystore + 'd,
     OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd,
+    SKS: SessionKeystore + 'd + 'static,
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
@@ -567,7 +567,7 @@ where
         return self.m_unauthenticated_sessions.alloc_initiator(ephemeral_initiator_node_id, peer_address, config).ok();
     }
 
-    pub fn prepare_message(&mut self, session_handle: &SessionHandle, payload_header: &PayloadHeader, message: PacketBufferHandle) -> Result<EncryptedPacketBufferHandle, ChipError> {
+    pub fn prepare_message(&mut self, session_handle: &SessionHandle, payload_header: &PayloadHeader, mut message: PacketBufferHandle) -> Result<EncryptedPacketBufferHandle, ChipError> {
         matter_trace_scope!("PrepareMessage", "SessionManager");
 
         let mut packet_header = PacketHeader::default();
@@ -584,9 +584,9 @@ where
         }
 
         #[cfg(feature = "chip_progress_logging")]
-        //let destination;
+        let cur_destination;
         #[cfg(feature = "chip_progress_logging")]
-        //let fabric_index;
+        let mut cur_fabric_index = KUNDEFINED_FABRIC_INDEX;
 
         let source_node_id;
         let destination_address;
@@ -615,7 +615,7 @@ where
                         return Err(chip_error_internal!());
                     }
                 };
-                let key_context = {
+                let mut key_context = {
                     if let Some(mut groups_ptr) = self.m_group_data_provider {
                         unsafe {
                             groups_ptr.as_mut().get_key_context(fabric_index, group_id)?
@@ -642,15 +642,20 @@ where
                 }
 
                 packet_header = packet_header.set_session_id(key_context.get_key_hash());
-                let nonce = CryptoContext::new_nonce();
-                {
+                let mut nonce = CryptoContext::new_nonce();
+                let _ = {
                     let key_context = key_context;
                     CryptoContext::build_nonce(&mut nonce, packet_header.get_security_flags(), packet_header.get_message_counter(), 
                         source_node_id)?;
-                    let crypto_context = CryptoContext::new_with_key_contxt(NonNull::from_ref(&key_context));
+                    let crypto_context = CryptoContext::new_with_key_context(NonNull::from_ref(&key_context));
                     secure_message_codec::encrypt(&crypto_context, &nonce, payload_header, &packet_header, &mut message)
-                }?
-                
+                }?;
+
+                #[cfg(feature = "chip_progress_logging")]
+                {
+                    cur_destination = node_id_from_group_id(group_id);
+                    cur_fabric_index = fabric_index;
+                }
             },
             SessionType::KSecure => {
             },
@@ -661,8 +666,24 @@ where
             }
         }
 
+        packet_header.encode_before_data(&message)?;
 
-        Err(chip_error_incorrect_state!())
+        #[cfg(feature = "chip_progress_logging")]
+        {
+            let mut compressed_fabric_id = KUNDEFINED_COMPRESSED_FABRIC_ID;
+
+            if cur_fabric_index != KUNDEFINED_FABRIC_INDEX {
+                if let Some(table_ptr) = self.m_fabric_table {
+                    unsafe {
+                        if let Some(fabric) = table_ptr.as_ref().find_fabric_with_index(cur_fabric_index) {
+                            compressed_fabric_id = fabric.get_compressed_fabric_id();
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(EncryptedPacketBufferHandle::mark_encrypted(message))
     }
 
     fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, FabricId), ChipError> {
