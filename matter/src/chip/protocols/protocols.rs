@@ -1,5 +1,47 @@
 use crate::chip::VendorId;
 
+pub const SUNKNOWN_TYPE_NAME: &str = "----";
+pub const NOT_SPECIFIED: Id = Id::const_not_specified();
+
+enum StandardProtocol {
+    SecureChannel,
+}
+
+impl StandardProtocol {
+    pub fn name(&self) -> &'static str {
+        match self {
+            StandardProtocol::SecureChannel => super::secure_channel::NAME,
+            _ => SUNKNOWN_TYPE_NAME,
+        }
+    }
+
+    pub fn msg_name(&self, msg_type: u8) -> &'static str {
+        match self {
+            StandardProtocol::SecureChannel => {
+                if let Ok(mt) = super::secure_channel::MsgType::try_from(msg_type) {
+                    mt.to_string()
+                } else {
+                    SUNKNOWN_TYPE_NAME
+                }
+            },
+            _ => SUNKNOWN_TYPE_NAME,
+        }
+    }
+}
+
+impl TryFrom<Id> for StandardProtocol {
+    type Error = ();
+
+    fn try_from(id: Id) -> Result<StandardProtocol, ()> {
+        let val = id.get_protocol_id();
+
+        match val {
+            val if val == super::secure_channel::ID.get_protocol_id() => Ok(StandardProtocol::SecureChannel),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Id {
     m_vendor_id: VendorId,
@@ -35,14 +77,25 @@ impl Id {
     pub fn get_protocol_id(&self) -> u16 {
         self.m_protocol_id
     }
-
-    /*
-    fn to_uint32(&self) -> u32 {
-        return (self.m_vendor_id as u32) << Self::KVENDOR_ID_SHIFT | (self.m_protocol_id as u32);
-    }
-    */
 }
 
+pub fn get_protocol_name(id: Id) -> &'static str {
+    if let Ok(p) = StandardProtocol::try_from(id) {
+        p.name()
+    } else {
+        SUNKNOWN_TYPE_NAME
+    }
+}
+
+pub fn get_message_type_name<'a>(protocol_id: Id, msg_type: u8) -> &'a str {
+    if let Ok(p) = StandardProtocol::try_from(protocol_id) {
+        p.msg_name(msg_type)
+    } else {
+        SUNKNOWN_TYPE_NAME
+    }
+}
+
+/*
 macro_rules! chip_standard_protocol {
     ($name:ident, $id:expr) => {
         pub mod $name {
@@ -51,25 +104,11 @@ macro_rules! chip_standard_protocol {
         }
     };
 }
+*/
 
-chip_standard_protocol!(secure_channel, 0x0000);
-chip_standard_protocol!(interaction_model, 0x0001);
-chip_standard_protocol!(bdx, 0x0002);
-chip_standard_protocol!(user_directed_commissioning, 0x0003);
-chip_standard_protocol!(echo, 0x0004);
+//chip_standard_protocol!(secure_channel, 0x0000);
+//chip_standard_protocol!(interaction_model, 0x0001);
+//chip_standard_protocol!(bdx, 0x0002);
+//chip_standard_protocol!(user_directed_commissioning, 0x0003);
+//chip_standard_protocol!(echo, 0x0004);
 
-pub const NOT_SPECIFIED: Id = Id::const_not_specified();
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::*;
-
-    /*
-    #[test]
-    fn to_uint32() {
-        let pid = Id::default(VendorId::Common, 0);
-        assert_eq!(0, pid.to_uint32());
-    }
-    */
-}

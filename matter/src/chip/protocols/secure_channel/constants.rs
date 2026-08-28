@@ -1,3 +1,17 @@
+use crate::{
+    chip::{
+        protocols::{
+            Id,
+        },
+        VendorId,
+    },
+};
+
+pub const ID: Id = Id::const_default(
+    VendorId::Common, 0x0000);
+
+pub const NAME: &str = "SecureChannel";
+
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum MsgType {
@@ -26,8 +40,28 @@ pub enum MsgType {
     IcdCheckIn = 0x50,
 }
 
+impl MsgType {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            MsgType::MsgCounterSyncReq => "MsgCounterSyncReq",
+            _ => "----",
+        }
+    }
+}
+
 impl From<MsgType> for u8 {
     fn from(t: MsgType) -> u8 {
         t as u8
+    }
+}
+
+impl TryFrom<u8> for MsgType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<MsgType, Self::Error> {
+        match value {
+            0x00 => Ok(MsgType::MsgCounterSyncReq),
+            _ => Err(()),
+        }
     }
 }
