@@ -30,6 +30,7 @@ pub struct IPAddress {
 
 impl IPAddress {
     pub const ANY: IPAddress = IPAddress { addr: (0, 0, 0, 0) };
+    pub const KMAX_STRING_LENGTH: usize = 46;
 
     pub const ANY_IPV4: IPAddress = IPAddress {
         addr: (0, 0, 0xFFFF_u32.to_be(), 0),
@@ -85,6 +86,10 @@ impl IPAddress {
         ];
 
         Self::make_ipv6_multicast(FLAGS, scope, group_ids)
+    }
+
+    pub fn is_ipv4(&self) -> bool {
+        self.addr.0 == 0 && self.addr.1 == 0 && self.addr.2 == 0xFFFF_u32.to_be()
     }
 }
 

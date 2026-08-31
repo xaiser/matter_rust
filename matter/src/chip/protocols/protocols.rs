@@ -24,7 +24,6 @@ impl StandardProtocol {
                     SUNKNOWN_TYPE_NAME
                 }
             },
-            _ => SUNKNOWN_TYPE_NAME,
         }
     }
 }
@@ -79,7 +78,7 @@ impl Id {
     }
 }
 
-pub fn get_protocol_name(id: Id) -> &'static str {
+pub fn get_protocol_name<'a>(id: Id) -> &'a str {
     if let Ok(p) = StandardProtocol::try_from(id) {
         p.name()
     } else {

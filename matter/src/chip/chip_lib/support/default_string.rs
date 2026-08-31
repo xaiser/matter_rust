@@ -106,6 +106,16 @@ impl<const N: usize> Write for DefaultString<N> {
     }
 }
 
+impl<const N: usize> fmt::Display for DefaultString<N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(s) = self.str() {
+            write!(f, "{}", s)
+        } else {
+            write!(f, "")
+        }
+    }
+}
+
 impl<const N: usize> PartialEq for DefaultString<N> {
     fn eq(&self, other: &Self) -> bool {
         self.const_bytes() == other.const_bytes()

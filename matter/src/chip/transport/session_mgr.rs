@@ -8,6 +8,7 @@ use crate::{
             },
             support::{
                 iterators::Loop,
+                default_string::DefaultString,
             },
         },
         credentials::{
@@ -670,6 +671,8 @@ where
 
         #[cfg(feature = "chip_progress_logging")]
         {
+            use core::fmt::Write;
+
             let mut compressed_fabric_id = KUNDEFINED_COMPRESSED_FABRIC_ID;
 
             if cur_fabric_index != KUNDEFINED_FABRIC_INDEX {
@@ -681,6 +684,34 @@ where
                     }
                 }
             }
+
+            //
+            // 32-bit value maximum = 10 chars + text preamble (6) + trailer (1) + null (1) + 2 buffer = 20
+            //
+            let mut ack_buf = DefaultString::<20>::new();
+            if let Some(c) = payload_header.get_ack_message_counter() {
+                let _ = write!(&mut ack_buf, "(Ack: {})", *c);
+            }
+
+            let mut type_str = DefaultString::<{ 4 + 1 + 2 + 1 }>::new();
+            let _ = write!(&mut type_str, "{:04X}:{:02X}", payload_header.get_protocol_id().get_protocol_id(), 
+                payload_header.get_message_type());
+
+            // ChipLogFormatExchangeId logs the numeric exchange ID (at most 5 chars,
+            // since it's a uint16_t) and one char for initiator/responder.  Plus we
+            // need a null-terminator.
+            let mut exchange_str = DefaultString::<{ 5 + 1 + 1 }>::new();
+            if payload_header.is_initiator() {
+                let _ = write!(&mut exchange_str, "{}{}", payload_header.get_exchange_id(), "i");
+            } else {
+                let _ = write!(&mut exchange_str, "{}{}", payload_header.get_exchange_id(), "r");
+            }
+
+            // text(5) + source(16) + text(4) + fabricIndex(uint16_t, at most 5 chars) + text(1) + destination(16) + text(2) + compressed
+            // fabric id(4) + text(1) + null-terminator
+            let mut source_destination_str = DefaultString::<{ 5 + 16 + 4 + 5 + 1 + 16 + 2 + 4 + 1 + 1 }>::new();
+            let _ = write!(&mut source_destination_str, "from {} to {} [{:04X}]", 
+                source_node_id, fabric_index, destination, compressed_fabric_id);
         }
 
         Ok(EncryptedPacketBufferHandle::mark_encrypted(message))

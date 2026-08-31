@@ -1,11 +1,29 @@
-use crate::chip::{
-    NodeId, FabricId, GroupId,
+use crate::{
+    chip::{
+        chip_lib::{
+            support::default_string::DefaultString,
+        },
+        inet::{
+            ip_address::IPAddress,
+            inet_interface::InterfaceId,
+        },
+        NodeId, FabricId, GroupId,
+    },
 };
 
-use crate::chip::inet::inet_interface::InterfaceId;
-use crate::chip::inet::ip_address::IPAddress;
+use core::fmt::{self, Write};
 
-use core::fmt;
+// Maximum size of the string outputes by ToString. Format is of the form:
+// "UDP:<ip>:<port>"
+pub const KMAX_TO_STRING_SIZE: usize = 3         // type: UDP/TCP/BLE
+    + 1                                          // splitter :
+    + 2                                          // brackets around address
+    + IPAddress::KMAX_STRING_LENGTH as usize     // address
+    + 1                                          // splitter %
+    + InterfaceId::K_MAX_IF_NAME_LENGTH as usize // interface
+    + 1                                          // splitter :
+    + 5                                          // port: 16 bit interger
+    + 1;                                         // NullTerminator
 
 pub trait LastTransportType {
     fn last_type(&self) -> Self;
@@ -28,7 +46,7 @@ impl fmt::Display for Type {
             Self::KUdp => write!(f, "Udp"),
             Self::KBle => write!(f, "Ble"),
             Self::KTcp => write!(f, "Tcp"),
-            Self::KWiFiPAF => write!(f, "Wifi"),
+            Self::KWiFiPAF => write!(f, "Wifi RAF"),
         }
     }
 }
@@ -62,6 +80,7 @@ impl Default for PeerAddress {
 
 impl fmt::Display for PeerAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        /*
         write!(
             f,
             "PeerAddress 
@@ -76,6 +95,22 @@ impl fmt::Display for PeerAddress {
             self.m_interface,
             self.m_port
         )
+        */
+        let mut interface = DefaultString::<{ 2usize + InterfaceId::K_MAX_IF_NAME_LENGTH as usize}>::new();
+        if self.m_interface.is_present() {
+            write!(&mut interface, "%0{}", self.m_interface)?;
+        }
+
+        match self.m_transport_type {
+            Type::KUndefined | Type::KWiFiPAF | Type::KBle => write!(f, "{}", self.m_transport_type),
+            Type::KUdp | Type::KTcp => {
+                if self.m_ip_address.is_ipv4() {
+                    write!(f, "{}:{}{}:{}", self.m_transport_type, self.m_ip_address, interface, self.m_port)
+                } else {
+                    write!(f, "{}:[{}{}]:{}", self.m_transport_type, self.m_ip_address, interface, self.m_port)
+                }
+            },
+        }
     }
 }
 
