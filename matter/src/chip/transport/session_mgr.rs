@@ -834,6 +834,11 @@ mod tests {
                 support::{
                     test_persistent_storage::TestPersistentStorage,
                 },
+                core::{
+                    data_model_types::{
+                        KMIN_VALID_FABRIC_INDEX,
+                    },
+                },
             },
             credentials::{
                 GroupDataProviderImpl,
@@ -845,6 +850,7 @@ mod tests {
                 group_data_provider_impl::{
                     UpdateSessionKeystore,
                 },
+                fabric_table::{self, FabricTableInitParams},
             },
             crypto::{
                 raw_session_keystore::RawKeySessionKeystore,
@@ -861,7 +867,7 @@ mod tests {
                 transport_mgr::{TransportMgrReceiver, TransportMgr},
                 session_message_delegate::DuplicateMessage,
                 session::{
-                    new_session_alloactor, new_shared_session, Session, SessionHandle,
+                    new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase,
                 },
             },
             platform::global::system_layer,
@@ -975,9 +981,26 @@ mod tests {
     //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
     type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
 
+    struct Resource<'a> {
+        system: *mut crate::chip::system::LayerImpl,
+        end_point_mgr: TestEndPointManager,
+        transport_mgr: TestTransportMgr<'a>,
+        message_counter_manager: TestMessageCounterMgr,
+        pa: TestPersistentStorage,
+        table: TestFabricTable<'a>,
+        session_key_store: RawKeySessionKeystore,
+        group_data: TestGroupDataProvider,
+        sm: TestSessionManager<'a>,
+        pos: OCS,
+        ks: OK,
+    }
+
+    /*
     fn setup<'a>() -> Result<(*mut crate::chip::system::LayerImpl, TestEndPointManager, TestTransportMgr<'a>, TestMessageCounterMgr,
-        TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestGroupDataProvider, TestSessionManager<'a>), ChipError>
-        //TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestSessionManager<'a>), ChipError>
+        TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestGroupDataProvider, TestSessionManager<'a>,
+        OCS, OK), ChipError>
+    */
+    fn setup<'a>() -> Result<Resource<'a> , ChipError>
     {
         // reset system packet buffer pool
         reset_pool();
@@ -991,10 +1014,27 @@ mod tests {
         end_point_mgr.init(system);
         let mut transport_mgr = TestTransportMgr::default();
         let mut message_counter_manager = TestMessageCounterMgr::new();
-        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
         
+        // init fabric table
+        // prepare a test fabric
+        let mut ks = OK::default();
+        let mut pos = OCS::default();
         let mut pa = TestPersistentStorage::default();
+        fabric_table::test_utility::set_up_stub_fabric(
+            KMIN_VALID_FABRIC_INDEX,
+            &mut pos,
+            &mut ks,
+            ptr::addr_of_mut!(pa),
+        );
+        fabric_table::test_utility::add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX]);
+        // init the fabric table with all the stroages
         let mut table = TestFabricTable::default();
+        let mut init_params = FabricTableInitParams::default();
+        init_params.storage = ptr::addr_of_mut!(pa);
+        init_params.operational_keystore = ptr::addr_of_mut!(ks);
+        init_params.op_certs_store = ptr::addr_of_mut!(pos);
+        table.init(&init_params)?;
+
         let mut session_key_store = RawKeySessionKeystore::new();
 
         let mut group_data = TestGroupDataProvider::new();
@@ -1009,7 +1049,21 @@ mod tests {
            NonNull::new(ptr::addr_of_mut!(session_key_store)),
            NonNull::new(ptr::addr_of_mut!(group_data)))?;
 
-        return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, group_data, sm));
+        //return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, group_data, sm, pos, ks));
+        return Ok(
+            Resource{
+                system,
+                end_point_mgr,
+                transport_mgr,
+                message_counter_manager,
+                pa,
+                table,
+                session_key_store,
+                group_data,
+                sm,
+                pos,
+                ks
+            });
     }
 
     #[test]
@@ -1078,6 +1132,7 @@ mod tests {
 
     #[test]
     fn prepare_group_outgoing_message() {
+        /*
         let (
             system,
             end_point_mgr,
@@ -1087,24 +1142,20 @@ mod tests {
             table,
             session_key_store,
             group_data,
-            mut sm
+            mut sm,
+            pos,
+            ks,
         ) = setup().unwrap();
+        */
+        let mut rs = setup().unwrap();
         let mut pool = new_session_alloactor();
         let ss_result = new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool));
         assert!(ss_result.is_ok());
         let ss = ss_result.unwrap();
+        ss.try_borrow_mut().unwrap().set_fabric_index(KMIN_VALID_FABRIC_INDEX);
         let session_handle = SessionHandle::new_with(&ss);
 
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA);
-        /*
-        let mut packet_header = PacketHeader::default()
-            .set_session_id(0x3412)
-            .set_message_counter(0x00123456)
-            .set_source_node_id(0x1122334455667788)
-            .set_destination_node_id(0x2233445566778899);
-        packet_header.set_message_flags_raw(0x05);
-        packet_header.set_security_flags_raw(0x00);
-        */
 
         /*
         let data = [1u8; 16];
@@ -1112,6 +1163,6 @@ mod tests {
         */
         let mut msg = PacketBufferHandle::new(0, 0).unwrap();
 
-        assert!(sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+        assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
     }
 } // end of mod tests

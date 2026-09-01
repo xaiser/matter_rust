@@ -4007,7 +4007,7 @@ mod fabric_table {
     }
 
     #[cfg(test)]
-    mod tests {
+    pub mod tests {
         use crate::chip::{
             asn1::Oid,
             chip_lib::{
@@ -4178,7 +4178,7 @@ mod fabric_table {
             fabric_info
         }
 
-        fn set_up_stub_fabric(
+        pub fn set_up_stub_fabric(
             fabric_index: FabricIndex,
             pos: &mut OCS,
             ks: &mut OK,
@@ -4270,7 +4270,7 @@ mod fabric_table {
             );
         }
 
-        fn add_fabric_index_info(
+        pub fn add_fabric_index_info(
             pa: &mut TestPersistentStorage,
             next_index: Option<FabricIndex>,
             indices: &[FabricIndex],
@@ -8323,5 +8323,9 @@ mod fabric_table {
     } // end of mod tests
 } // end of mod fabric_table
 
-pub use fabric_table::{FabricTable, Delegate};
+pub use fabric_table::{FabricTable, Delegate, InitParams as FabricTableInitParams};
 pub use fabric_info::FabricInfo;
+
+// export test utilties
+#[cfg(test)]
+pub use fabric_table::tests as test_utility;
