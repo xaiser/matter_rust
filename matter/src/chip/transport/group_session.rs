@@ -236,6 +236,27 @@ pub mod outgoing {
             self.m_group_id
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::chip::{
+            transport::{
+                session::{
+                    new_session_alloactor,
+                    new_shared_session, Session,
+                },
+            },
+        };
+        use core::ptr;
+
+        #[test]
+        fn allocate_successfully() {
+            let mut pool = new_session_alloactor();
+
+            assert!(new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool)).is_ok());
+        }
+    } // end of tests
 }
 
 pub use outgoing::{OutgoingGroupSession, AsRef, AsMut};

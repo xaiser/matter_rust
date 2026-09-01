@@ -11,7 +11,6 @@ impl StandardProtocol {
     pub fn name(&self) -> &'static str {
         match self {
             StandardProtocol::SecureChannel => super::secure_channel::NAME,
-            _ => SUNKNOWN_TYPE_NAME,
         }
     }
 

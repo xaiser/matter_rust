@@ -18,6 +18,7 @@ use crate::{
 };
 
 use core::str::FromStr;
+use core::fmt;
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -27,6 +28,18 @@ pub enum SessionType {
     KSecure = 2,
     KGroupIncoming = 3,
     KGroupOutgoing = 4,
+}
+
+impl fmt::Display for SessionType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SessionType::KGroupIncoming => write!(f, "G"),
+            SessionType::KGroupOutgoing => write!(f, "G"),
+            SessionType::KSecure => write!(f, "S"),
+            SessionType::KUnauthenticated => write!(f, "U"),
+            _ => write!(f, "?"),
+        }
+    }
 }
 
 mod session_handle {
@@ -1032,27 +1045,6 @@ impl Session {
         Session::OutgoingGroupSession(OutgoingGroupSession::new())
     }
 }
-
-pub fn get_session_type_string(session: &Session) -> &str {
-    match session.get_session_type() {
-        SessionType::KGroupIncoming => {
-            "G"
-        },
-        SessionType::KGroupOutgoing => {
-            "G"
-        },
-        SessionType::KSecure => {
-            "S"
-        },
-        SessionType::KUnauthenticated => {
-            "U"
-        },
-        _ => {
-            "?"
-        }
-    }
-}
-
 
 #[cfg(test)]
 mod tests {

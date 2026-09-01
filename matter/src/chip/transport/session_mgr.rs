@@ -27,6 +27,7 @@ use crate::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
         },
         tracing,
+        protocols::protocols,
         transport::{
             raw::{
                 peer_address::PeerAddress,
@@ -42,7 +43,7 @@ use crate::{
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::MessageCounter,
-            session::{SharedSession, SessionHandle, SessionBase, SessionType},
+            session::{self, SharedSession, SessionHandle, SessionBase, SessionType},
             secure_session::{SecureSession, AsRef as SecureSessionAsRef, mark_for_evication},
             group_session::{OutgoingGroupSession, AsRef as OutgoginGroupSessionAsRef},
             secure_message_codec,
@@ -74,6 +75,7 @@ use core::ptr::{self, NonNull};
 use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_error;
+use crate::chip_log_progress;
 use core::str::FromStr;
 
 fn group_peer_table() -> NonNull<GroupPeerTable> {
@@ -585,12 +587,12 @@ where
         }
 
         #[cfg(feature = "chip_progress_logging")]
-        let cur_destination;
+        let mut cur_destination = KUNDEFINED_NODE_ID;
         #[cfg(feature = "chip_progress_logging")]
         let mut cur_fabric_index = KUNDEFINED_FABRIC_INDEX;
 
-        let source_node_id;
-        let destination_address;
+        let mut source_node_id = KUNDEFINED_NODE_ID;
+        let mut destination_address = PeerAddress::new();
 
         match session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type() {
             SessionType::KGroupOutgoing => {
@@ -710,8 +712,22 @@ where
             // text(5) + source(16) + text(4) + fabricIndex(uint16_t, at most 5 chars) + text(1) + destination(16) + text(2) + compressed
             // fabric id(4) + text(1) + null-terminator
             let mut source_destination_str = DefaultString::<{ 5 + 16 + 4 + 5 + 1 + 16 + 2 + 4 + 1 + 1 }>::new();
-            let _ = write!(&mut source_destination_str, "from {} to {} [{:04X}]", 
-                source_node_id, fabric_index, destination, compressed_fabric_id);
+            let _ = write!(&mut source_destination_str, "from {} to {}: {} [{:04X}]", 
+                source_node_id, cur_fabric_index, cur_destination, compressed_fabric_id);
+
+            let (logging_id, session_type) = {
+                if let Ok(session_ref) = session_handle.try_ref() {
+                    (session_ref.session_id_for_logging(), session_ref.get_session_type())
+                } else {
+                    (0, SessionType::KUndefined)
+                }
+            };
+
+            chip_log_progress!(ExchangeManager, "<<< [E:{} S:{} M: {}{}] ({}) Msg Tx {} [{}] --- Type {} ({}:{}) (B:{})",
+                exchange_str, logging_id, packet_header.get_message_counter(), ack_buf, session_type, source_destination_str, destination_address, 
+                type_str, protocols::get_protocol_name(payload_header.get_protocol_id()), 
+                protocols::get_message_type_name(payload_header.get_protocol_id(), payload_header.get_message_type()),
+                message.total_length());
         }
 
         Ok(EncryptedPacketBufferHandle::mark_encrypted(message))
@@ -844,11 +860,19 @@ mod tests {
                 },
                 transport_mgr::{TransportMgrReceiver, TransportMgr},
                 session_message_delegate::DuplicateMessage,
+                session::{
+                    new_session_alloactor, new_shared_session, Session, SessionHandle,
+                },
             },
             platform::global::system_layer,
-            system::system_layer::Layer,
+            system::{
+                system_packet_buffer::reset_pool,
+                system_layer::Layer,
+            },
         },
     };
+
+    use core::ptr;
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -955,6 +979,9 @@ mod tests {
         TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestGroupDataProvider, TestSessionManager<'a>), ChipError>
         //TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestSessionManager<'a>), ChipError>
     {
+        // reset system packet buffer pool
+        reset_pool();
+
         let system = system_layer();
         unsafe {
             (*system).init();
@@ -981,16 +1008,8 @@ mod tests {
            NonNull::new(ptr::addr_of_mut!(pa)), NonNull::new(ptr::addr_of_mut!(table)), 
            NonNull::new(ptr::addr_of_mut!(session_key_store)),
            NonNull::new(ptr::addr_of_mut!(group_data)))?;
-        /*
-        sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
-           NonNull::new(ptr::addr_of_mut!(pa)), NonNull::new(ptr::addr_of_mut!(table)), 
-           NonNull::new(ptr::addr_of_mut!(session_key_store)),
-           //None
-        )?;
-        */
 
         return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, group_data, sm));
-        //return Ok((system, end_point_mgr, transport_mgr, message_counter_manager, pa, table, session_key_store, sm));
     }
 
     #[test]
@@ -1027,13 +1046,6 @@ mod tests {
            NonNull::new(ptr::addr_of_mut!(session_key_store)),
            NonNull::new(ptr::addr_of_mut!(group_data))
            ).is_ok());
-        /*
-        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
-           NonNull::new(ptr::addr_of_mut!(pa)), None,
-           NonNull::new(ptr::addr_of_mut!(session_key_store)),
-           //None
-           ).is_ok());
-        */
     }
 
     #[test]
@@ -1062,12 +1074,44 @@ mod tests {
            NonNull::new(ptr::addr_of_mut!(session_key_store)),
            NonNull::new(ptr::addr_of_mut!(group_data))
            ).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message() {
+        let (
+            system,
+            end_point_mgr,
+            transport_mgr,
+            message_counter_manager,
+            pa,
+            table,
+            session_key_store,
+            group_data,
+            mut sm
+        ) = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let ss_result = new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool));
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA);
         /*
-        assert!(!sm.init(NonNull::new(system), NonNull::new(ptr::addr_of_mut!(transport_mgr)), NonNull::new(ptr::addr_of_mut!(message_counter_manager)),
-           None, NonNull::new(ptr::addr_of_mut!(table)), 
-           NonNull::new(ptr::addr_of_mut!(session_key_store)),
-           //None
-           ).is_ok());
+        let mut packet_header = PacketHeader::default()
+            .set_session_id(0x3412)
+            .set_message_counter(0x00123456)
+            .set_source_node_id(0x1122334455667788)
+            .set_destination_node_id(0x2233445566778899);
+        packet_header.set_message_flags_raw(0x05);
+        packet_header.set_security_flags_raw(0x00);
         */
+
+        /*
+        let data = [1u8; 16];
+        let mut msg = PacketBufferHandle::new_with_data(&data[..], 0, 0).unwrap();
+        */
+        let mut msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
     }
 } // end of mod tests
