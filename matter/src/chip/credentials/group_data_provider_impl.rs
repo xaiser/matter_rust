@@ -3500,7 +3500,6 @@ where
 
         let mut fabric: FabricData = fabric_data::new_with(fabric_index);
         let mut keyset: KeySetData = key_set_data::new();
-
         match FabricData::load_from(&mut fabric, storage_ptr) {
             Err(e) if e != chip_error_not_found!() => return Err(e),
             _ => {}
@@ -3771,7 +3770,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::{
         chip::{
@@ -3814,6 +3813,21 @@ mod tests {
 
     //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
     type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
+
+    pub fn setup_keyset_group_map<P: GroupDataProvider>(p: &mut P, fabric_index: FabricIndex, compressed_fabric_id: &[u8],
+        keyset_id: KeysetId, group_id: GroupId) -> ChipErrorResult
+    {
+        // create keyset
+        // number of keys must be < 3, otherwise the get_current_group_credentials would return
+        // error
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 2);
+        //let compressed_fabric_id = u16::to_be_bytes(1u16);
+        p.set_key_set(fabric_index, compressed_fabric_id, &keyset)?;
+
+        // map group and keyset
+        let group_key = GroupKey::new_with(group_id, keyset_id);
+        p.set_group_key_at(fabric_index, 0, &group_key)
+    }
 
     #[test]
     fn init() {
@@ -5424,3 +5438,6 @@ mod tests {
         }
     }
 } // end of tests
+
+#[cfg(test)]
+pub use tests as test_utility;

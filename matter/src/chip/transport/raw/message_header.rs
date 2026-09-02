@@ -236,6 +236,11 @@ impl PacketHeader {
             .contains(header::MsgFlagValues::KDestinationNodeIdPresent)
     }
 
+    pub fn has_destination_group_id(&self) -> bool {
+        self.m_msg_flags
+            .contains(header::MsgFlagValues::KDestinationGroupIdPresent)
+    }
+
     pub fn set_message_flags(&mut self, flags: header::MsgFlags) {
         self.m_msg_flags = flags;
     }
@@ -255,7 +260,7 @@ impl PacketHeader {
     }
 
     pub fn is_group_session(&self) -> bool {
-        false
+        self.m_session_type == header::SessionType::KGroupSession
     }
 
     pub fn is_unicast_session(&self) -> bool {
@@ -272,7 +277,7 @@ impl PacketHeader {
     pub fn is_valid_group_msg(&self) -> bool {
         return self.is_group_session()
             && self.has_source_node_id()
-            && self.has_destination_node_id()
+            && self.has_destination_group_id()
             && !self.is_secure_session_control_msg();
     }
 

@@ -207,7 +207,7 @@ pub mod outgoing {
         fn session_id_for_logging(&self) -> u16 { 0 }
 
         fn get_fabric_index(&self) -> FabricIndex {
-            KUNDEFINED_FABRIC_INDEX
+            self.m_fabric_index
         }
 
         fn get_peer(&self) -> ScopedNodeId {
@@ -229,6 +229,14 @@ pub mod outgoing {
                 m_holders: new_session_holder_list(),
                 m_group_id: 0,
                 m_fabric_index: KUNDEFINED_FABRIC_INDEX,
+            }
+        }
+
+        pub const fn new_with(group_id: GroupId, fabric_index: FabricIndex) -> Self {
+            Self {
+                m_holders: new_session_holder_list(),
+                m_group_id: group_id,
+                m_fabric_index: fabric_index,
             }
         }
 

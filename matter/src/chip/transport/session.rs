@@ -1044,6 +1044,10 @@ impl Session {
     pub const fn new_outgoing_group() -> Session {
         Session::OutgoingGroupSession(OutgoingGroupSession::new())
     }
+
+    pub const fn new_outgoing_group_with(os: OutgoingGroupSession) -> Session {
+        Session::OutgoingGroupSession(os)
+    }
 }
 
 #[cfg(test)]

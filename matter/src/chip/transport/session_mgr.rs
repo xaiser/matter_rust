@@ -836,7 +836,7 @@ mod tests {
                 },
                 core::{
                     data_model_types::{
-                        KMIN_VALID_FABRIC_INDEX,
+                        KMIN_VALID_FABRIC_INDEX, KeysetId,
                     },
                 },
             },
@@ -848,6 +848,7 @@ mod tests {
                     GroupInfo,
                 },
                 group_data_provider_impl::{
+                    self,
                     UpdateSessionKeystore,
                 },
                 fabric_table::{self, FabricTableInitParams},
@@ -870,15 +871,21 @@ mod tests {
                     new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase,
                 },
             },
+            protocols,
             platform::global::system_layer,
             system::{
                 system_packet_buffer::reset_pool,
                 system_layer::Layer,
             },
+            GroupId,
         },
     };
 
     use core::ptr;
+
+    const TEST_GROUP_ID: GroupId = 1;
+    const TEST_KEYSET_ID: KeysetId = 1;
+    const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -1021,12 +1028,12 @@ mod tests {
         let mut pos = OCS::default();
         let mut pa = TestPersistentStorage::default();
         fabric_table::test_utility::set_up_stub_fabric(
-            KMIN_VALID_FABRIC_INDEX,
+            TEST_FABRIC_INDEX,
             &mut pos,
             &mut ks,
             ptr::addr_of_mut!(pa),
         );
-        fabric_table::test_utility::add_fabric_index_info(&mut pa, Some(2), &[KMIN_VALID_FABRIC_INDEX]);
+        fabric_table::test_utility::add_fabric_index_info(&mut pa, Some(2), &[TEST_FABRIC_INDEX]);
         // init the fabric table with all the stroages
         let mut table = TestFabricTable::default();
         let mut init_params = FabricTableInitParams::default();
@@ -1037,10 +1044,20 @@ mod tests {
 
         let mut session_key_store = RawKeySessionKeystore::new();
 
-        let mut group_data = TestGroupDataProvider::new();
+        // create group data provider
+        let mut group_data = <TestGroupDataProvider as GroupDataProvider>::new();
         group_data.set_session_keystore(Some(NonNull::from_ref(&session_key_store)));
         group_data.set_storage_delegate(Some(NonNull::from_ref(&pa)));
         let _ = group_data.init();
+        // set up a group - keyset mapping
+        let fabric_compressed_id = {
+            let mut id = [0u8; core::mem::size_of::<u64>()];
+            let fabric = table.find_fabric_with_index(TEST_FABRIC_INDEX).ok_or(chip_error_internal!())?;
+            fabric.get_compressed_fabric_id_bytes(&mut id)?;
+            id
+        };
+        group_data_provider_impl::test_utility::setup_keyset_group_map(&mut group_data, TEST_FABRIC_INDEX, &fabric_compressed_id, 
+            TEST_KEYSET_ID, TEST_GROUP_ID)?;
 
         let mut sm = TestSessionManager::new();
 
@@ -1132,35 +1149,21 @@ mod tests {
 
     #[test]
     fn prepare_group_outgoing_message() {
-        /*
-        let (
-            system,
-            end_point_mgr,
-            transport_mgr,
-            message_counter_manager,
-            pa,
-            table,
-            session_key_store,
-            group_data,
-            mut sm,
-            pos,
-            ks,
-        ) = setup().unwrap();
-        */
         let mut rs = setup().unwrap();
         let mut pool = new_session_alloactor();
-        let ss_result = new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool));
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        let oss = Session::new_outgoing_group_with(os);
+        //let ss_result = new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool));
+        let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
         assert!(ss_result.is_ok());
         let ss = ss_result.unwrap();
-        ss.try_borrow_mut().unwrap().set_fabric_index(KMIN_VALID_FABRIC_INDEX);
+        //ss.try_borrow_mut().unwrap().set_fabric_index(KMIN_VALID_FABRIC_INDEX);
         let session_handle = SessionHandle::new_with(&ss);
 
-        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA);
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
 
-        /*
-        let data = [1u8; 16];
-        let mut msg = PacketBufferHandle::new_with_data(&data[..], 0, 0).unwrap();
-        */
         let mut msg = PacketBufferHandle::new(0, 0).unwrap();
 
         assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
