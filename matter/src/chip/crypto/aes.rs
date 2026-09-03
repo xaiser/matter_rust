@@ -44,6 +44,14 @@ pub mod key_128 {
         verify_or_return_error,
         verify_or_return_value,
     };
+
+    /*
+    use crate::chip_internal_log;
+    use crate::chip_internal_log_impl;
+    use crate::chip_log_detail;
+    use core::str::FromStr;
+    */
+
     use typenum::Unsigned;
 
     use aead::{

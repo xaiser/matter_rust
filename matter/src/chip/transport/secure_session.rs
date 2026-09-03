@@ -15,6 +15,7 @@ use crate::{
             secure_session_table::SecureSessionTable,
             raw::peer_address::{self, PeerAddress},
             crypto_context::CryptoContext,
+            session_message_counter::SessionMessageCounter,
         },
         messaging::{
             session_parameters::SessionParameters,
@@ -154,6 +155,7 @@ pub struct SecureSession {
     m_crypto_context: CryptoContext,
     m_state: State,
     m_peer_session_id: u16,
+    m_session_message_counter: SessionMessageCounter,
     // TODO: find a way to remove this
     m_table: Option<NonNull<SecureSessionTable>>,
 }
@@ -310,12 +312,13 @@ impl SecureSession {
             m_crypto_context: CryptoContext::new(),
             m_state: State::Kestablishing,
             m_peer_session_id: 0,
+            m_session_message_counter: SessionMessageCounter::new(),
             m_table: None,
         }
     }
 
     pub fn new_with(table: *mut SecureSessionTable, secure_session_type: Type, local_session_id: u16) -> Self {
-        let s = Self {
+        let mut s = Self {
             m_holders: new_session_holder_list(),
             m_peer_address: PeerAddress::new(),
             m_remote_session_params: SessionParameters::new(),
@@ -331,10 +334,12 @@ impl SecureSession {
             m_state: State::Kestablishing,
             m_secure_session_type: secure_session_type,
             m_peer_session_id: 0,
+            m_session_message_counter: SessionMessageCounter::new(),
             m_table: NonNull::new(table),
         };
 
         let _ = s.m_local_session_id.set(local_session_id);
+        s.m_session_message_counter.init();
 
         s
     }
@@ -359,10 +364,12 @@ impl SecureSession {
             m_state: State::Kestablishing,
             m_secure_session_type: secure_session_type,
             m_peer_session_id: peer_session_id,
+            m_session_message_counter: SessionMessageCounter::new(),
             m_table: NonNull::new(table),
         };
 
         let _ = s.m_local_session_id.set(local_session_id);
+        s.m_session_message_counter.init();
 
         s.move_to_state(State::Kactive);
         s.set_fabric_index(fabric);
@@ -418,6 +425,14 @@ impl SecureSession {
 
     pub fn get_peer_node_id(&self) -> NodeId {
         self.m_peer_node_id
+    }
+
+    pub fn get_peer_session_id(&self) -> u16 {
+        self.m_peer_session_id
+    }
+
+    pub fn get_peer_address(&self) -> &PeerAddress {
+        &self.m_peer_address
     }
 
     fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
@@ -505,6 +520,18 @@ impl SecureSession {
     #[inline]
     pub fn is_case_session(&self) -> bool {
         self.get_secure_session_type() == Type::Kcase
+    }
+
+    pub fn get_crypto_context_mut(&mut self) -> &mut CryptoContext {
+        &mut self.m_crypto_context
+    }
+
+    pub fn get_crypto_context(&self) -> &CryptoContext {
+        &self.m_crypto_context
+    }
+
+    pub fn get_session_message_counter(&mut self) -> &mut SessionMessageCounter {
+        &mut self.m_session_message_counter
     }
 
     #[inline]

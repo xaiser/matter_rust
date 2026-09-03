@@ -437,6 +437,13 @@ macro_rules! chip_error_invalid_use_of_session_key {
 }
 
 #[macro_export]
+macro_rules! chip_error_not_connected {
+    () => {
+        chip_core_error!(0x48)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_ca_cert_not_found {
     () => {
         chip_core_error!(0x4a)

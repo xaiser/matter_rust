@@ -42,9 +42,9 @@ use crate::{
             transport_mgr::TransportMgrDelegate,
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
-            message_counter::MessageCounter,
+            message_counter::{MessageCounter, MessageCounterBase},
             session::{self, SharedSession, SessionHandle, SessionBase, SessionType},
-            secure_session::{SecureSession, AsRef as SecureSessionAsRef, mark_for_evication},
+            secure_session::{self, SecureSession, AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
             group_session::{OutgoingGroupSession, AsRef as OutgoginGroupSessionAsRef},
             secure_message_codec,
         },
@@ -60,6 +60,7 @@ use crate::{
     chip_error_invalid_argument,
     chip_error_message_too_long,
     chip_error_internal,
+    chip_error_not_connected,
     verify_or_return_error,
     verify_or_return_value,
     matter_trace_scope,
@@ -594,7 +595,9 @@ where
         let mut source_node_id = KUNDEFINED_NODE_ID;
         let mut destination_address = PeerAddress::new();
 
-        match session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type() {
+        let current_session_type = session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type();
+
+        match current_session_type {
             SessionType::KGroupOutgoing => {
                 let (group_id, fabric_index) = {
                     if let Ok(session_ref) = session_handle.try_ref() {
@@ -661,6 +664,38 @@ where
                 }
             },
             SessionType::KSecure => {
+                if let Ok(mut session_ref) = session_handle.try_mut() &&
+                    let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+                {
+                    let message_counter = 
+                        secure_session.get_session_message_counter().get_local_message_counter().advance_and_consume()?;
+
+                    packet_header = packet_header.set_message_counter(message_counter);
+                    packet_header = packet_header.set_session_id(secure_session.get_peer_session_id());
+                    packet_header = packet_header.set_session_type(header::SessionType::KUnicastSession);
+
+                    destination_address = secure_session.get_peer_address().clone();
+
+                    unsafe {
+                        matter_log_message_send!(tracing::OutgoingMessageType::KsecureSession, payload_header, &packet_header, 
+                            core::slice::from_raw_parts(message.start(), message.total_length()));
+                    }
+
+                    let mut nonce = CryptoContext::new_nonce();
+                    let source_node_id = secure_session.get_local_scoped_node_id().get_node_id();
+                    CryptoContext::build_nonce(&mut nonce, packet_header.get_security_flags(), message_counter, 
+                        source_node_id)?;
+                    secure_message_codec::encrypt(secure_session.get_crypto_context(), &nonce, payload_header, &packet_header, &mut message)?;
+
+                    #[cfg(feature = "chip_progress_logging")]
+                    {
+                        cur_destination = secure_session.get_peer_node_id();
+                        cur_fabric_index = secure_session.get_fabric_index();
+                    }
+                } else {
+                    chip_log_error!(ExchangeManager, "No???");
+                    return Err(chip_error_not_connected!());
+                }
             },
             SessionType::KUnauthenticated => {
             },
@@ -833,11 +868,13 @@ mod tests {
             chip_lib::{
                 support::{
                     test_persistent_storage::TestPersistentStorage,
+                    default_storage_key_allocator::DefaultStorageKeyAllocator,
                 },
                 core::{
                     data_model_types::{
                         KMIN_VALID_FABRIC_INDEX, KeysetId,
                     },
+                    case_auth_tag::CATValues,
                 },
             },
             credentials::{
@@ -856,12 +893,18 @@ mod tests {
             crypto::{
                 raw_session_keystore::RawKeySessionKeystore,
                 persistent_storage_operational_keystore::PersistentStorageOperationalKeystore,
+                crypto_pal::{
+                    P256EcdhDeriveSecret,
+                },
             },
             inet::{
                 inet_layer::EndPointManager,
                 test_end_point::TestEndPointManager,
             },
             transport::{
+                crypto_context::{
+                    SessionInfoType, SessionRole,
+                },
                 raw::{
                     test::{Test, TestListenParameter},
                 },
@@ -870,6 +913,7 @@ mod tests {
                 session::{
                     new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase,
                 },
+                secure_session_table::SecureSessionTable,
             },
             protocols,
             platform::global::system_layer,
@@ -877,7 +921,10 @@ mod tests {
                 system_packet_buffer::reset_pool,
                 system_layer::Layer,
             },
-            GroupId,
+            messaging::{
+                reliable_message_protocol_config::ReliableMessageProtocolConfig,
+            },
+            GroupId, ScopedNodeId,
         },
     };
 
@@ -886,6 +933,9 @@ mod tests {
     const TEST_GROUP_ID: GroupId = 1;
     const TEST_KEYSET_ID: KeysetId = 1;
     const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
+    const TEST_SESSION_ID: u16 = 1;
+    const TEST_PEER_SESSION_ID: u16 = 2;
+    const TEST_NODE_ID: NodeId = 1;
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -1000,13 +1050,9 @@ mod tests {
         sm: TestSessionManager<'a>,
         pos: OCS,
         ks: OK,
+        secure_session_table: SecureSessionTable,
     }
 
-    /*
-    fn setup<'a>() -> Result<(*mut crate::chip::system::LayerImpl, TestEndPointManager, TestTransportMgr<'a>, TestMessageCounterMgr,
-        TestPersistentStorage, TestFabricTable<'a>, RawKeySessionKeystore, TestGroupDataProvider, TestSessionManager<'a>,
-        OCS, OK), ChipError>
-    */
     fn setup<'a>() -> Result<Resource<'a> , ChipError>
     {
         // reset system packet buffer pool
@@ -1079,7 +1125,8 @@ mod tests {
                 group_data,
                 sm,
                 pos,
-                ks
+                ks,
+                secure_session_table: SecureSessionTable::new(),
             });
     }
 
@@ -1130,9 +1177,7 @@ mod tests {
         end_point_mgr.init(system);
         let mut transport_mgr = TestTransportMgr::default();
         let mut message_counter_manager = TestMessageCounterMgr::new();
-        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
         
-        //let mut pa = TestPersistentStorage::default();
         let mut table = TestFabricTable::default();
         let mut session_key_store = RawKeySessionKeystore::new();
 
@@ -1148,23 +1193,142 @@ mod tests {
     }
 
     #[test]
-    fn prepare_group_outgoing_message() {
+    fn prepare_group_outgoing_message_successfully() {
         let mut rs = setup().unwrap();
         let mut pool = new_session_alloactor();
         let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX);
         let oss = Session::new_outgoing_group_with(os);
-        //let ss_result = new_shared_session(Session::new_outgoing_group(), ptr::addr_of_mut!(pool));
         let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
         assert!(ss_result.is_ok());
         let ss = ss_result.unwrap();
-        //ss.try_borrow_mut().unwrap().set_fabric_index(KMIN_VALID_FABRIC_INDEX);
         let session_handle = SessionHandle::new_with(&ss);
 
         // set up a NOT control type payload
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
         protocols::secure_channel::MsgType::StandaloneAck.into());
 
-        let mut msg = PacketBufferHandle::new(0, 0).unwrap();
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message_message_too_long() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        let oss = Session::new_outgoing_group_with(os);
+        let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let too_long_data = [0u8; KMAX_APP_MESSAGE_LEN + 1];
+        let msg = PacketBufferHandle::new_with_data(&too_long_data, 0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message_incorrect_fabric() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX + 1);
+        let oss = Session::new_outgoing_group_with(os);
+        let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message_incorrect_group_id() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID + 1, TEST_FABRIC_INDEX);
+        let oss = Session::new_outgoing_group_with(os);
+        let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message_not_group_message() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        let oss = Session::new_outgoing_group_with(os);
+        let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // default is control message not group
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA);
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_secure_message_successfully() {
+        let mut rs = setup().unwrap();
+        let config = ReliableMessageProtocolConfig::new();
+        let ss_result = rs.secure_session_table.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, 
+            TEST_SESSION_ID,
+            TEST_NODE_ID,
+            TEST_NODE_ID + 1,
+            CATValues::new(),
+            TEST_SESSION_ID + 1,
+            TEST_FABRIC_INDEX,
+            &config,
+            );
+        assert!(ss_result.is_some());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // init the crypto context in the session
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [1u8; 2];
+
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+        {
+            assert!(secure_session.get_crypto_context_mut().init_from_secret(ptr::addr_of_mut!(rs.session_key_store), 
+                    secret.const_bytes(), &salt, SessionInfoType::KSessionEstablishment, SessionRole::KInitiator).is_ok());
+        } else {
+            assert!(false);
+        }
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
 
         assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
     }
