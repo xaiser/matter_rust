@@ -15,9 +15,7 @@ use crate::{
                 GroupDataProviderImpl,
             self, fabric_table::{self , FabricTable},
             group_data_provider::{
-                GroupInfo,
                 GroupDataProvider,
-                GroupListener,
             },
         },
         crypto::{
@@ -36,16 +34,16 @@ use crate::{
             },
             crypto_context::CryptoContext,
             secure_session_table::SecureSessionTable,
-            unauthenticated_session::UnauthenticatedSessionTable,
+            unauthenticated_session::{self, UnauthenticatedSessionTable, AsMut as UnauthenticatedSessionAsMut},
             group_peer_message_counter::{GroupOutgoingCounters, GroupPeerTable},
             session_message_delegate::SessionMessageDelegate,
             transport_mgr::TransportMgrDelegate,
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::{MessageCounter, MessageCounterBase},
-            session::{self, SharedSession, SessionHandle, SessionBase, SessionType},
-            secure_session::{self, SecureSession, AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
-            group_session::{OutgoingGroupSession, AsRef as OutgoginGroupSessionAsRef},
+            session::{SharedSession, SessionHandle, SessionBase, SessionType},
+            secure_session::{AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
+            group_session::{AsRef as OutgoginGroupSessionAsRef},
             secure_message_codec,
         },
         ScopedNodeId, FabricIndex, FabricId, NodeId,
@@ -469,13 +467,13 @@ where
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
         self.m_secure_sessions.for_each_session(|session| {
             if let Ok(session_ref) = session.try_borrow() {
-                let (is_case_session, peer_node_id) = {
+                let is_case_session = {
                     //let secure_session: Option<&SecureSession> = session_ref.as_ref();
                     let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
-                        (ss.is_case_session(), ss.get_peer_node_id())
+                        ss.is_case_session()
                     } else {
-                        (false, KUNDEFINED_NODE_ID)
+                        false
                     }
                 };
 
@@ -519,13 +517,12 @@ where
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
         self.m_secure_sessions.for_each_session_const(|session| {
             if let Ok(session_ref) = session.try_borrow() {
-                let (is_case_session, peer_node_id) = {
-                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                let is_case_session = {
                     let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
                     if let Some(ss) = secure_session {
-                        (ss.is_case_session(), ss.get_peer_node_id())
+                        ss.is_case_session()
                     } else {
-                        (false, KUNDEFINED_NODE_ID)
+                        false
                     }
                 };
 
@@ -693,11 +690,49 @@ where
                         cur_fabric_index = secure_session.get_fabric_index();
                     }
                 } else {
-                    chip_log_error!(ExchangeManager, "No???");
                     return Err(chip_error_not_connected!());
                 }
             },
             SessionType::KUnauthenticated => {
+                if let Ok(mut session_ref) = session_handle.try_mut() &&
+                    let Some(mut session) = UnauthenticatedSessionAsMut::as_mut(&mut (*session_ref)) 
+                {
+                    let message_counter = self.m_global_unencrypted_message_counter.advance_and_consume()?;
+                    packet_header = packet_header.set_message_counter(message_counter);
+                    match session.get_session_role() {
+                        unauthenticated_session::SessionRole::Kinitiator => {
+                            packet_header = packet_header.set_source_node_id(session.get_ephemeral_initiator_node_id());
+                        },
+                        unauthenticated_session::SessionRole::Kresponder => {
+                            packet_header = packet_header.set_destination_node_id(session.get_ephemeral_initiator_node_id());
+                        }
+                    }
+
+                    destination_address = session.get_peer_address().clone();
+
+                    unsafe {
+                        matter_log_message_send!(tracing::OutgoingMessageType::Kunauthenticated, payload_header, &packet_header, 
+                            core::slice::from_raw_parts(message.start(), message.total_length()));
+                    }
+
+                    payload_header.encode_before_data(&message)?;
+
+                    #[cfg(feature = "chip_progress_logging")]
+                    {
+                        cur_destination = KUNDEFINED_FABRIC_INDEX.into();
+                        cur_fabric_index = KUNDEFINED_FABRIC_INDEX.into();
+                        match session.get_session_role() {
+                            unauthenticated_session::SessionRole::Kinitiator => {
+                                cur_destination = session.get_ephemeral_initiator_node_id();
+                            },
+                            unauthenticated_session::SessionRole::Kresponder => {
+                                source_node_id = session.get_ephemeral_initiator_node_id();
+                            }
+                        }
+                    }
+                } else {
+                    return Err(chip_error_not_connected!());
+                }
             },
             _ => {
                 return Err(chip_error_internal!());
@@ -914,6 +949,8 @@ mod tests {
                     new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase,
                 },
                 secure_session_table::SecureSessionTable,
+                secure_session,
+                group_session::OutgoingGroupSession,
             },
             protocols,
             platform::global::system_layer,
@@ -1051,6 +1088,7 @@ mod tests {
         pos: OCS,
         ks: OK,
         secure_session_table: SecureSessionTable,
+        unauthenticated_session_table: UnauthenticatedSessionTable,
     }
 
     fn setup<'a>() -> Result<Resource<'a> , ChipError>
@@ -1127,6 +1165,7 @@ mod tests {
                 pos,
                 ks,
                 secure_session_table: SecureSessionTable::new(),
+                unauthenticated_session_table: UnauthenticatedSessionTable::new(),
             });
     }
 
@@ -1296,6 +1335,7 @@ mod tests {
     fn prepare_secure_message_successfully() {
         let mut rs = setup().unwrap();
         let config = ReliableMessageProtocolConfig::new();
+        // must new with test to ensure the session is in a test-able state
         let ss_result = rs.secure_session_table.create_new_secure_session_for_test(
             secure_session::Type::Kcase, 
             TEST_SESSION_ID,
@@ -1323,6 +1363,93 @@ mod tests {
         } else {
             assert!(false);
         }
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_secure_message_incorrect_state_in_session() {
+        let mut rs = setup().unwrap();
+        let config = ReliableMessageProtocolConfig::new();
+        // use a freash new secure session
+        let session_handle = rs.secure_session_table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default());
+        assert!(session_handle.is_some());
+        let session_handle = session_handle.unwrap();
+
+        // init the crypto context in the session
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [1u8; 2];
+
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+        {
+            assert!(secure_session.get_crypto_context_mut().init_from_secret(ptr::addr_of_mut!(rs.session_key_store), 
+                    secret.const_bytes(), &salt, SessionInfoType::KSessionEstablishment, SessionRole::KInitiator).is_ok());
+        } else {
+            assert!(false);
+        }
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_secure_message_no_encrypt_key() {
+        let mut rs = setup().unwrap();
+        let config = ReliableMessageProtocolConfig::new();
+        // must new with test to ensure the session is in a test-able state
+        let ss_result = rs.secure_session_table.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, 
+            TEST_SESSION_ID,
+            TEST_NODE_ID,
+            TEST_NODE_ID + 1,
+            CATValues::new(),
+            TEST_SESSION_ID + 1,
+            TEST_FABRIC_INDEX,
+            &config,
+            );
+        assert!(ss_result.is_some());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // init the crypto context in the session
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [1u8; 2];
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        assert!(!rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_unauthenticated_message_successfully() {
+        let mut rs = setup().unwrap();
+        let peer_address = PeerAddress::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let us_result = rs.unauthenticated_session_table.alloc_initiator(
+            TEST_NODE_ID,
+            &peer_address,
+            &config,
+            );
+        assert!(us_result.is_ok());
+        let session_handle = us_result.unwrap();
 
         // set up a NOT control type payload
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,

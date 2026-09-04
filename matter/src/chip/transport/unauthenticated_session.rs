@@ -215,12 +215,12 @@ impl UnauthenticatedSession {
     fn get_last_peer_activity_time(&self) -> Timestamp { self.m_last_peer_activity_time }
 
     #[inline]
-    fn get_session_role(&self) -> SessionRole {
+    pub fn get_session_role(&self) -> SessionRole {
         *(self.m_session_role.get_or_init(|| SessionRole::Kinitiator))
     }
 
     #[inline]
-    fn get_ephemeral_initiator_node_id(&self) -> NodeId {
+    pub fn get_ephemeral_initiator_node_id(&self) -> NodeId {
         *(self.m_ephemeral_initiator_node_id.get_or_init(|| KUNDEFINED_NODE_ID))
     }
 
