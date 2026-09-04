@@ -53,6 +53,7 @@ pub fn encrypt(context: &CryptoContext, nonce: &[u8; NONCE_LENGTH], payload_head
     chip_ok!()
 }
 
+#[allow(dead_code)]
 pub fn decrypt(context: &CryptoContext, nonce: &[u8; NONCE_LENGTH], payload_header: &mut PayloadHeader, packet_header: &PacketHeader, msg_buf: &mut PacketBufferHandle) -> ChipErrorResult {
     verify_or_return_error!(!msg_buf.is_null(), Err(chip_error_invalid_argument!()));
 

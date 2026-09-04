@@ -585,12 +585,12 @@ where
         }
 
         #[cfg(feature = "chip_progress_logging")]
-        let mut cur_destination = KUNDEFINED_NODE_ID;
+        let mut cur_destination;
         #[cfg(feature = "chip_progress_logging")]
-        let mut cur_fabric_index = KUNDEFINED_FABRIC_INDEX;
+        let cur_fabric_index;
 
         let mut source_node_id = KUNDEFINED_NODE_ID;
-        let mut destination_address = PeerAddress::new();
+        let destination_address;
 
         let current_session_type = session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type();
 
@@ -662,7 +662,7 @@ where
             },
             SessionType::KSecure => {
                 if let Ok(mut session_ref) = session_handle.try_mut() &&
-                    let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+                    let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
                 {
                     let message_counter = 
                         secure_session.get_session_message_counter().get_local_message_counter().advance_and_consume()?;
@@ -695,7 +695,7 @@ where
             },
             SessionType::KUnauthenticated => {
                 if let Ok(mut session_ref) = session_handle.try_mut() &&
-                    let Some(mut session) = UnauthenticatedSessionAsMut::as_mut(&mut (*session_ref)) 
+                    let Some(session) = UnauthenticatedSessionAsMut::as_mut(&mut (*session_ref)) 
                 {
                     let message_counter = self.m_global_unencrypted_message_counter.advance_and_consume()?;
                     packet_header = packet_header.set_message_counter(message_counter);
@@ -971,7 +971,6 @@ mod tests {
     const TEST_KEYSET_ID: KeysetId = 1;
     const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
     const TEST_SESSION_ID: u16 = 1;
-    const TEST_PEER_SESSION_ID: u16 = 2;
     const TEST_NODE_ID: NodeId = 1;
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
@@ -979,6 +978,7 @@ mod tests {
 
     struct TestSessionMessageDelegate(bool);
 
+    /*
     impl TestSessionMessageDelegate {
         pub const fn new() -> Self {
             TestSessionMessageDelegate(false)
@@ -988,6 +988,7 @@ mod tests {
             self.0 = false;
         }
     }
+    */
 
     impl SessionMessageDelegate for TestSessionMessageDelegate {
         fn on_message_received(&mut self, _packet_header: &PacketHeader, _payload_header: &PayloadHeader,
@@ -1035,8 +1036,8 @@ mod tests {
         }
 
 
-        fn queue_received_message_and_start_sync(&mut self, packet_header: &PacketHeader, session: &SessionHandle, state: &mut SessionHandle,
-            peer_address: &PeerAddress) -> Result<PacketBufferHandle, ChipError>
+        fn queue_received_message_and_start_sync(&mut self, _packet_header: &PacketHeader, _session: &SessionHandle, _state: &mut SessionHandle,
+            _peer_address: &PeerAddress) -> Result<PacketBufferHandle, ChipError>
         {
             Ok(PacketBufferHandle::default())
         }
@@ -1075,6 +1076,7 @@ mod tests {
     //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
     type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
 
+    #[allow(dead_code)]
     struct Resource<'a> {
         system: *mut crate::chip::system::LayerImpl,
         end_point_mgr: TestEndPointManager,
@@ -1356,7 +1358,7 @@ mod tests {
         let salt = [1u8; 2];
 
         if let Ok(mut session_ref) = session_handle.try_mut() &&
-            let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+            let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
         {
             assert!(secure_session.get_crypto_context_mut().init_from_secret(ptr::addr_of_mut!(rs.session_key_store), 
                     secret.const_bytes(), &salt, SessionInfoType::KSessionEstablishment, SessionRole::KInitiator).is_ok());
@@ -1376,7 +1378,7 @@ mod tests {
     #[test]
     fn prepare_secure_message_incorrect_state_in_session() {
         let mut rs = setup().unwrap();
-        let config = ReliableMessageProtocolConfig::new();
+        //let config = ReliableMessageProtocolConfig::new();
         // use a freash new secure session
         let session_handle = rs.secure_session_table.create_new_secure_session(secure_session::Type::Kcase, ScopedNodeId::default());
         assert!(session_handle.is_some());
@@ -1388,7 +1390,7 @@ mod tests {
         let salt = [1u8; 2];
 
         if let Ok(mut session_ref) = session_handle.try_mut() &&
-            let Some(mut secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+            let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
         {
             assert!(secure_session.get_crypto_context_mut().init_from_secret(ptr::addr_of_mut!(rs.session_key_store), 
                     secret.const_bytes(), &salt, SessionInfoType::KSessionEstablishment, SessionRole::KInitiator).is_ok());
@@ -1427,7 +1429,6 @@ mod tests {
         // init the crypto context in the session
         let mut secret = P256EcdhDeriveSecret::default();
         secret.bytes().fill(0x1);
-        let salt = [1u8; 2];
 
         // set up a NOT control type payload
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
