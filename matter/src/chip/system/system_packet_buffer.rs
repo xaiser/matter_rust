@@ -431,7 +431,7 @@ impl PacketBufferHandle {
         return self.m_buffer.is_null();
     }
 
-    pub fn retain(&mut self) -> Option<Self> {
+    pub fn retain(&self) -> Option<Self> {
         unsafe {
             (*self.m_buffer).add_ref();
         }

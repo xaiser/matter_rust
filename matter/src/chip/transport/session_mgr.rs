@@ -56,6 +56,7 @@ use crate::{
     chip_error_invalid_fabric_index,
     chip_error_incorrect_state,
     chip_error_invalid_argument,
+    chip_error_invalid_message_length,
     chip_error_message_too_long,
     chip_error_internal,
     chip_error_not_connected,
@@ -119,8 +120,8 @@ impl EncryptedPacketBufferHandle {
         }
     }
 
-    pub fn get_raw(&mut self) -> &mut PacketBufferHandle {
-        return &mut self.m_packet_buffer_handle;
+    pub fn get_raw(&self) -> &PacketBufferHandle {
+        return &self.m_packet_buffer_handle;
     }
 
     pub fn has_chained_buffer(&self) -> bool {
@@ -157,8 +158,9 @@ impl EncryptedPacketBufferHandle {
         }
     }
 
-    pub fn cast_to_writable(&mut self) -> PacketBufferHandle {
-        return self.m_packet_buffer_handle.retain().unwrap();
+    pub fn cast_to_writable(&self) -> Option<PacketBufferHandle> {
+        //return self.m_packet_buffer_handle.retain().unwrap();
+        self.m_packet_buffer_handle.retain()
     }
 }
 
@@ -731,7 +733,7 @@ where
                         }
                     }
                 } else {
-                    return Err(chip_error_not_connected!());
+                    return Err(chip_error_internal!());
                 }
             },
             _ => {
@@ -801,6 +803,80 @@ where
         }
 
         Ok(EncryptedPacketBufferHandle::mark_encrypted(message))
+    }
+
+    pub fn send_prepared_message(&self, session_handle: &SessionHandle, prepared_message: &EncryptedPacketBufferHandle) -> ChipErrorResult {
+        verify_or_return_error!(self.m_state == State::Kinitialized, Err(chip_error_incorrect_state!()));
+        verify_or_return_error!(!prepared_message.get_raw().is_null(), Err(chip_error_invalid_argument!()));
+        let current_session_type = session_handle.try_ref().map_err(|_| chip_error_incorrect_state!())?.get_session_type();
+        let destination = {
+            match current_session_type {
+                SessionType::KGroupOutgoing => {
+                    if let Ok(session_ref) = session_handle.try_ref() &&
+                        let Some(group_session) = OutgoginGroupSessionAsRef::as_ref(&(*session_ref))
+                    {
+                        let fabric_id = {
+                            if let Some(table) = self.m_fabric_table.as_ref() {
+                                unsafe {
+                                    table.as_ref().find_fabric_with_index(session_ref.get_fabric_index()).
+                                        ok_or(chip_error_invalid_argument!())?.get_fabric_id()
+                                }
+                            } else {
+                                return Err(chip_error_internal!());
+                            }
+                        };
+
+                        PeerAddress::multicast(fabric_id, group_session.get_group_id())
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                },
+                SessionType::KSecure => {
+                    if let Ok(mut session_ref) = session_handle.try_mut() &&
+                        let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+                    {
+                        secure_session.mark_active();
+
+                        secure_session.get_peer_address().clone()
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                },
+                SessionType::KUnauthenticated => {
+                    if let Ok(mut session_ref) = session_handle.try_mut() &&
+                        let Some(session) = UnauthenticatedSessionAsMut::as_mut(&mut (*session_ref)) 
+                    {
+                        session.mark_active();
+
+                        session.get_peer_address().clone()
+                    } else {
+                        return Err(chip_error_internal!());
+                    }
+                },
+                _ => {
+                    return Err(chip_error_internal!());
+                }
+            }
+        };
+
+        let msg_buf = prepared_message.cast_to_writable().ok_or(chip_error_invalid_argument!())?;
+        verify_or_return_error!(!msg_buf.is_null(), Err(chip_error_invalid_argument!()));
+        verify_or_return_error!(!msg_buf.has_chained_buffer(), Err(chip_error_invalid_message_length!()));
+
+        if let Some(mut transport_ptr) = self.m_transport_mgr {
+            let transport_mgr: &mut TMB = unsafe { transport_ptr.as_mut() };
+            let result = transport_mgr.send_message(destination, msg_buf);
+            #[cfg(feature = "chip_error_logging")]
+            {
+                if let Some(e) = result.clone().err() {
+                    chip_log_error!(Inet, "SendMessage() to {} failed: {}", destination, e);
+                }
+            }
+
+            result
+        } else {
+            Err(chip_error_incorrect_state!())
+        }
     }
 
     fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, FabricId), ChipError> {
@@ -946,7 +1022,7 @@ mod tests {
                 transport_mgr::{TransportMgrReceiver, TransportMgr},
                 session_message_delegate::DuplicateMessage,
                 session::{
-                    new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase,
+                    new_session_alloactor, new_shared_session, Session, SessionHandle, SessionBase, Alloactor,
                 },
                 secure_session_table::SecureSessionTable,
                 secure_session,
@@ -1171,6 +1247,24 @@ mod tests {
             });
     }
 
+    fn prepare_outgoing_message<'a>(rs: &mut Resource<'a>, pool: &mut Alloactor) -> (SessionHandle, Result<EncryptedPacketBufferHandle, ChipError>) {
+        let os = OutgoingGroupSession::new_with(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        let oss = Session::new_outgoing_group_with(os);
+        //let ss_result = new_shared_session(oss, ptr::addr_of_mut!(pool));
+        let ss_result = new_shared_session(oss, pool as _);
+        assert!(ss_result.is_ok());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        (session_handle.clone(), rs.sm.prepare_message(&session_handle, &payload_header, msg))
+    }
+
     #[test]
     fn init() {
         assert!(setup().is_ok());
@@ -1251,6 +1345,14 @@ mod tests {
         let msg = PacketBufferHandle::new(0, 0).unwrap();
 
         assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn prepare_group_outgoing_message_fn_successfully() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (_, result) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1459,5 +1561,14 @@ mod tests {
         let msg = PacketBufferHandle::new(0, 0).unwrap();
 
         assert!(rs.sm.prepare_message(&session_handle, &payload_header, msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_successfully() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        let msg = msg.unwrap();
+        assert!(rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
     }
 } // end of mod tests
