@@ -1014,6 +1014,7 @@ mod tests {
                 inet_layer::EndPointManager,
                 test_end_point::TestEndPointManager,
                 inet_fault_injection,
+                ip_address::IPAddress,
             },
             transport::{
                 crypto_context::{
@@ -1021,6 +1022,7 @@ mod tests {
                 },
                 raw::{
                     test::{Test, TestListenParameter},
+                    peer_address,
                 },
                 transport_mgr::{TransportMgrReceiver, TransportMgr},
                 session_message_delegate::DuplicateMessage,
@@ -1270,6 +1272,50 @@ mod tests {
         (session_handle.clone(), rs.sm.prepare_message(&session_handle, &payload_header, msg))
     }
 
+    fn prepare_secure_message<'a>(rs: &mut Resource<'a>) -> (SessionHandle, Result<EncryptedPacketBufferHandle, ChipError>) {
+        let config = ReliableMessageProtocolConfig::new();
+        // must new with test to ensure the session is in a test-able state
+        let ss_result = rs.secure_session_table.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, 
+            TEST_SESSION_ID,
+            TEST_NODE_ID,
+            TEST_NODE_ID + 1,
+            CATValues::new(),
+            TEST_SESSION_ID + 1,
+            TEST_FABRIC_INDEX,
+            &config,
+            );
+        assert!(ss_result.is_some());
+        let ss = ss_result.unwrap();
+        let session_handle = SessionHandle::new_with(&ss);
+
+        // init the crypto context in the session
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [1u8; 2];
+
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+        {
+            assert!(secure_session.get_crypto_context_mut().init_from_secret(ptr::addr_of_mut!(rs.session_key_store), 
+                    secret.const_bytes(), &salt, SessionInfoType::KSessionEstablishment, SessionRole::KInitiator).is_ok());
+            secure_session.set_peer_address(
+                // 1.1.1.1 is Ipv6
+                PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp)
+            );
+        } else {
+            assert!(false);
+        }
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        (session_handle.clone(), rs.sm.prepare_message(&session_handle, &payload_header, msg))
+    }
+
     #[test]
     fn init() {
         assert!(setup().is_ok());
@@ -1482,6 +1528,13 @@ mod tests {
     }
 
     #[test]
+    fn prepare_secure_message_fn_successfully() {
+        let mut rs = setup().unwrap();
+        let (_, msg) = prepare_secure_message(&mut rs);
+        assert!(msg.is_ok());
+    }
+
+    #[test]
     fn prepare_secure_message_incorrect_state_in_session() {
         let mut rs = setup().unwrap();
         //let config = ReliableMessageProtocolConfig::new();
@@ -1645,5 +1698,13 @@ mod tests {
         ).is_ok());
 
         assert!(!rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_secure_message_successfully() {
+        let mut rs = setup().unwrap();
+        let (session_handle, msg) = prepare_secure_message(&mut rs);
+        let msg = msg.unwrap();
+        assert!(rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
     }
 } // end of mod tests

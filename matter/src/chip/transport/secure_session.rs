@@ -435,6 +435,10 @@ impl SecureSession {
         &self.m_peer_address
     }
 
+    pub fn set_peer_address(&mut self, peer_address: PeerAddress) {
+        self.m_peer_address = peer_address;
+    }
+
     fn activate(&mut self, local_node: &ScopedNodeId, peer_node: &ScopedNodeId, peer_cats: CATValues, peer_session_id: u16,
         session_parameters: &SessionParameters)
     {
