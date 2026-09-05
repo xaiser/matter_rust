@@ -980,6 +980,7 @@ mod tests {
                 support::{
                     test_persistent_storage::TestPersistentStorage,
                     default_storage_key_allocator::DefaultStorageKeyAllocator,
+                    fault_injection::fault_injection::Manager,
                 },
                 core::{
                     data_model_types::{
@@ -1009,8 +1010,10 @@ mod tests {
                 },
             },
             inet::{
+                end_point_basis::DefaultWithMgr,
                 inet_layer::EndPointManager,
                 test_end_point::TestEndPointManager,
+                inet_fault_injection,
             },
             transport::{
                 crypto_context::{
@@ -1026,7 +1029,7 @@ mod tests {
                 },
                 secure_session_table::SecureSessionTable,
                 secure_session,
-                group_session::OutgoingGroupSession,
+                group_session::{OutgoingGroupSession, AsMut as OutgoingGroupSessionAsMut},
             },
             protocols,
             platform::global::system_layer,
@@ -1183,6 +1186,8 @@ mod tests {
         end_point_mgr.init(system);
         let mut transport_mgr = TestTransportMgr::default();
         let mut message_counter_manager = TestMessageCounterMgr::new();
+        let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
+        transport_mgr.init((test_param,))?;
         
         // init fabric table
         // prepare a test fabric
@@ -1281,7 +1286,6 @@ mod tests {
         end_point_mgr.init(system);
         let mut transport_mgr = TestTransportMgr::default();
         let mut message_counter_manager = TestMessageCounterMgr::new();
-        //let test_param = TestListenParameter::default(ptr::addr_of_mut!(end_point_mgr));
         
         let mut pa = TestPersistentStorage::default();
         //let mut table = TestFabricTable::default();
@@ -1570,5 +1574,76 @@ mod tests {
         let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
         let msg = msg.unwrap();
         assert!(rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_incorrect_state() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        let msg = msg.unwrap();
+        // reset the session manager state
+        rs.sm.m_state = State::KnotReady;
+        assert!(!rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_empty_message() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, _) = prepare_outgoing_message(&mut rs, &mut pool);
+        // empty message
+        let msg = EncryptedPacketBufferHandle::const_default();
+        assert!(!rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_incorrect_fabric() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        // incorrect fabric index
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(group_session) = OutgoingGroupSessionAsMut::as_mut(&mut (*session_ref))
+        {
+            group_session.set_fabric_index(TEST_FABRIC_INDEX + 1);
+        } else {
+            assert!(false);
+        }
+        let msg = msg.unwrap();
+        assert!(!rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_chained_buffer() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
+
+        // create a chained buffer
+        let msg = msg.unwrap();
+        let second_msg = PacketBufferHandle::new(0, 0).unwrap();
+        let mut writeable = msg.cast_to_writable().unwrap();
+        writeable.add_to_end(second_msg);
+        let new_msg = EncryptedPacketBufferHandle::mark_encrypted(writeable);
+
+        assert!(!rs.sm.send_prepared_message(&session_handle, &new_msg).is_ok());
+    }
+
+    #[test]
+    fn send_group_outgoing_message_send_failed() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session_handle, msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        let msg = msg.unwrap();
+
+        // inject fault at send
+        assert!(inet_fault_injection::get_manager().fail_at_fault(
+            inet_fault_injection::InetFaultInjectionID::KFaultSend as u32,
+            0, // number of skip
+            1, // number of fault
+        ).is_ok());
+
+        assert!(!rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
     }
 } // end of mod tests
