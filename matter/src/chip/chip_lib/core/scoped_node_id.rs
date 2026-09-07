@@ -2,6 +2,8 @@ use crate::chip::chip_lib::core::data_model_types::KUNDEFINED_FABRIC_INDEX;
 use crate::chip::chip_lib::core::node_id::{is_operational_node_id, KUNDEFINED_NODE_ID};
 use crate::chip::{FabricIndex, NodeId};
 
+use core::fmt;
+
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub struct ScopedNodeId {
     m_node_id: NodeId,
@@ -14,6 +16,16 @@ impl Default for ScopedNodeId {
     }
 }
 
+impl fmt::Display for ScopedNodeId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}, {}",
+            self.m_node_id, self.m_fabric_index
+        )
+    }
+}
+
 impl ScopedNodeId {
     pub const fn const_default() -> Self {
         Self {
@@ -22,7 +34,7 @@ impl ScopedNodeId {
         }
     }
 
-    pub fn default_with_ids(node_id: NodeId, fabric_index: FabricIndex) -> Self {
+    pub const fn default_with_ids(node_id: NodeId, fabric_index: FabricIndex) -> Self {
         Self {
             m_node_id: node_id,
             m_fabric_index: fabric_index,

@@ -42,7 +42,7 @@ use crate::{
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::{MessageCounter, MessageCounterBase},
             session::{SharedSession, SessionHandle, SessionBase, SessionType},
-            secure_session::{AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
+            secure_session::{self, AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
             group_session::{AsRef as OutgoginGroupSessionAsRef},
             secure_message_codec,
         },
@@ -76,6 +76,7 @@ use crate::chip_internal_log;
 use crate::chip_internal_log_impl;
 use crate::chip_log_error;
 use crate::chip_log_progress;
+use crate::chip_log_detail;
 use core::str::FromStr;
 
 fn group_peer_table() -> NonNull<GroupPeerTable> {
@@ -310,7 +311,7 @@ where
 
     pub fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         self.m_secure_sessions.for_each_session(|session| {
             if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
@@ -323,7 +324,7 @@ where
 
     pub fn for_each_matching_session_const<F>(&self, node: &ScopedNodeId, mut f: F)
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         self.m_secure_sessions.for_each_session_const(|session| {
             if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
@@ -336,7 +337,7 @@ where
 
     pub fn for_each_matching_fabric_index_session<F>(&mut self, fabric_index: FabricIndex, mut f: F)
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         self.m_secure_sessions.for_each_session(|session| {
             if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
@@ -349,7 +350,7 @@ where
 
     pub fn for_each_matching_fabric_index_session_const<F>(&self, fabric_index: FabricIndex, mut f: F)
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         self.m_secure_sessions.for_each_session_const(|session| {
             if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
@@ -362,7 +363,7 @@ where
 
     pub fn for_each_matching_session_on_logical_fabric<F>(&mut self, node: &ScopedNodeId, mut f: F) -> ChipErrorResult
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(node.get_fabric_index())?;
         self.m_secure_sessions.for_each_session(|session| {
@@ -413,7 +414,7 @@ where
 
     pub fn for_each_matching_session_on_logical_fabric_const<F>(&self, node: &ScopedNodeId, mut f: F) -> ChipErrorResult
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(node.get_fabric_index())?;
         self.m_secure_sessions.for_each_session_const(|session| {
@@ -464,7 +465,7 @@ where
 
     pub fn for_each_matching_fabric_index_session_on_logical_fabric<F>(&mut self, fabric_index: FabricIndex, mut f: F) -> ChipErrorResult
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
         self.m_secure_sessions.for_each_session(|session| {
@@ -514,7 +515,7 @@ where
 
     pub fn for_each_matching_fabric_index_session_on_logical_fabric_const<F>(&self, fabric_index: FabricIndex, mut f: F) -> ChipErrorResult
         where
-            F: FnOnce(&SharedSession) -> Loop + FnMut(&SharedSession) -> Loop
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
     {
         let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
         self.m_secure_sessions.for_each_session_const(|session| {
@@ -879,6 +880,38 @@ where
         }
     }
 
+    pub fn expire_all_sessions(&mut self, node: &ScopedNodeId) {
+        chip_log_detail!(Inet, "Expireing all sessions for node {}!!", node);
+        self.for_each_matching_session(node, |shared_session| {
+            let handle = SessionHandle::new_with(shared_session);
+            mark_for_evication(handle);
+        });
+    }
+
+    pub fn expire_all_sessions_for_fabric(&mut self, fabric_index: FabricIndex) {
+        chip_log_detail!(Inet, "Expireing all sessions for fabric 0x{:x}!!", fabric_index);
+        self.for_each_matching_fabric_index_session(fabric_index, |shared_session| {
+            let handle = SessionHandle::new_with(shared_session);
+            mark_for_evication(handle);
+        });
+    }
+
+    pub fn expire_all_sessions_on_logical_fabric(&mut self, node: &ScopedNodeId) -> ChipErrorResult {
+        chip_log_detail!(Inet, "Expireing all sessions to peer {} that are on the same logcial fabric!!", node);
+        self.for_each_matching_session_on_logical_fabric(node, |shared_session| {
+            let handle = SessionHandle::new_with(shared_session);
+            mark_for_evication(handle);
+        })
+    }
+
+    pub fn expire_all_sessions_on_logical_fabric_for_fabic(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
+        chip_log_detail!(Inet, "Expireing all sessions on the same logical fabric as fabric 0x{:x}!!", fabric_index);
+        self.for_each_matching_fabric_index_session_on_logical_fabric(fabric_index, |shared_session| {
+            let handle = SessionHandle::new_with(shared_session);
+            mark_for_evication(handle);
+        })
+    }
+
     fn get_fabric_and_pub_key(&self, fabric_index: FabricIndex) -> Result<(P256PublicKey, FabricId), ChipError> {
         let target_fabric = unsafe { self.m_fabric_table.as_ref().ok_or(chip_error_invalid_fabric_index!())?.as_ref().
             find_fabric_with_index(fabric_index).ok_or(chip_error_invalid_fabric_index!())?
@@ -888,7 +921,7 @@ where
         Ok((target_pub_key, target_fabric.get_fabric_id()))
     }
 
-    fn expire_all_secure_sessions(&mut self) {
+    pub fn expire_all_secure_sessions(&mut self) {
         self.m_secure_sessions.for_each_session(|shared_session| {
             let handle = SessionHandle::new_with(shared_session);
             mark_for_evication(handle);
@@ -896,6 +929,66 @@ where
             Loop::Continue
         });
     }
+
+    pub fn expire_all_pase_sessions(&mut self) {
+        chip_log_detail!(Inet, "Expiring all PASE sessions");
+        self.m_secure_sessions.for_each_session(|shared_session| {
+            let is_pase = { 
+                if let Ok(session_ref) = shared_session.try_borrow() &&
+                    let Some(secure_session) = SecureSessionAsRef::as_ref(&(*session_ref)) &&
+                        secure_session.get_secure_session_type() == secure_session::Type::Kpase 
+                {
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if is_pase {
+                let handle = SessionHandle::new_with(shared_session);
+                mark_for_evication(handle);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn mark_sessions_as_defunct(&mut self, node: &ScopedNodeId, secure_session_type: Option<secure_session::Type>) {
+        self.m_secure_sessions.for_each_session(|shared_session| {
+            if let Ok(mut session_ref) = shared_session.try_borrow_mut() &&
+                let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) &&
+                    secure_session.is_active_session() &&
+                    secure_session.get_peer() == *node &&
+                    (secure_session_type.is_none() || 
+                     secure_session_type.is_some_and(|t| t == secure_session.get_secure_session_type()))
+            {
+                secure_session.mark_as_defunct();
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn update_all_sessions_peer_address(&mut self, node: &ScopedNodeId, addr: &PeerAddress) {
+        self.m_secure_sessions.for_each_session(|shared_session| {
+            if let Ok(mut session_ref) = shared_session.try_borrow_mut() &&
+                let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) &&
+                    secure_session.get_peer() == *node &&
+                    secure_session.get_secure_session_type() == secure_session::Type::Kcase
+            {
+                secure_session.set_peer_address(addr.clone());
+            }
+
+            Loop::Continue
+        });
+    }
+
+    pub fn allocate_session(&mut self, secure_session_type: secure_session::Type, session_eviction_hint: &ScopedNodeId) -> Option<SessionHandle> {
+        verify_or_return_value!(self.m_state == State::Kinitialized, None);
+
+        self.m_secure_sessions.create_new_secure_session(secure_session_type, *session_eviction_hint)
+    }
+
 
     fn is_control_message(payload_header: &PayloadHeader) -> bool {
         payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncReq.into()) ||
@@ -1053,6 +1146,8 @@ mod tests {
     const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
     const TEST_SESSION_ID: u16 = 1;
     const TEST_NODE_ID: NodeId = 1;
+    const TEST_PEER_NODE_ID: NodeId = TEST_NODE_ID + 1;
+    //const TEST_SCOPED_NODE_ID: ScopedNodeId = ScopedNodeId::default_with_ids(TEST_NODE_ID, TEST_FABRIC_INDEX);
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
@@ -1279,7 +1374,7 @@ mod tests {
             secure_session::Type::Kcase, 
             TEST_SESSION_ID,
             TEST_NODE_ID,
-            TEST_NODE_ID + 1,
+            TEST_PEER_NODE_ID,
             CATValues::new(),
             TEST_SESSION_ID + 1,
             TEST_FABRIC_INDEX,
@@ -1306,6 +1401,27 @@ mod tests {
         } else {
             assert!(false);
         }
+
+        // set up a NOT control type payload
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
+        protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        let msg = PacketBufferHandle::new(0, 0).unwrap();
+
+        (session_handle.clone(), rs.sm.prepare_message(&session_handle, &payload_header, msg))
+    }
+
+    fn prepare_unauthenticated_message<'a>(rs: &mut Resource<'a>) -> (SessionHandle, Result<EncryptedPacketBufferHandle, ChipError>) {
+        // ipv6 address
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let config = ReliableMessageProtocolConfig::new();
+        let us_result = rs.unauthenticated_session_table.alloc_initiator(
+            TEST_NODE_ID,
+            &peer_address,
+            &config,
+            );
+        assert!(us_result.is_ok());
+        let session_handle = us_result.unwrap();
 
         // set up a NOT control type payload
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(protocols::secure_channel::ID,
@@ -1621,6 +1737,15 @@ mod tests {
     }
 
     #[test]
+    fn prepare_unauthenticated_message_fn_successfully() {
+        let mut rs = setup().unwrap();
+
+        let (_, msg) = prepare_unauthenticated_message(&mut rs);
+
+        assert!(msg.is_ok());
+    }
+
+    #[test]
     fn send_group_outgoing_message_successfully() {
         let mut rs = setup().unwrap();
         let mut pool = new_session_alloactor();
@@ -1706,5 +1831,46 @@ mod tests {
         let (session_handle, msg) = prepare_secure_message(&mut rs);
         let msg = msg.unwrap();
         assert!(rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn send_unauthenticated_message_successfully() {
+        let mut rs = setup().unwrap();
+        let (session_handle, msg) = prepare_unauthenticated_message(&mut rs);
+        let msg = msg.unwrap();
+        assert!(rs.sm.send_prepared_message(&session_handle, &msg).is_ok());
+    }
+
+    #[test]
+    fn for_each_matching_session() {
+        let mut rs = setup().unwrap();
+        let peer_scope_id = ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX);
+        let mut count = 0usize;
+        // make sure there is no session before allocate
+        rs.sm.for_each_matching_session_const(&peer_scope_id, |_| {
+            count += 1;
+        });
+        assert_eq!(0, count);
+
+        let config = ReliableMessageProtocolConfig::new();
+        // must new with test to ensure the session is in a test-able state
+        let ss_result = rs.sm.m_secure_sessions.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, 
+            TEST_SESSION_ID,
+            TEST_NODE_ID,
+            TEST_NODE_ID + 1,
+            CATValues::new(),
+            TEST_SESSION_ID + 1,
+            TEST_FABRIC_INDEX,
+            &config,
+            );
+        assert!(ss_result.is_some());
+
+        let mut count = 0usize;
+        // there should be 1 session
+        rs.sm.for_each_matching_session_const(&peer_scope_id, |_| {
+            count += 1;
+        });
+        assert_eq!(1, count);
     }
 } // end of mod tests
