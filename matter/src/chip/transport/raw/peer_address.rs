@@ -148,7 +148,7 @@ impl PeerAddress {
         self.m_transport_type.clone()
     }
 
-    pub fn get_address(&self) -> IPAddress {
+    pub fn get_ip_address(&self) -> IPAddress {
         self.m_ip_address.clone()
     }
 
@@ -214,7 +214,7 @@ mod test {
     #[test]
     fn new_udp() {
         let a = PeerAddress::udp(IPAddress::ANY.clone());
-        assert_eq!(a.get_address() == IPAddress::ANY.clone(), true);
+        assert_eq!(a.get_ip_address() == IPAddress::ANY.clone(), true);
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod test {
             666,
             InterfaceId::default(),
         );
-        assert_eq!(a.get_address(), IPAddress::ANY.clone());
+        assert_eq!(a.get_ip_address(), IPAddress::ANY.clone());
         assert_eq!(a.get_port(), 666);
     }
 }

@@ -282,7 +282,7 @@ where
 
         let mut addr_info = IPPacketInfo::default();
 
-        addr_info.dest_address = peer_address.get_address();
+        addr_info.dest_address = peer_address.get_ip_address();
         addr_info.dest_port = peer_address.get_port();
         addr_info.interface = Some(peer_address.get_interface());
 
@@ -294,7 +294,7 @@ where
     fn can_send_to_peer(&self, peer_address: &PeerAddress) -> bool {
         return (self.m_state == State::KInitialized)
             && (peer_address.get_transport_type() == Type::KUdp)
-            && (peer_address.get_address().ip_type() == self.m_test_end_point_type);
+            && (peer_address.get_ip_address().ip_type() == self.m_test_end_point_type);
     }
 
     fn close(&mut self) {
@@ -797,7 +797,7 @@ mod test {
                 (*ep).test_get_msg(&src_pkt_info, msg);
 
                 assert_eq!(d.check.get(), true);
-                assert_eq!(d.addr.get().get_address(), EXPECTED_SEND_ADDR.clone());
+                assert_eq!(d.addr.get().get_ip_address(), EXPECTED_SEND_ADDR.clone());
                 assert_eq!(d.addr.get().get_port(), EXPECTED_SEND_PORT);
                 for i in 0..4 {
                     let vec = d.data.get().as_ref().unwrap();

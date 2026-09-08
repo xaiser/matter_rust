@@ -91,6 +91,10 @@ impl IPAddress {
     pub fn is_ipv4(&self) -> bool {
         self.addr.0 == 0 && self.addr.1 == 0 && self.addr.2 == 0xFFFF_u32.to_be()
     }
+
+    pub fn is_ipv6_link_local(&self) -> bool {
+        self.addr.0 == 0xFE800000_u32.to_be() && self.addr.1 == 0
+    }
 }
 
 impl fmt::Display for IPAddress {

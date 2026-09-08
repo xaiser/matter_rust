@@ -5,6 +5,7 @@ use crate::{
                 chip_persistent_storage_delegate::PersistentStorageDelegate,
                 data_model_types::{KUNDEFINED_FABRIC_INDEX, KUNDEFINED_COMPRESSED_FABRIC_ID},
                 node_id::{KUNDEFINED_NODE_ID, is_operational_node_id, node_id_from_group_id},
+                case_auth_tag::CATValues,
             },
             support::{
                 iterators::Loop,
@@ -19,7 +20,12 @@ use crate::{
             },
         },
         crypto::{
-            self, session_keystore::SessionKeystore, P256PublicKey, crypto_pal::ECPKey, SymmetricKeyContext,
+            self, session_keystore::SessionKeystore, P256PublicKey, 
+            crypto_pal::{
+                ECPKey, 
+                P256EcdhDeriveSecret,
+            },
+            SymmetricKeyContext,
         },
         messaging::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
@@ -32,7 +38,7 @@ use crate::{
                 base::MessageTransportContext,
                 message_header::{header, PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN},
             },
-            crypto_context::CryptoContext,
+            crypto_context::{self, CryptoContext},
             secure_session_table::SecureSessionTable,
             unauthenticated_session::{self, UnauthenticatedSessionTable, AsMut as UnauthenticatedSessionAsMut},
             group_peer_message_counter::{GroupOutgoingCounters, GroupPeerTable},
@@ -41,9 +47,10 @@ use crate::{
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
             message_counter::{MessageCounter, MessageCounterBase},
-            session::{SharedSession, SessionHandle, SessionBase, SessionType},
+            session::{SessionHolder, SharedSession, SessionHandle, SessionBase, SessionType},
             secure_session::{self, AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
             group_session::{AsRef as OutgoginGroupSessionAsRef},
+            peer_message_counter::PeerMessageCounter,
             secure_message_codec,
         },
         ScopedNodeId, FabricIndex, FabricId, NodeId,
@@ -60,6 +67,7 @@ use crate::{
     chip_error_message_too_long,
     chip_error_internal,
     chip_error_not_connected,
+    chip_error_no_memory,
     verify_or_return_error,
     verify_or_return_value,
     matter_trace_scope,
@@ -85,6 +93,18 @@ fn group_peer_table() -> NonNull<GroupPeerTable> {
     unsafe {
         return NonNull::new_unchecked(ptr::addr_of_mut!(G_GROUP_PEER_TABLE));
     }
+}
+
+// Helper function that strips off the interface ID from a peer address that is
+// not an IPv6 link-local address.  For any other address type we should rely on
+// the device's routing table to route messages sent.  Forcing messages down a
+// specific interface might fail with "no route to host".
+fn correct_peer_address_interface_id(peer_address: &mut PeerAddress) {
+    if peer_address.get_ip_address().is_ipv6_link_local() {
+        return;
+    }
+
+    peer_address.set_interface(crate::chip::inet::inet_interface::InterfaceId::NULL);
 }
 
 /*
@@ -177,7 +197,7 @@ where
 {
     m_system_layer: Option<NonNull<LayerImpl>>,
     m_fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>,
-    m_session_key_storage: Option<NonNull<SKS>>,
+    m_session_keystore: Option<NonNull<SKS>>,
     m_unauthenticated_sessions: UnauthenticatedSessionTable,
     m_secure_sessions: SecureSessionTable,
     m_state: State,
@@ -220,7 +240,7 @@ where
         Self {
             m_system_layer: None,
             m_fabric_table: None,
-            m_session_key_storage: None,
+            m_session_keystore: None,
             m_unauthenticated_sessions: UnauthenticatedSessionTable::new(),
             m_secure_sessions: SecureSessionTable::new(),
             m_state: State::KnotReady,
@@ -256,7 +276,7 @@ where
         self.m_transport_mgr = transport_mgr;
         self.m_message_counter_manager = message_counter_manager;
         self.m_fabric_table = fabric_table;
-        self.m_session_key_storage = session_keystore;
+        self.m_session_keystore = session_keystore;
         self.m_group_data_provider = group_data_provider;
 
         self.m_secure_sessions.init();
@@ -989,6 +1009,124 @@ where
         self.m_secure_sessions.create_new_secure_session(secure_session_type, *session_eviction_hint)
     }
 
+    pub fn inject_pase_session_with_test_key(&mut self, session_hodler: &mut SessionHolder, local_session_id: u16, peer_node_id: NodeId,
+        peer_session_id: u16, fabric: FabricIndex, peer_address: &PeerAddress, role: crypto_context::SessionRole) -> ChipErrorResult 
+    {
+        let local_node_id = KUNDEFINED_NODE_ID;
+        let shared_session = self.m_secure_sessions.create_new_secure_session_for_test(
+            secure_session::Type::Kpase, local_session_id, local_node_id, peer_node_id, CATValues::new(), peer_session_id, fabric,
+            &ReliableMessageProtocolConfig::get_local_mrp_config().unwrap_or(ReliableMessageProtocolConfig::get_default_mrp_config())).
+            ok_or(chip_error_no_memory!())?;
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [0u8; 0];
+
+        if let Ok(mut session_ref) = shared_session.try_borrow_mut() &&
+            let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) &&
+            let Some(session_keystore) = self.m_session_keystore
+        {
+            secure_session.set_peer_address(peer_address.clone());
+            secure_session.get_crypto_context_mut().init_from_secret(session_keystore.as_ptr(), 
+                    secret.const_bytes(), &salt, crypto_context::SessionInfoType::KSessionEstablishment, role)?;
+            secure_session.get_session_message_counter().get_peer_message_counter().set_counter(PeerMessageCounter::K_INITIAL_SYNC_VALUE);
+        } else {
+            return Err(chip_error_internal!());
+        }
+
+        let _ = session_hodler.grab(SessionHandle::new_with(&shared_session));
+
+        chip_ok!()
+    }
+
+    pub fn inject_case_session_with_test_key(&mut self, session_hodler: &mut SessionHolder, local_session_id: u16, peer_node_id: NodeId,
+        peer_session_id: u16, local_node_id: NodeId, fabric: FabricIndex, peer_address: &PeerAddress, 
+        role: crypto_context::SessionRole, cats: CATValues) -> ChipErrorResult 
+    {
+        let shared_session = self.m_secure_sessions.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, local_session_id, local_node_id, peer_node_id, cats, peer_session_id, fabric,
+            &ReliableMessageProtocolConfig::get_local_mrp_config().unwrap_or(ReliableMessageProtocolConfig::get_default_mrp_config())).
+            ok_or(chip_error_no_memory!())?;
+
+        let mut secret = P256EcdhDeriveSecret::default();
+        secret.bytes().fill(0x1);
+        let salt = [0u8; 0];
+
+        if let Ok(mut session_ref) = shared_session.try_borrow_mut() &&
+            let Some(secure_session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) &&
+            let Some(session_keystore) = self.m_session_keystore
+        {
+            secure_session.set_peer_address(peer_address.clone());
+            secure_session.get_crypto_context_mut().init_from_secret(session_keystore.as_ptr(), 
+                    secret.const_bytes(), &salt, crypto_context::SessionInfoType::KSessionEstablishment, role)?;
+            secure_session.get_session_message_counter().get_peer_message_counter().set_counter(PeerMessageCounter::K_INITIAL_SYNC_VALUE);
+        } else {
+            return Err(chip_error_internal!());
+        }
+
+        let _ = session_hodler.grab(SessionHandle::new_with(&shared_session));
+
+        chip_ok!()
+    }
+
+    fn secure_group_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle)
+    {
+        matter_trace_scope!("Unauthenticated Message Dispatch", "SessionManager");
+
+        // Drop unsecured messages with privacy enabled.
+        if partial_packet_header.has_privacy_flag() {
+            chip_log_error!(Inet, "Dropping unauthenticated message with privacy flag set");
+            return;
+        }
+
+        let mut packet_header = PacketHeader::default();
+        if packet_header.decode_and_consume(&msg).is_err() {
+            return;
+        }
+
+        let mut session_handle = {
+            let source = packet_header.get_source_node_id();
+            let destination = packet_header.get_destination_node_id();
+
+            if (source.is_some() & destination.is_some()) || (source.is_none() && destination.is_none()) {
+                chip_log_progress!(Inet,
+                    "Received malformed unsecure packet with source {:#x} destination {:#x}", source.unwrap_or(KUNDEFINED_NODE_ID),
+                    destination.unwrap_or(KUNDEFINED_NODE_ID));
+                return;
+            }
+
+            if let Some(source_node_id) = source {
+                // Assume peer is the initiator, we are the responder.
+                match self.m_unauthenticated_sessions.find_or_allocate_responder(source_node_id,
+                    ReliableMessageProtocolConfig::get_default_mrp_config(), &peer_address) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        chip_log_progress!(Inet, "UnauthenticatedSession exhausted");
+                        return;
+                    }
+                }
+            } else {
+                let destination = destination.unwrap_or(KUNDEFINED_NODE_ID);
+                // Assume peer is the responder, we are the initiator.
+                match self.m_unauthenticated_sessions.find_initiator(destination, &peer_address) {
+                    Some(s) => s,
+                    None => {
+                        chip_log_progress!(Inet, "Received unknown unsecure packet for initiator {:#x}", destination);
+                        return;
+                    }
+                }
+            }
+        };
+    }
+
+    fn secure_unicast_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
+        _ctxt: *const MessageTransportContext)
+    {}
+
+    fn unauthenticated_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
+        _ctxt: *const MessageTransportContext)
+    {}
+
 
     fn is_control_message(payload_header: &PayloadHeader) -> bool {
         payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncReq.into()) ||
@@ -1045,7 +1183,7 @@ where
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
-    PSD: PersistentStorageDelegate + 'd,
+    PSD: PersistentStorageDelegate + 'd + 'static,
     OK: crypto::OperationalKeystore + 'd,
     OCS: credentials::OperationalCertificateStore + 'd,
     SKS: SessionKeystore + 'd,
@@ -1055,12 +1193,27 @@ where
 {
     fn on_message_received(
         &mut self,
-        _source: PeerAddress,
-        _msg_buf: PacketBufferHandle,
-        _ctext: *const MessageTransportContext,
+        peer_address: PeerAddress,
+        msg_buf: PacketBufferHandle,
+        ctext: *const MessageTransportContext,
     )
     {
-        // TODO
+        let mut partial_packet_header = PacketHeader::default();
+        if partial_packet_header.decode_fixed(&msg_buf).inspect_err(|e| {
+            chip_log_error!(Inet, "Failed to decode packet header: {}", e)
+        }).is_err() {
+            return;
+        }
+
+        if partial_packet_header.is_encrypted() {
+            if partial_packet_header.is_group_session() {
+                self.secure_group_message_dispatch(&partial_packet_header, peer_address, msg_buf);
+            } else {
+                self.secure_unicast_message_dispatch(&partial_packet_header, peer_address, msg_buf, ctext);
+            }
+        } else {
+            self.unauthenticated_message_dispatch(&partial_packet_header, peer_address, msg_buf, ctext);
+        }
     }
 }
 
@@ -1872,5 +2025,17 @@ mod tests {
             count += 1;
         });
         assert_eq!(1, count);
+    }
+
+    #[test]
+    fn inject_pase_session_successfully() {
+        let mut rs = setup().unwrap();
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        assert!(rs.sm.inject_pase_session_with_test_key(&mut holder, TEST_SESSION_ID, KUNDEFINED_NODE_ID, TEST_SESSION_ID, KUNDEFINED_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator).is_ok());
+        assert!(holder.is_some());
+
     }
 } // end of mod tests

@@ -34,6 +34,7 @@ pub struct InterfaceId {
 
 impl InterfaceId {
     pub const K_MAX_IF_NAME_LENGTH: u32 = 13;
+    pub const NULL: Self = Self::default();
 
     pub const fn default() -> Self {
         Self {
