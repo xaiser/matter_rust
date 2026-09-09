@@ -1357,15 +1357,25 @@ mod tests {
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
 
-    struct TestSessionMessageDelegate(bool);
+    struct TestSessionMessageDelegate{
+        is_run: bool,
+        is_duplicate: DuplicateMessage,
+    }
 
     impl TestSessionMessageDelegate {
         pub const fn new() -> Self {
-            TestSessionMessageDelegate(false)
+            TestSessionMessageDelegate {
+                is_run: false,
+                is_duplicate: DuplicateMessage::No,
+            }
         }
 
         pub fn is_run(&self) -> bool {
-            self.0
+            self.is_run
+        }
+
+        pub fn is_duplicate(&self) -> bool {
+            self.is_duplicate == DuplicateMessage::Yes
         }
     }
 
@@ -1383,8 +1393,9 @@ mod tests {
 
     impl SessionMessageDelegate for TestSessionMessageDelegate {
         fn on_message_received(&mut self, _packet_header: &PacketHeader, _payload_header: &PayloadHeader,
-            _session: &SessionHandle, _is_duplicate: DuplicateMessage, _msg_buf: PacketBufferHandle) {
-            self.0 = true;
+            _session: &SessionHandle, is_duplicate: DuplicateMessage, _msg_buf: PacketBufferHandle) {
+            self.is_run = true;
+            self.is_duplicate = is_duplicate;
         }
     }
 
@@ -2105,10 +2116,40 @@ mod tests {
     fn dispatch_unauthenticated_message_correctlly() {
         let mut rs = setup().unwrap();
 
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+        assert!(!output.is_duplicate());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_second_msg_correctlly() {
+        let mut rs = setup().unwrap();
+
         // allocate a responder first
         let config = ReliableMessageProtocolConfig::get_default_mrp_config();
         let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
-        let us_result = rs.unauthenticated_session_table.find_or_allocate_responder(
+        let us_result = rs.sm.m_unauthenticated_sessions.find_or_allocate_responder(
             TEST_NODE_ID,
             &config,
             &peer_address
@@ -2136,5 +2177,271 @@ mod tests {
         rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
 
         assert!(output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_with_privacy() {
+        let mut rs = setup().unwrap();
+
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let mut packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        // set up privacy flag
+        packet_header.set_security_flags(header::SecFlags::KPrivacyFlag);
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_no_packet_header() {
+        let mut rs = setup().unwrap();
+
+        // allocate a responder first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_no_source_dest() {
+        let mut rs = setup().unwrap();
+
+        // allocate a responder first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default();
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_has_both_source_and_dest() {
+        let mut rs = setup().unwrap();
+
+        // allocate a responder first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID).set_destination_node_id(TEST_NODE_ID + 1);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_as_initiator_correctlly() {
+        let mut rs = setup().unwrap();
+
+        // allocate a initiator first
+        let config = ReliableMessageProtocolConfig::get_default_mrp_config();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let us_result = rs.sm.m_unauthenticated_sessions.alloc_initiator(
+            TEST_NODE_ID,
+            &peer_address,
+            &config
+            );
+        assert!(us_result.is_ok());
+
+        let packet_header = PacketHeader::default().set_destination_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_no_initiator() {
+        let mut rs = setup().unwrap();
+
+        // allocate a initiator first
+        let config = ReliableMessageProtocolConfig::get_default_mrp_config();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let us_result = rs.sm.m_unauthenticated_sessions.alloc_initiator(
+            TEST_NODE_ID,
+            &peer_address,
+            &config
+            );
+        assert!(us_result.is_ok());
+
+        let packet_header = PacketHeader::default().set_destination_node_id(TEST_NODE_ID + 1);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_no_payload() {
+        let mut rs = setup().unwrap();
+
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_duplicated_message() {
+        let mut rs = setup().unwrap();
+
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+        assert!(!output.is_duplicate());
+
+        // create second message with same packet header
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // reset delegate
+        let output_2 = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output_2));
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output_2.is_run());
+        assert!(output_2.is_duplicate());
     }
 } // end of mod tests
