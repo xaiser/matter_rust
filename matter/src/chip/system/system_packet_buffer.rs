@@ -296,6 +296,12 @@ impl PacketBuffer {
             }
         }
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(self.start(), self.total_length())
+        }
+    }
 }
 
 pub struct PacketBufferHandle {
@@ -530,6 +536,12 @@ impl PacketBufferHandle {
     pub fn set_data_length(&mut self, a_new_len: usize) {
         unsafe {
             (*self.m_buffer).set_data_length(a_new_len)
+        }
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe {
+            (*self.m_buffer).as_slice()
         }
     }
 }

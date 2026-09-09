@@ -1,5 +1,6 @@
 mod constants;
 pub mod logging;
+pub mod text_only_logging;
 
 pub use constants::LogCategory;
 pub use constants::LogModule;

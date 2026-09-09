@@ -8,6 +8,7 @@ use crate::{
                 case_auth_tag::CATValues,
             },
             support::{
+                logging::text_only_logging::chip_log_value_exchange_id_from_received_header,
                 iterators::Loop,
                 default_string::DefaultString,
             },
@@ -42,7 +43,7 @@ use crate::{
             secure_session_table::SecureSessionTable,
             unauthenticated_session::{self, UnauthenticatedSessionTable, AsMut as UnauthenticatedSessionAsMut},
             group_peer_message_counter::{GroupOutgoingCounters, GroupPeerTable},
-            session_message_delegate::SessionMessageDelegate,
+            session_message_delegate::{DuplicateMessage, SessionMessageDelegate},
             transport_mgr::TransportMgrDelegate,
             transport_mgr_base::TransportMgrBase,
             message_counter_manager_interface::MessageCounterManagerInterface,
@@ -67,11 +68,13 @@ use crate::{
     chip_error_message_too_long,
     chip_error_internal,
     chip_error_not_connected,
+    chip_error_duplicate_message_received,
     chip_error_no_memory,
     verify_or_return_error,
     verify_or_return_value,
     matter_trace_scope,
     matter_log_message_send,
+    matter_log_message_received,
     //verify_or_die,
 };
 
@@ -795,12 +798,14 @@ where
             // ChipLogFormatExchangeId logs the numeric exchange ID (at most 5 chars,
             // since it's a uint16_t) and one char for initiator/responder.  Plus we
             // need a null-terminator.
-            let mut exchange_str = DefaultString::<{ 5 + 1 + 1 }>::new();
+            let exchange_str = chip_log_value_exchange_id_from_received_header(&payload_header);
+            /*
             if payload_header.is_initiator() {
                 let _ = write!(&mut exchange_str, "{}{}", payload_header.get_exchange_id(), "i");
             } else {
                 let _ = write!(&mut exchange_str, "{}{}", payload_header.get_exchange_id(), "r");
             }
+            */
 
             // text(5) + source(16) + text(4) + fabricIndex(uint16_t, at most 5 chars) + text(1) + destination(16) + text(2) + compressed
             // fabric id(4) + text(1) + null-terminator
@@ -1069,7 +1074,15 @@ where
         chip_ok!()
     }
 
-    fn secure_group_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle)
+    fn secure_group_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle)
+    { }
+
+    fn secure_unicast_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
+        _ctxt: *const MessageTransportContext)
+    {}
+
+    fn unauthenticated_message_dispatch(&mut self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle,
+        _ctxt: *const MessageTransportContext)
     {
         matter_trace_scope!("Unauthenticated Message Dispatch", "SessionManager");
 
@@ -1084,7 +1097,7 @@ where
             return;
         }
 
-        let mut session_handle = {
+        let session_handle = {
             let source = packet_header.get_source_node_id();
             let destination = packet_header.get_destination_node_id();
 
@@ -1097,8 +1110,8 @@ where
 
             if let Some(source_node_id) = source {
                 // Assume peer is the initiator, we are the responder.
-                match self.m_unauthenticated_sessions.find_or_allocate_responder(source_node_id,
-                    ReliableMessageProtocolConfig::get_default_mrp_config(), &peer_address) {
+                match self.m_unauthenticated_sessions.find_or_allocate_responder(*source_node_id,
+                    &ReliableMessageProtocolConfig::get_default_mrp_config(), &peer_address) {
                     Ok(s) => s,
                     Err(_) => {
                         chip_log_progress!(Inet, "UnauthenticatedSession exhausted");
@@ -1117,15 +1130,54 @@ where
                 }
             }
         };
+
+        let mut mutable_peer_address = peer_address.clone();
+        let mut is_duplicate = DuplicateMessage::No;
+        let mut payload_header = PayloadHeader::default();
+        correct_peer_address_interface_id(&mut mutable_peer_address);
+
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(session) = UnauthenticatedSessionAsMut::as_mut(&mut (*session_ref)) 
+        {
+            session.set_peer_address(mutable_peer_address);
+            session.mark_active_rx();
+            if payload_header.decode_and_consume(&msg).is_err() {
+                return;
+            }
+            // Verify message counter
+            let err = session.get_peer_message_counter().verify_unencrypted(packet_header.get_message_counter());
+            match err {
+                Ok(_) => {
+                    let _ = session.get_peer_message_counter().commit_unencrypted(packet_header.get_message_counter());
+                },
+                Err(e) if e == chip_error_duplicate_message_received!() => {
+                    chip_log_detail!(Inet, "Received a duplicate message with MessageCounter: {} on exchange {}",
+                        packet_header.get_message_counter(), 
+                        chip_log_value_exchange_id_from_received_header(&payload_header).str().unwrap_or(""));
+                    is_duplicate = DuplicateMessage::Yes;
+                },
+                _ => {
+                    chip_log_error!(Inet, "Uncorrect unauthenticated message counter");
+                    return;
+                }
+            }
+
+        } else {
+            chip_log_error!(Inet, "Failed to get unauthenticated sesion");
+            return;
+        }
+
+        if let Some(mut cb) = self.m_cb {
+            matter_log_message_received!(tracing::IncomingMessageType::Kunauthenticated, &payload_header, &packet_header, 
+                &session_handle, &peer_address, msg.as_slice());
+
+            unsafe {
+                cb.as_mut().on_message_received(&packet_header, &payload_header, &session_handle, is_duplicate, msg);
+            }
+        } else {
+            chip_log_error!(Inet, "Received UNSECURED message was not processed.");
+        }
     }
-
-    fn secure_unicast_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
-        _ctxt: *const MessageTransportContext)
-    {}
-
-    fn unauthenticated_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
-        _ctxt: *const MessageTransportContext)
-    {}
 
 
     fn is_control_message(payload_header: &PayloadHeader) -> bool {
@@ -1307,6 +1359,16 @@ mod tests {
 
     struct TestSessionMessageDelegate(bool);
 
+    impl TestSessionMessageDelegate {
+        pub const fn new() -> Self {
+            TestSessionMessageDelegate(false)
+        }
+
+        pub fn is_run(&self) -> bool {
+            self.0
+        }
+    }
+
     /*
     impl TestSessionMessageDelegate {
         pub const fn new() -> Self {
@@ -1321,7 +1383,7 @@ mod tests {
 
     impl SessionMessageDelegate for TestSessionMessageDelegate {
         fn on_message_received(&mut self, _packet_header: &PacketHeader, _payload_header: &PayloadHeader,
-            _session: &SessionHandle, _is_duplicate: DuplicateMessage, _msg_buf: &mut PacketBufferHandle) {
+            _session: &SessionHandle, _is_duplicate: DuplicateMessage, _msg_buf: PacketBufferHandle) {
             self.0 = true;
         }
     }
@@ -2037,5 +2099,41 @@ mod tests {
                 &peer_address, SessionRole::KInitiator).is_ok());
         assert!(holder.is_some());
 
+    }
+
+    #[test]
+    fn dispatch_unauthenticated_message_correctly() {
+        let mut rs = setup().unwrap();
+
+        // allocate a responder first
+        let config = ReliableMessageProtocolConfig::get_default_mrp_config();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let us_result = rs.unauthenticated_session_table.find_or_allocate_responder(
+            TEST_NODE_ID,
+            &config,
+            &peer_address
+            );
+        assert!(us_result.is_ok());
+
+        let packet_header = PacketHeader::default().set_source_node_id(TEST_NODE_ID);
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
     }
 } // end of mod tests

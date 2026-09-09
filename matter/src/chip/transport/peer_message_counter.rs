@@ -281,7 +281,7 @@ impl PeerMessageCounter {
         self.commit_without_rollover(counter)
     }
 
-    pub fn verify_uncrypted(&mut self, counter: u32) -> ChipErrorResult {
+    pub fn verify_unencrypted(&mut self, counter: u32) -> ChipErrorResult {
         match self.m_status {
             Status::NotSynced => {
                 self.set_counter(counter);

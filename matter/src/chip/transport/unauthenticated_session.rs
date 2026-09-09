@@ -263,8 +263,8 @@ impl UnauthenticatedSession {
         self.m_remote_session_params = session_params;
     }
 
-    pub fn get_peer_message_counter(&self) -> &PeerMessageCounter {
-        &self.m_peer_message_counter
+    pub fn get_peer_message_counter(&mut self) -> &mut PeerMessageCounter {
+        &mut self.m_peer_message_counter
     }
 }
 

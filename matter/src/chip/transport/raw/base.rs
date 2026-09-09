@@ -4,6 +4,12 @@ use crate::ChipError;
 
 pub struct MessageTransportContext;
 
+impl MessageTransportContext {
+    pub const fn new() -> Self {
+        MessageTransportContext
+    }
+}
+
 pub trait RawTransportDelegate {
     fn handle_message_received(
         &self,
