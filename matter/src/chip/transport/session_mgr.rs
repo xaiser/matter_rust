@@ -2102,7 +2102,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_unauthenticated_message_correctly() {
+    fn dispatch_unauthenticated_message_correctlly() {
         let mut rs = setup().unwrap();
 
         // allocate a responder first
@@ -2125,6 +2125,7 @@ mod tests {
         assert!(msg.is_some());
         let msg = msg.unwrap();
         assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
 
         // set up delegate
         let output = TestSessionMessageDelegate::new();
