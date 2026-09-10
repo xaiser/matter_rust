@@ -8,7 +8,7 @@ pub enum InterfaceType {
     Thread,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformType(u8);
 
 impl PlatformType {
@@ -27,7 +27,7 @@ impl fmt::Display for PlatformType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterfaceId {
     m_platform_interface: PlatformType,
 }

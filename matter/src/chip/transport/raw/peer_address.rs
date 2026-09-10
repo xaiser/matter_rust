@@ -30,7 +30,7 @@ pub trait LastTransportType {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Eq)]
 pub enum Type {
     KUndefined,
     KUdp,
@@ -57,7 +57,7 @@ impl LastTransportType for Type {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeerAddress {
     m_transport_type: Type,
     m_remote_id: NodeId,

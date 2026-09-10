@@ -1077,9 +1077,140 @@ where
     fn secure_group_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle)
     { }
 
-    fn secure_unicast_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle,
+    fn secure_unicast_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, mut msg: PacketBufferHandle,
         _ctxt: *const MessageTransportContext)
-    {}
+    {
+        matter_trace_scope!("Secure Unicast Message Dispatch", "SessionManager");
+        let session_handle = {
+            match self.m_secure_sessions.find_secure_session_by_local_key(partial_packet_header.get_session_id()) {
+                Some(s) => s,
+                None => {
+                    chip_log_error!(Inet, "data received on an unknown session (LSID={}). Dropping it!", partial_packet_header.get_session_id());
+                    return;
+                }
+            }
+        };
+
+        let mut mutable_peer_address = peer_address.clone();
+        correct_peer_address_interface_id(&mut mutable_peer_address);
+        let mut payload_header = PayloadHeader::default();
+        let mut packet_header = PacketHeader::default();
+        let mut is_duplicate = DuplicateMessage::No;
+
+        if let Ok(mut session_ref) = session_handle.try_mut() &&
+            let Some(session) = SecureSessionAsMut::as_mut(&mut (*session_ref)) 
+        {
+            if *session.get_peer_address() != mutable_peer_address {
+                session.set_peer_address(mutable_peer_address);
+            }
+            if partial_packet_header.has_privacy_flag() {
+                chip_log_error!(Inet, "Dropping secure unicast message with privacy flag set");
+                return;
+            }
+            if msg.is_null() {
+                chip_log_error!(Inet, "Secure transport received Unicast NULL packet, discarding");
+                return;
+            }
+            if packet_header.decode_and_consume(&msg).is_err() {
+                return;
+            }
+
+            // We need to allow through messages even on sessions that are pending
+            // evictions, because for some cases (UpdateNOC, RemoveFabric, etc) there
+            // can be a single exchange alive on the session waiting for a MRP ack, and
+            // we need to make sure to send the ack through.  The exchange manager is
+            // responsible for ensuring that such messages do not lead to new exchange
+            // creation.
+            if !session.is_defunct() && !session.is_active_session() && !session.is_pending_eviction() {
+                chip_log_error!(Inet, 
+                    "Secure transport received message on a session in an invalid state (state = {})", session.get_state());
+                return;
+            }
+
+            // Decrypt and verify the message before message counter verification or any further processing.
+            let mut nonce = CryptoContext::new_nonce();
+            // PASE Sessions use the undefined node ID of all zeroes, since there is no node ID to use
+            // and the key is short-lived and always different for each PASE session.
+            let target_node_id = {
+                if session.get_secure_session_type() == secure_session::Type::Kcase {
+                    session.get_peer_node_id()
+                } else {
+                    KUNDEFINED_NODE_ID
+                }
+            };
+            let _ = CryptoContext::build_nonce(&mut nonce, packet_header.get_security_flags(), packet_header.get_message_counter(),
+                target_node_id).inspect_err(|e|{
+                    chip_log_error!(Inet, "cannot handle nonce {}", e);
+                });
+            if secure_message_codec::decrypt(session.get_crypto_context(), &nonce, &mut payload_header, &packet_header, &mut msg).is_err() {
+                chip_log_error!(Inet, "Secure transport received message, but failed to decode/authenticate it, discarding");
+                return;
+            }
+
+            match session.get_session_message_counter().get_peer_message_counter().verify_encrypted_unicast(packet_header.get_message_counter()) {
+                Ok(_) => {},
+                Err(e) if e == chip_error_duplicate_message_received!() => {
+                    chip_log_detail!(Inet,
+                        "Received a duplicate message with Message Counter: {} on exchange {}",
+                        packet_header.get_message_counter(), chip_log_value_exchange_id_from_received_header(&payload_header));
+                    is_duplicate = DuplicateMessage::Yes;
+                },
+                Err(e) => {
+                    chip_log_error!(Inet, "Message counter verify failed, err = {}", e);
+                    return;
+                }
+            }
+
+            session.mark_active_rx();
+
+            if is_duplicate == DuplicateMessage::Yes && !payload_header.is_needs_ack() {
+                // If it's a duplicate message, but doesn't require an ack, let's drop it right here to save CPU
+                // cycles on further message processing.
+                return;
+            }
+
+            if is_duplicate == DuplicateMessage::No {
+                let _ = session.get_session_message_counter().get_peer_message_counter().
+                    commit_encrypted_unicast(packet_header.get_message_counter()).inspect_err(|e| {
+                        chip_log_error!(Inet, "Secure transport failed to commit counter {}", e)
+                    });
+            }
+
+        } else {
+            chip_log_error!(Inet, "Failed to get secure sesion");
+            return;
+        }
+
+        if let Some(mut cb) = self.m_cb {
+            let pending_fabric_index = unsafe {
+                if let Some(table) = self.m_fabric_table.as_ref() {
+                    Some(table.as_ref().get_pending_new_fabric_index())
+                } else {
+                    None
+                }
+            };
+
+            if let Ok(mut session_ref) = session_handle.try_mut() &&
+                let Some(session) = SecureSessionAsMut::as_mut(&mut (*session_ref))
+            {
+                if session.is_case_session() && pending_fabric_index.is_some() {
+                    session.set_case_commissioning_session_status(session.get_fabric_index() == pending_fabric_index.unwrap());
+                }
+            } else {
+                chip_log_error!(Inet, "Failed to get secure sesion");
+                return;
+            }
+
+            matter_log_message_received!(tracing::IncomingMessageType::KsecureUnicast, &payload_header, &packet_header, 
+                &session_handle, &peer_address, msg.as_slice());
+
+            unsafe {
+                cb.as_mut().on_message_received(&packet_header, &payload_header, &session_handle, is_duplicate, msg);
+            }
+        } else {
+            chip_log_error!(Inet, "Received SECURED message was not processed.");
+        }
+    }
 
     fn unauthenticated_message_dispatch(&mut self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle,
         _ctxt: *const MessageTransportContext)
@@ -2113,6 +2244,18 @@ mod tests {
     }
 
     #[test]
+    fn inject_case_session_successfully() {
+        let mut rs = setup().unwrap();
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_PEER_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+    }
+
+    #[test]
     fn dispatch_unauthenticated_message_correctlly() {
         let mut rs = setup().unwrap();
 
@@ -2444,4 +2587,50 @@ mod tests {
         assert!(output_2.is_run());
         assert!(output_2.is_duplicate());
     }
+
+    /*
+    #[test]
+    fn dispatch_secure_message_correctlly() {
+        let mut rs = setup().unwrap();
+
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        // allocate secure case session first
+        let config = ReliableMessageProtocolConfig::get_default_mrp_config();
+        // must new with test to ensure the session is in a test-able state
+        let ss_result = rs.sm.m_secure_sessions.create_new_secure_session_for_test(
+            secure_session::Type::Kcase, 
+            TEST_SESSION_ID,
+            TEST_NODE_ID,
+            TEST_NODE_ID + 1,
+            CATValues::new(),
+            TEST_SESSION_ID + 1,
+            TEST_FABRIC_INDEX,
+            &config,
+            );
+        assert!(ss_result.is_some());
+
+        let packet_header = PacketHeader::default();
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // encode the payload header into message
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(payload_header.encode_before_data(&msg).is_ok());
+        assert!(packet_header.encode_before_data(&msg).is_ok());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+        assert!(!output.is_duplicate());
+    }
+    */
 } // end of mod tests

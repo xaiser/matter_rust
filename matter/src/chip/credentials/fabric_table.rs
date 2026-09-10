@@ -3203,7 +3203,7 @@ mod fabric_table {
             is_legal
         }
 
-        fn get_pending_new_fabric_index(&self) -> FabricIndex {
+        pub fn get_pending_new_fabric_index(&self) -> FabricIndex {
             if self.m_state_flag.contains(StateFlags::KisAddPending) {
                 return self.m_fabric_index_with_pending_state;
             }

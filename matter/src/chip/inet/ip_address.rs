@@ -23,7 +23,7 @@ pub enum IPAddressType {
     KAny,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Eq)]
 pub struct IPAddress {
     pub addr: (u32, u32, u32, u32),
 }
