@@ -17,7 +17,7 @@ use crate::{
                 GroupDataProviderImpl,
             self, fabric_table::{self , FabricTable},
             group_data_provider::{
-                GroupDataProvider,
+                self, GroupDataProvider,
             },
         },
         crypto::{
@@ -37,7 +37,7 @@ use crate::{
             raw::{
                 peer_address::PeerAddress,
                 base::MessageTransportContext,
-                message_header::{header, PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN},
+                message_header::{header, PayloadHeader, PacketHeader, KMAX_LARGE_APP_MESSAGE_LEN, KMAX_APP_MESSAGE_LEN, MessageAuthenticationCode},
             },
             crypto_context::{self, CryptoContext},
             secure_session_table::SecureSessionTable,
@@ -1072,6 +1072,24 @@ where
         let _ = session_hodler.grab(SessionHandle::new_with(&shared_session));
 
         chip_ok!()
+    }
+
+    fn group_key_decrypt_attempt<KC: SymmetricKeyContext>(partial_packet_header: &PacketHeader, packet_header_copy: &PacketHeader, payload_header: &PayloadHeader, apply_privacy: bool,
+        msg_copy: &PacketBufferHandle, mac: &MessageAuthenticationCode, group_context: &group_data_provider::GroupSession<KC>) -> bool
+    {
+        let context = CryptoContext::new_with_key_context(NonNull::from_ref(group_context));
+        if apply_privacy {
+            // Perform privacy deobfuscation, if applicable.
+            let privacy_header = partial_packet_header.privacy_header(msg_copy.start());
+            let privacy_length = partial_packet_header.privacy_header_length();
+
+            /*
+            unsafe {
+                if context.privacy_decrypt(core::slice::from_raw_parts(privacy_header, privacy_length), 
+            }
+            */
+        }
+        true
     }
 
     fn secure_group_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle)
