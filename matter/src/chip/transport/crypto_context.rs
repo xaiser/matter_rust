@@ -338,7 +338,7 @@ impl CryptoContext {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::{
         chip::{
@@ -362,6 +362,12 @@ mod tests {
     pub struct TestKeySessionKeystore {
         pub m_aes128_session_keys: SessionKeys,
         pub m_hkdf_session_keys: SessionKeys,
+    }
+
+    impl TestKeySessionKeystore {
+        pub fn new() -> Self {
+            Self::default()
+        }
     }
 
     impl SessionKeystore for TestKeySessionKeystore {
@@ -728,3 +734,6 @@ mod tests {
         assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
     }
 } // end of tests
+
+#[cfg(test)]
+pub use tests::TestKeySessionKeystore;

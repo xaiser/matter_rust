@@ -1448,6 +1448,7 @@ mod tests {
             transport::{
                 crypto_context::{
                     SessionInfoType, SessionRole,
+                    TestKeySessionKeystore,
                 },
                 raw::{
                     test::{Test, TestListenParameter},
@@ -1487,6 +1488,7 @@ mod tests {
 
     type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
     type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
+    type TestSKS = TestKeySessionKeystore;
 
     struct TestSessionMessageDelegate{
         is_run: bool,
@@ -1576,7 +1578,7 @@ mod tests {
         }
     }
 
-    type TestSessionManager<'a> = SessionManager<'a, TestPersistentStorage, OK, OCS, RawKeySessionKeystore,
+    type TestSessionManager<'a> = SessionManager<'a, TestPersistentStorage, OK, OCS, TestSKS,
        TestSessionMessageDelegate, TestTransportMgr<'a>, TestMessageCounterMgr>;
 
     type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
@@ -1607,7 +1609,7 @@ mod tests {
     */
 
     //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
-    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore>;
+    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, TestSKS>;
 
     #[allow(dead_code)]
     struct Resource<'a> {
@@ -1617,7 +1619,7 @@ mod tests {
         message_counter_manager: TestMessageCounterMgr,
         pa: TestPersistentStorage,
         table: TestFabricTable<'a>,
-        session_key_store: RawKeySessionKeystore,
+        session_key_store: TestSKS,
         group_data: TestGroupDataProvider,
         sm: TestSessionManager<'a>,
         pos: OCS,
@@ -1663,7 +1665,8 @@ mod tests {
         init_params.op_certs_store = ptr::addr_of_mut!(pos);
         table.init(&init_params)?;
 
-        let mut session_key_store = RawKeySessionKeystore::new();
+        //let mut session_key_store = RawKeySessionKeystore::new();
+        let mut session_key_store = TestKeySessionKeystore::default();
 
         // create group data provider
         let mut group_data = <TestGroupDataProvider as GroupDataProvider>::new();
@@ -1808,7 +1811,7 @@ mod tests {
         
         let mut pa = TestPersistentStorage::default();
         //let mut table = TestFabricTable::default();
-        let mut session_key_store = RawKeySessionKeystore::new();
+        let mut session_key_store = TestSKS::new();
 
         let mut group_data = TestGroupDataProvider::new();
         group_data.set_session_keystore(Some(NonNull::from_ref(&session_key_store)));
@@ -1837,7 +1840,7 @@ mod tests {
         let mut message_counter_manager = TestMessageCounterMgr::new();
         
         let mut table = TestFabricTable::default();
-        let mut session_key_store = RawKeySessionKeystore::new();
+        let mut session_key_store = TestSKS::new();
 
         let mut group_data = TestGroupDataProvider::new();
 
@@ -2588,49 +2591,88 @@ mod tests {
         assert!(output_2.is_duplicate());
     }
 
-    /*
     #[test]
     fn dispatch_secure_message_correctlly() {
         let mut rs = setup().unwrap();
 
+        // inject a test secure session first
         let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
-        // allocate secure case session first
-        let config = ReliableMessageProtocolConfig::get_default_mrp_config();
-        // must new with test to ensure the session is in a test-able state
-        let ss_result = rs.sm.m_secure_sessions.create_new_secure_session_for_test(
-            secure_session::Type::Kcase, 
-            TEST_SESSION_ID,
-            TEST_NODE_ID,
-            TEST_NODE_ID + 1,
-            CATValues::new(),
-            TEST_SESSION_ID + 1,
-            TEST_FABRIC_INDEX,
-            &config,
-            );
-        assert!(ss_result.is_some());
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
 
-        let packet_header = PacketHeader::default();
         // just need a valid payload header, the content is don't care
         let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
             protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
 
-        // encode the payload header into message
-        let msg = PacketBufferHandle::new(0, 0);
-        assert!(msg.is_some());
-        let msg = msg.unwrap();
-        assert!(payload_header.encode_before_data(&msg).is_ok());
-        assert!(packet_header.encode_before_data(&msg).is_ok());
 
         // set up delegate
         let output = TestSessionMessageDelegate::new();
         rs.sm.set_delegate(NonNull::from_ref(&output));
 
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
         let transport_context = MessageTransportContext::new();
 
-        rs.sm.unauthenticated_message_dispatch(&packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
 
         assert!(output.is_run());
-        assert!(!output.is_duplicate());
     }
-    */
+
+    #[test]
+    fn dispatch_secure_message_mismatched_session() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+
+        // different sesssion IDs
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
 } // end of mod tests
