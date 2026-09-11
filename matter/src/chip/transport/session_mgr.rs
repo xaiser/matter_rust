@@ -2631,6 +2631,56 @@ mod tests {
         rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
 
         assert!(output.is_run());
+        assert!(!output.is_duplicate());
+    }
+
+    #[test]
+    fn dispatch_secure_message_by_direct_call_successfully() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        let msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        if partial_packet_header.decode_fixed(&msg).is_err() {
+            assert!(false);
+        }
+
+        rs.sm.secure_unicast_message_dispatch(&partial_packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
     }
 
     #[test]
@@ -2674,5 +2724,316 @@ mod tests {
         rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
 
         assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_message_privacy_flag() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        let msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        if partial_packet_header.decode_fixed(&msg).is_err() {
+            assert!(false);
+        }
+        // set up privacy flag
+        partial_packet_header.set_security_flags(header::SecFlags::KPrivacyFlag);
+
+        //rs.sm.on_message_received(peer_address,  empty_msg, ptr::addr_of!(transport_context));
+        rs.sm.secure_unicast_message_dispatch(&partial_packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_message_empty_msg() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        let mut msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        if partial_packet_header.decode_fixed(&msg).is_err() {
+            assert!(false);
+        }
+
+        // empty out msg
+        let _ = msg.pop_head();
+
+        rs.sm.secure_unicast_message_dispatch(&partial_packet_header, peer_address, msg, ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_pase_secure_message_correctlly() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        assert!(rs.sm.inject_pase_session_with_test_key(&mut holder, TEST_SESSION_ID, KUNDEFINED_NODE_ID, TEST_SESSION_ID,
+                KUNDEFINED_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_message_decryt_failed() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        // Use mismatched peer node id to fail the decrypt
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID + 1, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_duplicate_message() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into()).set_needs_ack(true);
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let encrypted_msg_2 = encrypted_msg.clone();
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+        assert!(!output.is_duplicate());
+
+        // prepare duplicate message
+        let duplicated_msg = encrypted_msg_2.cast_to_writable().unwrap();
+        /*
+        let mut packet_header = PacketHeader::default();
+        assert!(packet_header.decode_and_consume(&duplicated_msg).is_ok());
+        let packet_header = packet_header.set_needs_ack(true);
+        assert!(packet_header.encode_before_data(&duplicated_msg).is_ok());
+        */
+
+        // reset delegate
+        let output_2 = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output_2));
+        // set the same msg again
+        rs.sm.on_message_received(peer_address, duplicated_msg, ptr::addr_of!(transport_context));
+
+        assert!(output_2.is_run());
+        assert!(output_2.is_duplicate());
+    }
+
+    #[test]
+    fn dispatch_secure_duplicate_no_needs_ack_message() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+        let mut holder = SessionHolder::new();
+        // Since we are looping back(that is, the same session prepare message and send it to
+        // itself), just keep session_id and node_id the same.
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_NODE_ID, TEST_SESSION_ID,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        // get session handle
+        let session_handle = holder.get().unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let encrypted_msg_2 = encrypted_msg.clone();
+
+        let transport_context = MessageTransportContext::new();
+
+        rs.sm.on_message_received(peer_address,  encrypted_msg.cast_to_writable().unwrap(), ptr::addr_of!(transport_context));
+
+        assert!(output.is_run());
+        assert!(!output.is_duplicate());
+
+        // prepare duplicate message
+        let duplicated_msg = encrypted_msg_2.cast_to_writable().unwrap();
+        /*
+        let mut packet_header = PacketHeader::default();
+        assert!(packet_header.decode_and_consume(&duplicated_msg).is_ok());
+        let packet_header = packet_header.set_needs_ack(true);
+        assert!(packet_header.encode_before_data(&duplicated_msg).is_ok());
+        */
+
+        // reset delegate
+        let output_2 = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output_2));
+        // set the same msg again
+        rs.sm.on_message_received(peer_address, duplicated_msg, ptr::addr_of!(transport_context));
+
+        assert!(!output_2.is_run());
+        assert!(!output_2.is_duplicate());
     }
 } // end of mod tests
