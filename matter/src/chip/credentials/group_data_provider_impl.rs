@@ -2468,12 +2468,15 @@ pub mod iter_impl {
             crypto::aes::mode_ccm::decrypt(text, aad, mic, &self.m_encryption_key, nonce)
         }
 
-        fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
-            crypto::aes_ctr_encrypt(input, &self.m_privacy_key, nonce, output)
+        //fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        fn privacy_encrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult {
+            crypto::aes_ctr_encrypt(text, &self.m_privacy_key, nonce)
         }
 
-        fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
-            crypto::aes_ctr_encrypt(input, &self.m_privacy_key, nonce, output)
+        //fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        fn privacy_decrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult {
+            //crypto::aes_ctr_encrypt(input, &self.m_privacy_key, nonce, output)
+            crypto::aes_ctr_encrypt(text, &self.m_privacy_key, nonce)
         }
 
         fn release(&mut self) {

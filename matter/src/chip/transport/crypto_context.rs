@@ -282,30 +282,31 @@ impl CryptoContext {
         Ok(result_sizes)
     }
 
-    pub fn privacy_encrypt(&self, input: &[u8], output: &mut [u8], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+    pub fn privacy_encrypt(&self, text: Text, header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
+        verify_or_return_error!(text.len() > 0, Err(chip_error_invalid_argument!()));
 
         if let Some(context_ptr) = self.m_key_context.as_ref() 
         {
             let mut privacy_nonce: [u8; Self::KAESCCM_NONCE_LEN] = [0; Self::KAESCCM_NONCE_LEN];
             Self::build_privacy_nonce(&mut privacy_nonce, header.get_session_id(), mac)?;
             unsafe {
-                return context_ptr.as_ref().privacy_encrypt(input, &privacy_nonce[..], &mut output[..input.len()]);
+                return context_ptr.as_ref().privacy_encrypt(text, &privacy_nonce[..]);
             }
         } else {
             return Err(chip_error_invalid_use_of_session_key!());
         }
     }
 
-    pub fn privacy_decrypt(&self, input: &[u8], output: &mut [u8], header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
-        verify_or_return_error!(input.len() > 0 && input.len() <= output.len(), Err(chip_error_invalid_argument!()));
+    pub fn privacy_decrypt(&self, text: Text, header: &PacketHeader, mac: &MessageAuthenticationCode) -> ChipErrorResult {
+        verify_or_return_error!(text.len() > 0, Err(chip_error_invalid_argument!()));
 
         if let Some(context_ptr) = self.m_key_context.as_ref() 
         {
             let mut privacy_nonce: [u8; Self::KAESCCM_NONCE_LEN] = [0; Self::KAESCCM_NONCE_LEN];
             Self::build_privacy_nonce(&mut privacy_nonce, header.get_session_id(), mac)?;
             unsafe {
-                return context_ptr.as_ref().privacy_decrypt(input, &privacy_nonce[..], &mut output[..input.len()]);
+                //return context_ptr.as_ref().privacy_decrypt(input, &privacy_nonce[..], &mut output[..input.len()]);
+                return context_ptr.as_ref().privacy_decrypt(text, &privacy_nonce[..]);
             }
         } else {
             return Err(chip_error_invalid_use_of_session_key!());
@@ -672,11 +673,13 @@ pub mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        //assert!(context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        assert!(context.privacy_encrypt(Text::new_b2b(&input, &mut output), &header, &mut mac).is_ok());
 
         let mut output_2 = [0u8; 16];
 
-        assert!(context.privacy_decrypt(&output, &mut output_2, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        //assert!(context.privacy_decrypt(&output, &mut output_2, &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
+        assert!(context.privacy_decrypt(Text::new_b2b(&output, &mut output_2), &header, &mac).inspect_err(|e| println!("err is {:?}", e)).is_ok());
     }
 
     #[test]
@@ -707,7 +710,8 @@ pub mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        //assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        assert!(!context.privacy_encrypt(Text::new_b2b(&input, &mut output), &header, &mut mac).is_ok());
     }
 
     #[test]
@@ -731,7 +735,8 @@ pub mod tests {
         let header = PacketHeader::default().set_session_id(0x1);
         let mut mac = MessageAuthenticationCode::default();
 
-        assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        //assert!(!context.privacy_encrypt(&input, &mut output, &header, &mut mac).is_ok());
+        assert!(!context.privacy_encrypt(Text::new_b2b(&input, &mut output), &header, &mut mac).is_ok());
     }
 } // end of tests
 

@@ -261,17 +261,41 @@ pub mod key_128 {
         }
 
         pub fn encrypt<Ctr: KeyIvInit + StreamCipher>(input: &[u8], key: &Aes128KeyHandle, nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+            /*
             let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
 
             ctr.apply_keystream_b2b(input, output).map_err(|_| chip_error_internal!())?;
 
             chip_ok!()
+            */
+            encrypt_text::<Ctr>(Text::new_b2b(input, output), key, nonce)
         }
 
         pub fn encrypt_in_place<Ctr: KeyIvInit + StreamCipher>(text: &mut [u8], key: &Aes128KeyHandle, nonce: &[u8]) -> ChipErrorResult {
+            /*
             let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
 
             ctr.try_apply_keystream(text).map_err(|_| chip_error_internal!())?;
+
+            chip_ok!()
+            */
+            encrypt_text::<Ctr>(Text::new_in_place(text), key, nonce)
+        }
+
+        pub fn encrypt_text<Ctr: KeyIvInit + StreamCipher>(text: Text, key: &Aes128KeyHandle, nonce: &[u8]) -> ChipErrorResult {
+            let mut ctr = create_aes128::<Ctr>(key, nonce).map_err(|_| chip_error_invalid_argument!())?;
+
+            match text {
+                Text::B2B(input, output) => {
+                    if output.len() < input.len() {
+                        return Err(chip_error_internal!());
+                    }
+                    ctr.apply_keystream_b2b(input, output).map_err(|_| chip_error_internal!())?;
+                },
+                Text::InPlace(text) => {
+                    ctr.try_apply_keystream(text).map_err(|_| chip_error_internal!())?;
+                }
+            }
 
             chip_ok!()
         }
@@ -349,24 +373,27 @@ pub mod key_128 {
             return mode_ccm::decrypt_text::<M>(text, aad, mic, &self.m_encryption_key, nonce);
         }
 
-        fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        //fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        fn privacy_encrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult {
             let mut iv = [0u8; KEY_SIZE_BYTES];
             let nonce_size = <M as AeadCore>::NonceSize::to_usize();
             if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
                 iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
-                return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
+                return mode_ctr::encrypt_text::<R>(text, &self.m_privacy_key, &iv);
             } else {
                 return Err(chip_error_invalid_argument!());
             }
         }
 
-        fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        //fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult {
+        fn privacy_decrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult {
             let mut iv = [0u8; KEY_SIZE_BYTES];
             let nonce_size = <M as AeadCore>::NonceSize::to_usize();
             if nonce.len() >= nonce_size && iv.len() >= KEY_SIZE_BYTES {
                 iv[0..nonce_size].copy_from_slice(&nonce[..nonce_size]);
                 // ctr decrypt is simply xor, so we can shared the encrypt function call.
-                return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
+                //return mode_ctr::encrypt::<R>(input, &self.m_privacy_key, &iv, output);
+                return mode_ctr::encrypt_text::<R>(text, &self.m_privacy_key, &iv);
             } else {
                 return Err(chip_error_invalid_argument!());
             }

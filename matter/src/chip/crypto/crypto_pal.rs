@@ -957,6 +957,7 @@ pub fn aes_ccm_decrypt(
     crate::chip::crypto::aes::key_128::mode_ccm::decrypt_autosize(ciphertext, aad, tag, key, nonce, plaintext)
 }
 
+/*
 pub fn aes_ctr_encrypt(
     input: &[u8],
     key: &Aes128KeyHandle,
@@ -964,6 +965,14 @@ pub fn aes_ctr_encrypt(
     output: &mut [u8],
 ) -> ChipErrorResult {
     crate::chip::crypto::aes::key_128::mode_ctr::encrypt::<ctr::Ctr32LE<aes::Aes128>>(input, key, nonce, output)
+}
+*/
+pub fn aes_ctr_encrypt(
+    text: Text,
+    key: &Aes128KeyHandle,
+    nonce: &[u8],
+) -> ChipErrorResult {
+    crate::chip::crypto::aes::key_128::mode_ctr::encrypt_text::<ctr::Ctr32LE<aes::Aes128>>(text, key, nonce)
 }
 
 pub fn generate_certificate_signing_request(
@@ -1573,9 +1582,14 @@ pub trait SymmetricKeyContext {
 
     fn message_decrypt(&self, text: Text, aad: &[u8], nonce: &[u8], mic: &[u8]) -> Result<SymmetricDecryptResult, ChipError>;
 
+    /*
     fn privacy_encrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
 
     fn privacy_decrypt(&self, input: &[u8], nonce: &[u8], output: &mut [u8]) -> ChipErrorResult;
+    */
+    fn privacy_encrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult;
+
+    fn privacy_decrypt(&self, text: Text, nonce: &[u8]) -> ChipErrorResult;
 
     fn release(&mut self);
 }

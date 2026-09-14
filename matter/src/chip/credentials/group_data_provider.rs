@@ -151,6 +151,15 @@ impl<KeyContext: SymmetricKeyContext> GroupSession<KeyContext> {
             key_context: None,
         }
     }
+
+    pub fn new_with(key_context: Option<NonNull<KeyContext>>) -> Self {
+        Self {
+            group_id: KUNDEFINED_GROUP_ID,
+            fabric_index: KUNDEFINED_FABRIC_INDEX,
+            security_policy: SecurityPolicy::KcacheAndSync,
+            key_context,
+        }
+    }
 }
 
 pub mod epoch_key {

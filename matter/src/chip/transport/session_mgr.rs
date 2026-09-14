@@ -26,7 +26,7 @@ use crate::{
                 ECPKey, 
                 P256EcdhDeriveSecret,
             },
-            SymmetricKeyContext,
+            SymmetricKeyContext, Text,
         },
         messaging::{
             reliable_message_protocol_config::ReliableMessageProtocolConfig,
@@ -1074,22 +1074,54 @@ where
         chip_ok!()
     }
 
-    fn group_key_decrypt_attempt<KC: SymmetricKeyContext>(partial_packet_header: &PacketHeader, packet_header_copy: &PacketHeader, payload_header: &PayloadHeader, apply_privacy: bool,
-        msg_copy: &PacketBufferHandle, mac: &MessageAuthenticationCode, group_context: &group_data_provider::GroupSession<KC>) -> bool
+    fn group_key_decrypt_attempt<KC: SymmetricKeyContext + 'static>(partial_packet_header: &PacketHeader, 
+        packet_header_copy: &mut PacketHeader, payload_header: &mut PayloadHeader, apply_privacy: bool,
+        msg_copy: &mut PacketBufferHandle, mac: &MessageAuthenticationCode, group_context: &group_data_provider::GroupSession<KC>) -> bool
     {
-        let context = CryptoContext::new_with_key_context(NonNull::from_ref(group_context));
+        let context = {
+            if let Some(c) = group_context.key_context {
+                CryptoContext::new_with_key_context(c)
+            } else {
+                return false;
+            }
+        };
+
         if apply_privacy {
             // Perform privacy deobfuscation, if applicable.
-            let privacy_header = partial_packet_header.privacy_header(msg_copy.start());
+            let privacy_header = PacketHeader::privacy_header(msg_copy.start());
             let privacy_length = partial_packet_header.privacy_header_length();
 
-            /*
-            unsafe {
-                if context.privacy_decrypt(core::slice::from_raw_parts(privacy_header, privacy_length), 
+            let privacy_data = unsafe {
+                core::slice::from_raw_parts_mut(privacy_header, privacy_length)
+            };
+
+            if context.privacy_decrypt(Text::new_in_place(privacy_data), partial_packet_header, mac).is_err() {
+                return false;
             }
-            */
         }
-        true
+
+        if packet_header_copy.decode_and_consume(msg_copy).is_err() {
+            chip_log_error!(Inet, "Failed to decode groupcast packet header. Discarding.");
+            return false;
+        }
+
+        // Optimization to reduce number of decryption attempts
+        if packet_header_copy.get_destination_node_id().is_some_and(|id| id != group_context.group_id.into()) {
+            return false;
+        }
+
+        let mut nonce = CryptoContext::new_nonce();
+        if let Some(id) = packet_header_copy.get_source_node_id() {
+            let _ = CryptoContext::build_nonce(&mut nonce, packet_header_copy.get_security_flags(), packet_header_copy.get_message_counter(),
+                *id).inspect_err(|e|{
+                    chip_log_error!(Inet, "cannot handle nonce {}", e);
+                });
+        } else {
+            chip_log_error!(Inet, "No source id in the packet");
+            return false;
+        }
+
+        secure_message_codec::decrypt(&context, &nonce, payload_header, packet_header_copy, msg_copy).is_ok()
     }
 
     fn secure_group_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle)
@@ -3053,5 +3085,51 @@ mod tests {
 
         assert!(!output_2.is_run());
         assert!(!output_2.is_duplicate());
+    }
+
+    #[test]
+    fn group_key_decrypt_successfully() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (session, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(encrypt_msg.is_ok());
+        let encrypt_msg = encrypt_msg.unwrap();
+        let raw_msg = encrypt_msg.cast_to_writable().unwrap();
+        let raw_msg_privacy = raw_msg.clone();
+
+        // set up privacy flag
+        let mut packet_header = PacketHeader::default();
+        if packet_header.decode_and_consume(&raw_msg_privacy).is_err() {
+            assert!(false);
+        }
+        packet_header.set_security_flags(SecFlags::KPrivacyFlag);
+        packet_header.encode_before_data(&raw_msg_privacy);
+
+        // get header
+        let privacy_header = PacketHeader::privacy_header(raw_msg_privacy.start());
+        let privacy_length = raw_msg_privacy.privacy_header_length();
+        let privacy_data = unsafe {
+            core::slice::from_raw_parts_mut(privacy_header, privacy_length)
+        };
+        let mut key_context = {
+            if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
+                unsafe {
+                    let result = groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID);
+                    assert!(result.is_ok());
+                    result.unwrap()
+                }
+            } else {
+                assert!(false);
+                return;
+            }
+        };
+        // encrypt the header
+        {
+            let context = CryptoContext::new_with_key_context(NonNull::from_ref(&key_context));
+            assert!(context.privacy_encrypt(Text::new_in_place(privacy_data, packet_header, mac).is_ok());
+        }
+
+        let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
+        group_session.group_id = TEST_GROUP_ID;
     }
 } // end of mod tests
