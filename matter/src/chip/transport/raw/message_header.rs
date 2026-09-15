@@ -574,6 +574,9 @@ impl PacketHeader {
      * consumes the bytes we decoded from.
      */
     pub fn decode_and_consume(&mut self, buf: &PacketBufferHandle) -> ChipErrorResult {
+        if buf.is_null() {
+            return Err(chip_error_internal!());
+        }
         let packet_buffer: *mut PacketBuffer = buf.get_raw();
         let mut header_size: u16 = 0;
         unsafe {

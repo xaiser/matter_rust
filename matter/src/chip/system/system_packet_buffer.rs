@@ -299,7 +299,7 @@ impl PacketBuffer {
 
     pub fn as_slice(&self) -> &[u8] {
         unsafe {
-            core::slice::from_raw_parts(self.start(), self.total_length())
+            core::slice::from_raw_parts(self.start(), self.data_len() as usize)
         }
     }
 }

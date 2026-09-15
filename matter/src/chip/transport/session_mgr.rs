@@ -1106,7 +1106,7 @@ where
         }
 
         // Optimization to reduce number of decryption attempts
-        if packet_header_copy.get_destination_node_id().is_some_and(|id| id != group_context.group_id.into()) {
+        if packet_header_copy.get_destination_group_id().is_some_and(|id| id != group_context.group_id.into()) {
             return false;
         }
 
@@ -1124,8 +1124,83 @@ where
         secure_message_codec::decrypt(&context, &nonce, payload_header, packet_header_copy, msg_copy).is_ok()
     }
 
-    fn secure_group_message_dispatch(&self, _partial_packet_header: &PacketHeader, _peer_address: PeerAddress, _msg: PacketBufferHandle)
-    { }
+    fn secure_group_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle)
+    { 
+        matter_trace_scope!("Group Message Dispatch", "SessionManager");
+        let mut payload_header = PayloadHeader::default();
+        // Packet header decoded per group key, with privacy decrypted fields
+        let mut packet_header_copy = PacketHeader::default();
+        let mut msg_copy = PacketBufferHandle::default();
+
+        if !partial_packet_header.has_destination_group_id() {
+            return; // malformed packet
+        }
+
+        if !(partial_packet_header.is_valid_mcsp_msg() || partial_packet_header.is_valid_group_msg()) {
+            chip_log_error!(Inet, "Invalid condition found in packet header");
+            return;
+        }
+
+        //let mut group_context = group_data_provider::GroupSession::default();
+
+        let iter = {
+            if let Some(mut groups_ptr) = self.m_group_data_provider {
+                unsafe {
+                    match groups_ptr.as_ref().iter_group_session(partial_packet_header.get_session_id()) {
+                        Some(i) => i,
+                        None => {
+                            chip_log_error!(Inet, "Failed to retrieve Groups iterator. Discarding everything");
+                            return;
+                        }
+                    }
+                }
+            } else {
+                return;
+            }
+        };
+
+        // Extract MIC from the end of the message.
+        let len = msg.data_len() as usize;
+        let footer_len = partial_packet_header.mic_tag_length() as usize;
+
+        let mut tag_len = 0u16;
+        let mut mac = MessageAuthenticationCode::default();
+        let data = msg.as_slice();
+        if let Some(footer_slice) = data.get((len - footer_len)..) {
+            if mac.decode(&partial_packet_header, footer_slice, &mut tag_len).is_err() {
+                return;
+            }
+        } else {
+            return;
+        }
+
+        if !(usize::from(tag_len) == footer_len) {
+            return;
+        }
+
+        let mut decrypted = false;
+        for group_context in iter.filter(|g| g.key_context.is_some()) {
+            if decrypted {
+                break;
+            }
+            let context = CryptoContext::new_with_key_context(group_context.key_context.unwrap());
+            msg_copy = msg.clone();
+            if msg_copy.is_null() {
+                chip_log_error!(Inet, "Failed to clone groupcast message buffer. Discarding.");
+                return;
+            }
+            let privacy = partial_packet_header.has_privacy_flag();
+            decrypted = Self::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header, 
+                privacy, &mut msg_copy, &mut mac, &group_context);
+        }
+
+        iter.release();
+
+        if !decrypted {
+            chip_log_error!(Inet, "Failed to decrypt group message. Discarding everything");
+            return;
+        }
+    }
 
     fn secure_unicast_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, mut msg: PacketBufferHandle,
         _ctxt: *const MessageTransportContext)
@@ -3091,45 +3166,196 @@ mod tests {
     fn group_key_decrypt_successfully() {
         let mut rs = setup().unwrap();
         let mut pool = new_session_alloactor();
-        let (session, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        let (_, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
         assert!(encrypt_msg.is_ok());
         let encrypt_msg = encrypt_msg.unwrap();
         let raw_msg = encrypt_msg.cast_to_writable().unwrap();
-        let raw_msg_privacy = raw_msg.clone();
+        let mut raw_msg_copy = raw_msg.clone();
 
-        // set up privacy flag
-        let mut packet_header = PacketHeader::default();
-        if packet_header.decode_and_consume(&raw_msg_privacy).is_err() {
-            assert!(false);
-        }
-        packet_header.set_security_flags(SecFlags::KPrivacyFlag);
-        packet_header.encode_before_data(&raw_msg_privacy);
+        // TODO: As we don't support privacy encrypt now, we will test it later
 
-        // get header
-        let privacy_header = PacketHeader::privacy_header(raw_msg_privacy.start());
-        let privacy_length = raw_msg_privacy.privacy_header_length();
-        let privacy_data = unsafe {
-            core::slice::from_raw_parts_mut(privacy_header, privacy_length)
-        };
-        let mut key_context = {
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        let mut packet_header_copy = PacketHeader::default();
+
+        let mut payload_header = PayloadHeader::default();
+
+        let mac = MessageAuthenticationCode::default();
+
+        let key_context = {
             if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
                 unsafe {
-                    let result = groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID);
-                    assert!(result.is_ok());
-                    result.unwrap()
+                    groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID).unwrap()
                 }
             } else {
                 assert!(false);
                 return;
             }
         };
-        // encrypt the header
-        {
-            let context = CryptoContext::new_with_key_context(NonNull::from_ref(&key_context));
-            assert!(context.privacy_encrypt(Text::new_in_place(privacy_data, packet_header, mac).is_ok());
-        }
 
         let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
         group_session.group_id = TEST_GROUP_ID;
+
+        assert!(TestSessionManager::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header,
+                false, &mut raw_msg_copy, &mac, &group_session));
+    }
+
+    #[test]
+    fn group_key_decrypt_no_key_context() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (_, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(encrypt_msg.is_ok());
+        let encrypt_msg = encrypt_msg.unwrap();
+        let raw_msg = encrypt_msg.cast_to_writable().unwrap();
+        let mut raw_msg_copy = raw_msg.clone();
+
+        // TODO: As we don't support privacy encrypt now, we will test it later
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        let mut packet_header_copy = PacketHeader::default();
+
+        let mut payload_header = PayloadHeader::default();
+
+        let mac = MessageAuthenticationCode::default();
+
+        let key_context = {
+            if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
+                unsafe {
+                    groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID).unwrap()
+                }
+            } else {
+                assert!(false);
+                return;
+            }
+        };
+
+        let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
+        group_session.group_id = TEST_GROUP_ID;
+        // remove key context
+        group_session.key_context = None;
+
+        assert!(!TestSessionManager::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header,
+                false, &mut raw_msg_copy, &mac, &group_session));
+    }
+
+    #[test]
+    fn group_key_decrypt_empty_msg() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (_, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(encrypt_msg.is_ok());
+        let encrypt_msg = encrypt_msg.unwrap();
+        let raw_msg = encrypt_msg.cast_to_writable().unwrap();
+
+        // TODO: As we don't support privacy encrypt now, we will test it later
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        let mut packet_header_copy = PacketHeader::default();
+
+        let mut payload_header = PayloadHeader::default();
+
+        let mac = MessageAuthenticationCode::default();
+
+        let key_context = {
+            if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
+                unsafe {
+                    groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID).unwrap()
+                }
+            } else {
+                assert!(false);
+                return;
+            }
+        };
+
+        let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
+        group_session.group_id = TEST_GROUP_ID;
+
+        let mut raw_msg_copy = PacketBufferHandle::default();
+        assert!(!TestSessionManager::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header,
+                false, &mut raw_msg_copy, &mac, &group_session));
+    }
+
+    #[test]
+    fn group_key_decrypt_different_group_id() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (_, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(encrypt_msg.is_ok());
+        let encrypt_msg = encrypt_msg.unwrap();
+        let raw_msg = encrypt_msg.cast_to_writable().unwrap();
+        let mut raw_msg_copy = raw_msg.clone();
+
+        // TODO: As we don't support privacy encrypt now, we will test it later
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        let mut packet_header_copy = PacketHeader::default();
+
+        let mut payload_header = PayloadHeader::default();
+
+        let mac = MessageAuthenticationCode::default();
+
+        let key_context = {
+            if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
+                unsafe {
+                    groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID).unwrap()
+                }
+            } else {
+                assert!(false);
+                return;
+            }
+        };
+
+        let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
+        group_session.group_id = TEST_GROUP_ID + 1;
+
+        assert!(!TestSessionManager::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header,
+                false, &mut raw_msg_copy, &mac, &group_session));
+    }
+
+    #[test]
+    fn group_key_decrypt_failed_decrypt() {
+        let mut rs = setup().unwrap();
+        let mut pool = new_session_alloactor();
+        let (_, encrypt_msg) = prepare_outgoing_message(&mut rs, &mut pool);
+        assert!(encrypt_msg.is_ok());
+        let encrypt_msg = encrypt_msg.unwrap();
+        let raw_msg = encrypt_msg.cast_to_writable().unwrap();
+        let mut raw_msg_copy = raw_msg.clone();
+
+        // TODO: As we don't support privacy encrypt now, we will test it later
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        let mut packet_header_copy = PacketHeader::default();
+
+        let mut payload_header = PayloadHeader::default();
+
+        let mac = MessageAuthenticationCode::default();
+
+        let key_context = {
+            if let Some(mut groups_ptr) = rs.sm.m_group_data_provider {
+                unsafe {
+                    groups_ptr.as_mut().get_key_context(TEST_FABRIC_INDEX, TEST_GROUP_ID).unwrap()
+                }
+            } else {
+                assert!(false);
+                return;
+            }
+        };
+
+        let mut group_session = group_data_provider::GroupSession::new_with(Some(NonNull::from_ref(&key_context)));
+        group_session.group_id = TEST_GROUP_ID;
+
+        let mut packet_header_mismatched_source_id = PacketHeader::default();
+        let _ = packet_header_mismatched_source_id.decode_and_consume(&raw_msg_copy);
+        packet_header_mismatched_source_id = packet_header_mismatched_source_id.set_source_node_id(TEST_NODE_ID + 1);
+        let _ = packet_header_mismatched_source_id.encode_before_data(&raw_msg_copy);
+
+        assert!(!TestSessionManager::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header,
+                false, &mut raw_msg_copy, &mac, &group_session));
     }
 } // end of mod tests
