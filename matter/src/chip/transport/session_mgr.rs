@@ -14,10 +14,10 @@ use crate::{
             },
         },
         credentials::{
-                GroupDataProviderImpl,
-            self, fabric_table::{self , FabricTable},
+            self, GroupDataProviderImpl,
+            fabric_table::{self , FabricTable},
             group_data_provider::{
-                self, GroupDataProvider,
+                self, GroupDataProvider, SecurityPolicy,
             },
         },
         crypto::{
@@ -50,11 +50,11 @@ use crate::{
             message_counter::{MessageCounter, MessageCounterBase},
             session::{SessionHolder, SharedSession, SessionHandle, SessionBase, SessionType},
             secure_session::{self, AsRef as SecureSessionAsRef, AsMut as SecureSessionAsMut, mark_for_evication},
-            group_session::{AsRef as OutgoginGroupSessionAsRef},
+            group_session::{AsRef as OutgoginGroupSessionAsRef, GroupSessionTable},
             peer_message_counter::PeerMessageCounter,
             secure_message_codec,
         },
-        ScopedNodeId, FabricIndex, FabricId, NodeId,
+        ScopedNodeId, FabricIndex, FabricId, NodeId, GroupId,
     },
     ChipError,
     ChipErrorResult,
@@ -212,6 +212,7 @@ where
     // TODO: use linkedlist
     m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>,
     m_group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS>>>,
+    m_group_sessions: GroupSessionTable,
 }
 
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
@@ -254,6 +255,7 @@ where
             m_global_unencrypted_message_counter: MessageCounter::new_global_unencrypted(),
             m_next_table_delegate: None,
             m_group_data_provider: None,
+            m_group_sessions: GroupSessionTable::new(),
         }
     }
 
@@ -1124,7 +1126,7 @@ where
         secure_message_codec::decrypt(&context, &nonce, payload_header, packet_header_copy, msg_copy).is_ok()
     }
 
-    fn secure_group_message_dispatch(&self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, msg: PacketBufferHandle)
+    fn secure_group_message_dispatch(&mut self, partial_packet_header: &PacketHeader, peer_address: PeerAddress, mut msg: PacketBufferHandle)
     { 
         matter_trace_scope!("Group Message Dispatch", "SessionManager");
         let mut payload_header = PayloadHeader::default();
@@ -1141,23 +1143,6 @@ where
             return;
         }
 
-        //let mut group_context = group_data_provider::GroupSession::default();
-
-        let iter = {
-            if let Some(mut groups_ptr) = self.m_group_data_provider {
-                unsafe {
-                    match groups_ptr.as_ref().iter_group_session(partial_packet_header.get_session_id()) {
-                        Some(i) => i,
-                        None => {
-                            chip_log_error!(Inet, "Failed to retrieve Groups iterator. Discarding everything");
-                            return;
-                        }
-                    }
-                }
-            } else {
-                return;
-            }
-        };
 
         // Extract MIC from the end of the message.
         let len = msg.data_len() as usize;
@@ -1178,27 +1163,125 @@ where
             return;
         }
 
-        let mut decrypted = false;
-        for group_context in iter.filter(|g| g.key_context.is_some()) {
-            if decrypted {
-                break;
-            }
-            let context = CryptoContext::new_with_key_context(group_context.key_context.unwrap());
-            msg_copy = msg.clone();
-            if msg_copy.is_null() {
-                chip_log_error!(Inet, "Failed to clone groupcast message buffer. Discarding.");
-                return;
-            }
-            let privacy = partial_packet_header.has_privacy_flag();
-            decrypted = Self::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header, 
-                privacy, &mut msg_copy, &mut mac, &group_context);
-        }
+        // have a block so the iter will be dropped(released) at the end
+        let current_group_context: Option<(FabricIndex, SecurityPolicy, GroupId)> = {
+            let iter = {
+                if let Some(groups_ptr) = self.m_group_data_provider {
+                    unsafe {
+                        match groups_ptr.as_ref().iter_group_session(partial_packet_header.get_session_id()) {
+                            Some(i) => i,
+                            None => {
+                                chip_log_error!(Inet, "Failed to retrieve Groups iterator. Discarding everything");
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    return;
+                }
+            };
 
-        iter.release();
+            let mut found_context: Option<(FabricIndex, SecurityPolicy, GroupId)> = None;
+            for group_context in iter.filter(|g| g.key_context.is_some()) {
+                if found_context.is_some() {
+                    break;
+                }
+                //let context = CryptoContext::new_with_key_context(group_context.key_context.unwrap());
+                msg_copy = msg.clone();
+                if msg_copy.is_null() {
+                    chip_log_error!(Inet, "Failed to clone groupcast message buffer. Discarding.");
+                    return;
+                }
+                let privacy = partial_packet_header.has_privacy_flag();
+                if Self::group_key_decrypt_attempt(&partial_packet_header, &mut packet_header_copy, &mut payload_header, 
+                    privacy, &mut msg_copy, &mut mac, &group_context) {
+                    found_context = Some((group_context.fabric_index, group_context.security_policy, group_context.group_id));
+                }
+            }
 
-        if !decrypted {
+            found_context
+        };
+
+        if current_group_context.is_none() {
             chip_log_error!(Inet, "Failed to decrypt group message. Discarding everything");
             return;
+        }
+        let current_group_context = current_group_context.unwrap();
+
+        msg = msg_copy;
+
+        // MCSP check
+        if packet_header_copy.is_valid_mcsp_msg() {
+            // TODO: When MCSP Msg, create Secure Session instead of a Group session
+
+            // TODO
+            // if (packetHeaderCopy.GetDestinationNodeId().Value() == ThisDeviceNodeID)
+            // {
+            //     MCSP processing..
+            // }
+
+            return;
+        }
+
+        // Group Messages should never send an Ack
+        if payload_header.is_needs_ack() {
+            chip_log_error!(Inet, "Unexpected ACK requested for group message");
+            return;
+        }
+
+        // Handle Group message counter here spec 4.7.3
+        // spec 4.5.1.2 for msg counter
+        let source_node_id = {
+            match packet_header_copy.get_source_node_id() {
+                Some(s) => *s,
+                None => {
+                    chip_log_error!(Inet, "No source node id in message, dropping everything");
+                    return;
+                }
+            }
+        };
+        let fabric_index = current_group_context.0;
+        let security_policy = current_group_context.1;
+        let group_peer_table = unsafe { group_peer_table().as_mut() };
+        if let Ok(counter) = group_peer_table.find_or_add_peer(fabric_index, source_node_id,
+                packet_header_copy.is_secure_session_control_msg()) 
+        {
+            if SecurityPolicy::KtrustFirst == security_policy {
+                match counter.verify_or_trust_first_group(packet_header_copy.get_message_counter()) {
+                    Ok(_) => {
+                        let _ = counter.commit_group(packet_header_copy.get_message_counter());
+                    },
+                    Err(e) => {
+                        // Exit now, since Group Messages don't have acks or responses of any kind.
+                        chip_log_error!(Inet, "Message count verify failed, err = {}", e);
+                        return;
+                    }
+                }
+            } else {
+                // TODO support cache and sync with MCSP. Issue  #11689
+                chip_log_error!(Inet, "Received Group Msg with key policy Cache and Sync, but MCSP is not implemented");
+                return;
+            }
+        } else {
+            chip_log_error!(Inet, "Group Counter Tables full or invalid NodeId/FabricIndex after decryption of message, dropping everything");
+            return;
+        }
+
+        let group_id = current_group_context.2;
+        if let Some(mut cb) = self.m_cb {
+            // TODO : When MCSP is done, clean up session creation logic
+            if let Ok(session_handle) = self.m_group_sessions.alloc_incoming_group_session(group_id, fabric_index, source_node_id) {
+                matter_log_message_received!(tracing::IncomingMessageType::KgroupMessage, &payload_header, &packet_header_copy, 
+                    &session_handle, &peer_address, msg.as_slice());
+
+                unsafe {
+                    cb.as_mut().on_message_received(&packet_header_copy, &payload_header, &session_handle, DuplicateMessage::No, msg);
+                }
+            } else {
+                chip_log_error!(Inet, "cannot alloc session");
+            }
+        } else {
+            chip_log_error!(Inet, "Received GROUP message was not processed.");
         }
     }
 

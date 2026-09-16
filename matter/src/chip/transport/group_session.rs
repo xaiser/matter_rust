@@ -1,4 +1,21 @@
 #![allow(dead_code)]
+use crate::{
+    chip::{
+        transport::{
+            session::{
+                Alloactor as Pool, SessionHandle,
+                Session, new_session_alloactor, new_shared_session,
+            },
+        },
+        GroupId, NodeId, FabricIndex,
+    },
+    ChipError,
+    chip_sdk_error,
+    chip_core_error,
+    chip_error_internal,
+};
+
+use core::ptr;
 
 pub mod incoming {
     use crate::{
@@ -114,6 +131,15 @@ pub mod incoming {
                 m_group_id: 0,
                 m_fabric_index: KUNDEFINED_FABRIC_INDEX,
                 m_peer_node_id: KUNDEFINED_NODE_ID,
+            }
+        }
+
+        pub fn new_with(group_id: GroupId, fabric_index: FabricIndex, peer_node_id: NodeId) -> Self {
+            Self {
+                m_holders: new_session_holder_list(),
+                m_group_id: group_id,
+                m_fabric_index: fabric_index,
+                m_peer_node_id: peer_node_id,
             }
         }
 
@@ -267,4 +293,64 @@ pub mod outgoing {
     } // end of tests
 }
 
+pub struct GroupSessionTable 
+{
+    // TODO: maybe we could use pool with smaller size
+    m_entries_pool: Pool,
+}
+
+impl GroupSessionTable {
+    pub const fn new() -> Self {
+        Self {
+            m_entries_pool: new_session_alloactor(),
+        }
+    }
+
+    pub fn alloc_incoming_group_session(&mut self, group_id: GroupId, fabric_index: FabricIndex, peer_node_id: NodeId) -> Result<SessionHandle, ChipError> {
+        if let Ok(ss) = new_shared_session(Session::new_incoming_group_with(IncomingGroupSession::new_with(group_id, fabric_index,
+                    peer_node_id)), ptr::addr_of_mut!(self.m_entries_pool)) {
+            return Ok(SessionHandle::new_with(&ss));
+        } else {
+            return Err(chip_error_internal!());
+        }
+    }
+
+    pub fn alloc_outgoing_group_session(&mut self, group_id: GroupId, fabric_index: FabricIndex) -> Result<SessionHandle, ChipError> {
+        if let Ok(ss) = new_shared_session(Session::new_outgoing_group_with(OutgoingGroupSession::new_with(group_id, fabric_index,
+                    )), ptr::addr_of_mut!(self.m_entries_pool)) {
+            return Ok(SessionHandle::new_with(&ss));
+        } else {
+            return Err(chip_error_internal!());
+        }
+    }
+}
+
 pub use outgoing::{OutgoingGroupSession, AsRef, AsMut};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chip::{
+        transport::{
+            session::{
+                new_session_alloactor,
+                new_shared_session, Session,
+            },
+        },
+    };
+    use core::ptr;
+
+    #[test]
+    fn allocate_incoming_successfully() {
+        let mut table = GroupSessionTable::new();
+
+        assert!(table.alloc_incoming_group_session(1, 1, 1).is_ok());
+    }
+
+    #[test]
+    fn allocate_outgoing_successfully() {
+        let mut table = GroupSessionTable::new();
+
+        assert!(table.alloc_outgoing_group_session(1, 1).is_ok());
+    }
+} // end of tests

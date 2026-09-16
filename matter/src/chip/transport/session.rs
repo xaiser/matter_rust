@@ -1041,6 +1041,10 @@ impl Session {
         Session::IncomingGroupSession(IncomingGroupSession::new())
     }
 
+    pub const fn new_incoming_group_with(igs: IncomingGroupSession) -> Session {
+        Session::IncomingGroupSession(igs)
+    }
+
     pub const fn new_outgoing_group() -> Session {
         Session::OutgoingGroupSession(OutgoingGroupSession::new())
     }
