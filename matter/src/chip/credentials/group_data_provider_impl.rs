@@ -3823,7 +3823,7 @@ pub mod tests {
         // create keyset
         // number of keys must be < 3, otherwise the get_current_group_credentials would return
         // error
-        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KcacheAndSync, 2);
+        let keyset = KeySet::new_with(keyset_id, SecurityPolicy::KtrustFirst, 2);
         //let compressed_fabric_id = u16::to_be_bytes(1u16);
         p.set_key_set(fabric_index, compressed_fabric_id, &keyset)?;
 
