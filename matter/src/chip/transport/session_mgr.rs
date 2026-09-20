@@ -1840,6 +1840,10 @@ mod tests {
     {
         // reset system packet buffer pool
         reset_pool();
+        // reset peer table
+        unsafe {
+            group_peer_table().as_mut().reset();
+        }
 
         let system = system_layer();
         unsafe {
@@ -3598,5 +3602,172 @@ mod tests {
         rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, raw_msg);
 
         assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_group_message_incorrect_session_id() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let session_handle = rs.sm.m_group_sessions.alloc_outgoing_group_session(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        assert!(session_handle.is_ok());
+        let session_handle = session_handle.unwrap();
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let raw_msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        // incorrect session id
+        let partial_packet_header = partial_packet_header.set_session_id(TEST_SESSION_ID + 1);
+
+        rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, raw_msg);
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_group_message_decode_failed() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let session_handle = rs.sm.m_group_sessions.alloc_outgoing_group_session(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        assert!(session_handle.is_ok());
+        let session_handle = session_handle.unwrap();
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let raw_msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+        partial_packet_header.set_security_flags(header::SecFlags::KPrivacyFlag);
+
+        rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, raw_msg);
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_group_message_payload_needs_ack() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let session_handle = rs.sm.m_group_sessions.alloc_outgoing_group_session(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        assert!(session_handle.is_ok());
+        let session_handle = session_handle.unwrap();
+
+        // just need a valid payload header, the content is don't care
+        // ACK
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into()).set_needs_ack(true);
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let raw_msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+
+        rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, raw_msg);
+
+        assert!(!output.is_run());
+    }
+
+    #[test]
+    fn dispatch_secure_group_message_counter_mismatched() {
+        let mut rs = setup().unwrap();
+
+        // inject a test secure session first
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        let session_handle = rs.sm.m_group_sessions.alloc_outgoing_group_session(TEST_GROUP_ID, TEST_FABRIC_INDEX);
+        assert!(session_handle.is_ok());
+        let session_handle = session_handle.unwrap();
+
+        // just need a valid payload header, the content is don't care
+        let payload_header = PayloadHeader::default().set_exchange_id(0xBBAA).set_message_type(
+            protocols::secure_channel::ID, protocols::secure_channel::MsgType::StandaloneAck.into());
+
+        // set up delegate
+        let output = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output));
+
+        // raw message buffer
+        let msg = PacketBufferHandle::new(0, 0);
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+
+        // encode the message
+        let encrypted_msg = rs.sm.prepare_message(&session_handle, &payload_header, msg);
+        assert!(encrypted_msg.is_ok());
+        let encrypted_msg = encrypted_msg.unwrap();
+        let encrypted_msg_2 = encrypted_msg.clone();
+        let raw_msg = encrypted_msg.cast_to_writable().unwrap();
+
+        let mut partial_packet_header = PacketHeader::default();
+        let _ = partial_packet_header.decode_fixed(&raw_msg);
+
+        rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, raw_msg);
+
+        assert!(output.is_run());
+
+        let duplicated_msg = encrypted_msg_2.cast_to_writable().unwrap();
+
+        // reset delegate
+        let output_2 = TestSessionMessageDelegate::new();
+        rs.sm.set_delegate(NonNull::from_ref(&output_2));
+
+        rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, duplicated_msg);
+
+        assert!(!output_2.is_run());
     }
 } // end of mod tests

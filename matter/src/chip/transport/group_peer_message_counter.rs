@@ -82,6 +82,12 @@ impl GroupPeerTable {
         }
     }
 
+    // mainly for test
+    #[cfg(test)]
+    pub fn reset(&mut self) {
+        self.m_group_fabrics = [ const { GroupFabric::new() }; CHIP_CONFIG_MAX_FABRICS];
+    }
+
     pub fn find_or_add_peer(&mut self, fabric_index: FabricIndex, node_id: NodeId, is_control: bool) -> Result<&mut PeerMessageCounter, ChipError> {
         if fabric_index == KUNDEFINED_FABRIC_INDEX || node_id == KUNDEFINED_NODE_ID {
             return Err(chip_error_invalid_argument!());
