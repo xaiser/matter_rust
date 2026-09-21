@@ -1518,6 +1518,96 @@ where
         }
     }
 
+    pub fn find_secure_session_for_node(&self, peer_node_id: ScopedNodeId, session_type: Option<secure_session::Type>,
+        _transport_payload_capability: TransportPayloadCapability) -> Option<SessionHandle>
+    {
+        let mut mrp_session: Option<SessionHandle> = None;
+        self.m_secure_sessions.for_each_session_const(|ss| {
+            let mut update = false;
+            if let Ok(session_ref) = ss.try_borrow() &&
+                let Some(secure_session) = SecureSessionAsRef::as_ref(&(*session_ref)) 
+            {
+                if secure_session.is_active_session() && secure_session.get_peer() == peer_node_id &&
+                    (session_type.is_none() || session_type.is_some_and(|t| t == secure_session.get_secure_session_type()) )
+                {
+                    if mrp_session.is_none() || mrp_session.as_ref().is_some_and(|handle| {
+                        if let Ok(mrp_session_ref) = handle.try_ref() &&
+                            let Some(mrp_secure_session) = SecureSessionAsRef::as_ref(&(*mrp_session_ref)) 
+                        {
+                            mrp_secure_session.get_last_peer_activity_time() < secure_session.get_last_peer_activity_time()
+                        } else {
+                            false
+                        }
+                    }) 
+                    {
+                        update = true;
+                    }
+                }
+            }
+
+            if update {
+                mrp_session = Some(SessionHandle::new_with(ss));
+            }
+
+            Loop::Continue
+        });
+
+        mrp_session
+    }
+
+    pub fn for_each_session_handle<F>(&mut self, mut f: F) -> ChipErrorResult
+        where
+            F: FnOnce(SessionHandle) + FnMut(SessionHandle)
+    {
+        self.m_secure_sessions.for_each_session(|ss| {
+            let handle = SessionHandle::new_with(ss);
+            f(handle);
+            Loop::Continue
+        });
+
+        chip_ok!()
+    }
+
+    pub fn for_each_session_handle_const<F>(&self, mut f: F) -> ChipErrorResult
+        where
+            F: FnOnce(SessionHandle) + FnMut(SessionHandle)
+    {
+        self.m_secure_sessions.for_each_session_const(|ss| {
+            let handle = SessionHandle::new_with(ss);
+            f(handle);
+            Loop::Continue
+        });
+
+        chip_ok!()
+    }
+
+    pub fn system_layer(&mut self) -> Option<&mut LayerImpl> {
+        unsafe {
+            self.m_system_layer.and_then(|mut p| Some(p.as_mut()))
+        }
+    }
+
+    pub fn get_transport_manager(&self) -> Option<&TMB> {
+        unsafe {
+            self.m_transport_mgr.and_then(|p| Some(p.as_ref()))
+        }
+    }
+
+    pub fn get_secure_sessions(&mut self) -> &mut SecureSessionTable {
+        &mut self.m_secure_sessions
+    }
+
+    pub fn get_fabric_table(&self) -> Option<&FabricTable<'d, PSD, OK, OCS>> {
+        unsafe {
+            self.m_fabric_table.and_then(|p| Some(p.as_ref()))
+        }
+    }
+
+    pub fn get_session_keystore(&self) -> Option<&SKS> {
+        unsafe {
+            self.m_session_keystore.and_then(|p| Some(p.as_ref()))
+        }
+    }
 
     fn is_control_message(payload_header: &PayloadHeader) -> bool {
         payload_header.has_message_type(crate::chip::protocols::secure_channel::MsgType::MsgCounterSyncReq.into()) ||
@@ -1550,8 +1640,11 @@ where
     fn on_fabric_updated(
         &mut self,
         _fabric_table: &FabricTable<PSD, OK, OCS>,
-        _fabric_index: FabricIndex,
-    ) {}
+        fabric_index: FabricIndex,
+    ) 
+    {
+        self.fabric_removed(fabric_index);
+    }
 
     fn on_fabric_commit(
         &mut self,
@@ -3769,5 +3862,76 @@ mod tests {
         rs.sm.secure_group_message_dispatch(&partial_packet_header, peer_address, duplicated_msg);
 
         assert!(!output_2.is_run());
+    }
+
+    #[test]
+    fn get_secure_session_for_node() {
+        let mut rs = setup().unwrap();
+
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        // inject session for the node
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_PEER_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        assert!(rs.sm.find_secure_session_for_node(ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX), Some(secure_session::Type::Kcase), TransportPayloadCapability::KMrpPayload).is_some());
+    }
+
+    #[test]
+    fn get_secure_session_for_node_no_type() {
+        let mut rs = setup().unwrap();
+
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        // inject session for the node
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_PEER_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        assert!(rs.sm.find_secure_session_for_node(ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX), None, TransportPayloadCapability::KMrpPayload).is_some());
+    }
+
+    #[test]
+    fn get_secure_session_for_node_no_session() {
+        let rs = setup().unwrap();
+
+        assert!(!rs.sm.find_secure_session_for_node(ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX), Some(secure_session::Type::Kcase), TransportPayloadCapability::KMrpPayload).is_some());
+    }
+
+    #[test]
+    fn get_secure_session_for_node_incorrect_node() {
+        let mut rs = setup().unwrap();
+
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        // inject session for the node
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_PEER_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        assert!(!rs.sm.find_secure_session_for_node(ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID + 1, TEST_FABRIC_INDEX), Some(secure_session::Type::Kcase), TransportPayloadCapability::KMrpPayload).is_some());
+    }
+
+    #[test]
+    fn get_secure_session_for_node_incorrect_session() {
+        let mut rs = setup().unwrap();
+
+        let mut holder = SessionHolder::new();
+        let peer_address = PeerAddress::new_addr_type(IPAddress::init((1,1,1,1)), peer_address::Type::KUdp);
+
+        // inject session for the node
+        assert!(rs.sm.inject_case_session_with_test_key(&mut holder, TEST_SESSION_ID, TEST_PEER_NODE_ID, TEST_SESSION_ID + 1,
+                TEST_NODE_ID, TEST_FABRIC_INDEX,
+                &peer_address, SessionRole::KInitiator, CATValues::new()).is_ok());
+        assert!(holder.is_some());
+
+        assert!(!rs.sm.find_secure_session_for_node(ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX), Some(secure_session::Type::Kpase), TransportPayloadCapability::KMrpPayload).is_some());
     }
 } // end of mod tests
