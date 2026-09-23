@@ -1,4 +1,11 @@
-use crate::chip_static_assert;
+use crate::{
+    chip::{
+        messaging::{
+            reliable_message_context::ReliableMessageContext,
+        },
+    },
+    chip_static_assert,
+};
 use core::time::Duration;
 
 // TODO: make this config-able
@@ -6,7 +13,35 @@ static ADDITIONAL_MRP_BACKOFF_TIME: Duration = Duration::from_millis(1);
 
 pub struct ReliableMessageMgr;
 
+pub mod shared {
+    use super::ReliableMessageMgr;
+    use core::cell::{RefCell, Ref, RefMut};
+    pub struct SharedReliableMessageMgr<'a> {
+        m_inner: &'a RefCell<ReliableMessageMgr>,
+    }
+
+    impl SharedReliableMessageMgr<'_> {
+        pub fn get(&self) -> Ref<'_, ReliableMessageMgr> {
+            self.m_inner.borrow()
+        }
+
+        pub fn get_mut(&self) -> RefMut<'_, ReliableMessageMgr> {
+            self.m_inner.borrow_mut()
+        }
+    }
+}
+
+pub type SharedReliableMessageMgr = shared::SharedReliableMessageMgr<'static>;
+
 impl ReliableMessageMgr {
+    /*
+     *  Iterate through active exchange contexts and retrans table entries. Clear the entry matching
+     *  the specified ExchangeContext and the message ID from the retransmision table.
+     */
+    pub fn check_and_rem_retrans_table<Context: ReliableMessageContext>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
+        false
+    }
+
     pub fn get_backoff(base_interval: Duration, send_count: u8, compute_max_possible: bool) -> Duration {
         // See section "4.11.8. Parameters and Constants" for the parameters below:
         // MRP_BACKOFF_JITTER = 0.25
