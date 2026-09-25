@@ -1701,6 +1701,44 @@ where
     }
 }
 
+pub mod message_packet_buffer {
+    use crate::{
+        chip::{
+            transport::{
+                raw::{
+                    message_header::KMAX_TAG_LEN,
+                },
+            },
+            system::{
+                system_packet_buffer::{
+                    PacketBufferHandle,
+                    PacketBuffer,
+                },
+            },
+        },
+        chip_static_assert,
+    };
+    /*
+     * Maximum size of a message footer, in bytes.
+     */
+    pub const KMAX_FOOTER_SIZE: usize = KMAX_TAG_LEN;
+
+    /*
+     * Allocates a packet buffer with space for message headers and footers.
+     *
+     *  Fails and returns \c nullptr if no memory is available, or if the size requested is too large.
+     */
+    #[inline]
+    pub fn new(available_size: usize) -> PacketBufferHandle {
+        chip_static_assert!(usize::from(PacketBuffer::KMAX_SIZE) > KMAX_FOOTER_SIZE, "inadequate capacity");
+        if available_size > usize::from(PacketHeader::KMAX_SIZE).unchecked_sub(KMAX_FOOTER_SIZE) {
+            return PacketBufferHandle::const_default();
+        }
+
+        PacketBufferHandle::new_with_default_header((available_size + KMAX_FOOTER_SIZE) as u32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

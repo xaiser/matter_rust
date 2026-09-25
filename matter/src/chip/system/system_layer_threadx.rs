@@ -1,5 +1,16 @@
-use super::system_layer::Layer;
-use crate::chip::chip_lib::support::object_life_cycle::ObjectLifeCycle;
+use crate::{
+    chip::{
+        chip_lib::{
+            support::object_life_cycle::ObjectLifeCycle,
+        },
+        system::{
+            system_layer::{
+                Layer, TimerCompleteCallback, TimerCallbackContext,
+            },
+            system_clock::Timeout,
+        },
+    },
+};
 use crate::chip_core_error;
 use crate::chip_error_incorrect_state;
 use crate::chip_no_error;
@@ -42,6 +53,9 @@ impl Layer for LayerImplThreadX {
 
     fn is_initialized(&self) -> bool {
         self.m_layer_state.is_initialized()
+    }
+
+    fn start_timer(&self, _delay: Timeout, _complete: TimerCompleteCallback, _app_state: TimerCallbackContext) {
     }
 }
 

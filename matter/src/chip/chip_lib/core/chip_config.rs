@@ -12,3 +12,9 @@ pub const CHIP_CONFIG_MAX_GROUP_NAME_LENGTH: usize = 16;
 pub const CHIP_CONFIG_MAX_GROUP_ENDPOINTS_PER_FABRIC: usize = 1;
 pub const CHIP_CONFIG_MAX_GROUPS_PER_FABRIC: usize = CHIP_CONFIG_MAX_GROUP_ENDPOINTS_PER_FABRIC * 4;
 pub const CHIP_CONFIG_MAX_GROUP_KEYS_PER_FABRIC: usize = 3;
+
+// TODO: we shuold use some pre-compile program to add the platform defined error code here
+#[macro_export]
+macro_rules! chip_config_is_platform_error_non_critical {
+    ($code:expr) => {}
+}

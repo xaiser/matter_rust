@@ -42,6 +42,15 @@ impl ReliableMessageMgr {
         false
     }
 
+    /*
+     * Iterate through active exchange contexts and retrans table entries.
+     * Determine how many ReliableMessageProtocol ticks we need to sleep before we
+     * need to physically wake the CPU to perform an action.  Set a timer to go off
+     * when we next need to wake the system.
+     *
+     */
+    pub fn start_timer(&mut self) { }
+
     pub fn get_backoff(base_interval: Duration, send_count: u8, compute_max_possible: bool) -> Duration {
         // See section "4.11.8. Parameters and Constants" for the parameters below:
         // MRP_BACKOFF_JITTER = 0.25

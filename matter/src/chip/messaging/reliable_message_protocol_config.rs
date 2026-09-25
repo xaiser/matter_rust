@@ -9,11 +9,11 @@ use core::time::Duration;
 
 pub const CHIP_CONFIG_MRP_LOCAL_ACTIVE_RETRY_INTERVAL: Duration = Duration::from_millis(2000);
 pub const CHIP_CONFIG_MRP_LOCAL_IDLE_RETRY_INTERVAL: Duration = Duration::from_millis(2000);
-pub const CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT: Duration = Duration::from_millis(200);
 pub const CHIP_CONFIG_RESOLVE_PEER_ON_FIRST_TRANSMIT_FAILURE: u32 = 0;
 pub const CHIP_CONFIG_RMP_RETRANS_TABLE_SIZE: usize = crate::chip::chip_lib::core::chip_config::CHIP_CONFIG_MAX_EXCHANGE_CONTEXTS;
 pub const CHIP_CONFIG_RMP_DEFAULT_MAX_RETRANS: usize = 4;
 pub const CHIP_CONFIG_MRP_RETRY_INTERVAL_SECOND_BOOST: Duration = Duration::from_millis(1500);
+pub const CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT: Duration = Duration::from_millis(200);
 
 pub const K_DEFAULT_ACTIVE_TIME: Duration = Duration::from_millis(4000);
 

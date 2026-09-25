@@ -8,10 +8,12 @@ use crate::{
         messaging::{
             exchange_context::ExchangeContext,
             reliable_message_mgr::SharedReliableMessageMgr,
+            reliable_message_protocol_config::CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT,
             flags::MessageFlagValues,
         },
         system::{
             system_clock::Timestamp,
+            system_packet_buffer::PacketBufferHandle,
         },
     },
     ChipErrorResult, chip_ok,
@@ -19,7 +21,7 @@ use crate::{
     chip_internal_log,
     chip_internal_log_impl,
     chip_log_detail,
-    chip_log_error,
+    //chip_log_error,
 };
 
 use core::str::FromStr;
@@ -180,6 +182,83 @@ pub trait ReliableMessageContext {
     fn get_exchange_context(&mut self) -> &mut ExchangeContext;
 
     fn get_exchange_context_const(&self) -> &ExchangeContext;
+
+    fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
+        where
+            Self: Sized,
+    {
+        let mgr = self.get_reliable_message_mgr();
+        if mgr.get_mut().check_and_rem_retrans_table(self, ack_message_counter) {
+            self.base_mut().set_waiting_for_response_or_ack(false);
+        } else {
+            // This can happen quite easily due to a packet with a piggyback ack
+            // being lost and retransmitted.
+            chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
+                ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+        }
+    }
+
+    fn handle_needs_ack(&mut self, message_counter: u32, message_flags: MessageFlagValues) -> ChipErrorResult {
+        let result = self.handle_needs_ack_inner(message_counter, message_flags);
+
+        // Schedule next physical wakeup on function exit
+        let mgr = self.get_reliable_message_mgr();
+        mgr.get_mut().start_timer();
+
+        result
+    }
+
+    fn handle_needs_ack_inner(&mut self, message_counter: u32, message_flags: MessageFlagValues) -> ChipErrorResult {
+        // If the message IS a duplicate there will never be a response to it, so we
+        // should not wait for one and just immediately send a standalone ack.
+        if message_flags.intersects(MessageFlagValues::KduplicateMessage) {
+            chip_log_detail!(ExchangeManager,
+                "Forcing tx of solitary ack for duplicate MessageCounter: {} on exchange {}",
+                message_counter, chip_log_value_exchange(self.get_exchange_context()));
+
+            let was_ack_pending = self.is_ack_pending() && self.base().m_pending_peer_ack_message_counter != message_counter;
+            let message_counter_was_valid = self.has_piggyback_ack_pending();
+            // Temporary store currently pending ack message counter (even if there is none).
+            let temp_ack_message_counter = self.base().m_pending_peer_ack_message_counter;
+
+            self.set_pending_peer_ack_message_counter(message_counter);
+            let err = self.send_standalone_ack_message();
+
+            if was_ack_pending {
+                // Restore previously pending ack message counter.
+                self.set_pending_peer_ack_message_counter(temp_ack_message_counter);
+            } else if message_counter_was_valid {
+                // Restore the previous value, so later piggybacks will pick it up,
+                // but don't set out "ack is pending" state, because we didn't use
+                // to have it set.
+                self.base_mut().m_pending_peer_ack_message_counter = temp_ack_message_counter;
+            }
+
+            // Otherwise don't restore the invalid old mPendingPeerAckMessageCounter
+            // value, so we preserve the invariant that once we have had an ack
+            // pending we always have a valid mPendingPeerAckMessageCounter.
+            return err;
+        }
+        // Otherwise, the message IS NOT a duplicate.
+        if self.is_ack_pending() {
+            chip_log_detail!(ExchangeManager,
+                "Pending ack queue full; forcing tx of solitary ack for MessageCounter: {} on exchange {}",
+                self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+            // Send the Ack for the currently pending Ack in a SecureChannel::StandaloneAck message.
+            self.send_standalone_ack_message()?;
+        }
+
+        // Replace the Pending ack message counter.
+        self.set_pending_peer_ack_message_counter(message_counter);
+        self.base_mut().m_next_ack_time = crate::chip::system::system_clock::get_monotonic_timestamp().saturating_add(
+            CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT);
+
+        chip_ok!()
+    }
+
+    fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
+        self.base_mut().set_pending_peer_ack_message_counter(peer_ack_message_counter)
+    }
 }
 
 pub struct BaseReliableMessageContext {
@@ -196,6 +275,12 @@ impl BaseReliableMessageContext {
             m_next_ack_time: Timestamp::from_secs(0),
             m_pending_peer_ack_message_counter: 0,
         }
+    }
+
+    fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
+        self.m_pending_peer_ack_message_counter = peer_ack_message_counter;
+        self.set_ack_pending(true);
+        self.m_flags.insert(MessageFlags::KflagAckMessageCounterIsValid);
     }
 
     #[inline]
@@ -246,17 +331,5 @@ impl BaseReliableMessageContext {
     #[inline]
     pub fn set_waiting_ack(&mut self, waiting_for_ack: bool) {
         self.m_flags.set(MessageFlags::KflagWaitingForAck, waiting_for_ack)
-    }
-}
-
-pub fn handle_rcvd_ack<Context: ReliableMessageContext>(context: &mut Context, ack_message_counter: u32) {
-    let mgr = context.get_reliable_message_mgr();
-    if mgr.get_mut().check_and_rem_retrans_table(context, ack_message_counter) {
-        context.base_mut().set_waiting_for_response_or_ack(false);
-    } else {
-        // This can happen quite easily due to a packet with a piggyback ack
-        // being lost and retransmitted.
-        chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
-            ack_message_counter, chip_log_value_exchange(context.get_exchange_context_const()));
     }
 }
