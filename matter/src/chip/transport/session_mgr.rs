@@ -1729,13 +1729,32 @@ pub mod message_packet_buffer {
      *  Fails and returns \c nullptr if no memory is available, or if the size requested is too large.
      */
     #[inline]
-    pub fn new(available_size: usize) -> PacketBufferHandle {
-        chip_static_assert!(usize::from(PacketBuffer::KMAX_SIZE) > KMAX_FOOTER_SIZE, "inadequate capacity");
-        if available_size > usize::from(PacketHeader::KMAX_SIZE).unchecked_sub(KMAX_FOOTER_SIZE) {
-            return PacketBufferHandle::const_default();
+    pub fn new(available_size: usize) -> Option<PacketBufferHandle> {
+        chip_static_assert!((PacketBuffer::KMAX_SIZE as usize) > KMAX_FOOTER_SIZE, "inadequate capacity");
+        if available_size > (PacketBuffer::KMAX_SIZE as usize).saturating_sub(KMAX_FOOTER_SIZE) {
+            return Some(PacketBufferHandle::const_default());
         }
 
         PacketBufferHandle::new_with_default_header((available_size + KMAX_FOOTER_SIZE) as u32)
+    }
+
+    /*
+     * Allocates a packet buffer with initial contents.
+     *
+     */
+    #[inline]
+    pub fn new_with_data(data: &[u8]) -> Option<PacketBufferHandle> {
+        PacketBufferHandle::new_with_data(data, KMAX_FOOTER_SIZE.try_into().unwrap(), PacketBuffer::KDEFAULT_HEADER_RESERVE)
+    }
+
+    /*
+     * Check whether a packet buffer has enough space for a message footer.
+     *
+     * @returns true if there is space, false otherwise.
+     */
+    #[inline]
+    pub fn has_footer_space(buffer: &PacketBufferHandle) -> bool {
+        buffer.available_data_length() >= KMAX_FOOTER_SIZE
     }
 }
 

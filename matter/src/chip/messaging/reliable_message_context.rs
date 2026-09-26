@@ -5,6 +5,9 @@ use crate::{
                 logging::text_only_logging::chip_log_value_exchange,
             },
         },
+        transport::{
+            session_mgr,
+        },
         messaging::{
             exchange_context::ExchangeContext,
             reliable_message_mgr::SharedReliableMessageMgr,
@@ -17,6 +20,9 @@ use crate::{
         },
     },
     ChipErrorResult, chip_ok,
+    chip_error_no_memory,
+    chip_core_error,
+    chip_sdk_error,
 
     chip_internal_log,
     chip_internal_log_impl,
@@ -124,7 +130,22 @@ pub trait ReliableMessageContext {
      *  even in the case where the auto-request acknowledgment feature has been enabled on the
      *  exchange.
      */
-    fn send_standalone_ack_message(&mut self) -> ChipErrorResult;
+    fn send_standalone_ack_message(&mut self) -> ChipErrorResult {
+        let msg_buf = match session_mgr::message_packet_buffer::new(0) {
+            Some(buf) => {
+                if buf.is_null() {
+                    return Err(chip_error_no_memory!());
+                }
+
+                buf
+            },
+            None => {
+                return Err(chip_error_no_memory!());
+            }
+        };
+
+        chip_ok!()
+    }
 
     /*
      *  Determine whether an acknowledgment will be requested whenever a message is sent for the exchange.
@@ -255,7 +276,7 @@ pub trait ReliableMessageContext {
 
         chip_ok!()
     }
-
+    
     fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
         self.base_mut().set_pending_peer_ack_message_counter(peer_ack_message_counter)
     }

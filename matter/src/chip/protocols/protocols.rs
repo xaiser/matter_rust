@@ -3,6 +3,10 @@ use crate::chip::VendorId;
 pub const SUNKNOWN_TYPE_NAME: &str = "----";
 pub const NOT_SPECIFIED: Id = Id::const_not_specified();
 
+pub trait MessageTypeTrait {
+    const PROTOCOL_ID: u16;
+}
+
 enum StandardProtocol {
     SecureChannel,
 }
