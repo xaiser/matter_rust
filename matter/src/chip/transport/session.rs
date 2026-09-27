@@ -208,6 +208,7 @@ mod session_holder {
     };
 
     use super::{SessionBase, session_handle::SessionHandle, SessionHangOp};
+    //use super::*;
     use core::cell::RefCell;
 
     // Adapter for holder linked list
@@ -217,6 +218,25 @@ mod session_holder {
     // Handle for holder
     pub type Handle = UnsafeRef<SessionHolder>;
 
+    #[repr(u8)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum NewSessionHandlingPolicy {
+        KshiftToNewSession,
+        KstayAtOldSession,
+    }
+
+    pub mod delegate {
+        pub type OnRelease = fn(* mut u8);
+        pub type GetPolicy = fn(* mut u8) -> super::NewSessionHandlingPolicy;
+        pub type OnHang = fn(* mut u8) -> Option<super::SessionHangOp>;
+        pub struct Delegate {
+            pub(super) on_release: OnRelease,
+            pub(super) get_policy: GetPolicy,
+            pub(super) on_hang: OnHang,
+            pub(super) context: * mut u8,
+        }
+    }
+
     const fn new_session_holder_adapter() -> Adapter {
         Adapter::new()
     }
@@ -225,10 +245,12 @@ mod session_holder {
         LinkedList::new(new_session_holder_adapter())
     }
 
+    #[repr(C)]
     pub struct SessionHolder {
         #[allow(dead_code)]
         m_link: Link,
         m_session: RefCell<Option<SessionHandle>>,
+        m_delegate: Option<delegate::Delegate>,
     }
 
     impl Drop for SessionHolder {
@@ -242,6 +264,15 @@ mod session_holder {
             Self {
                 m_link: Link::new(),
                 m_session: RefCell::new(None),
+                m_delegate: None,
+            }
+        }
+
+        pub fn new_with_delegate(d: delegate::Delegate) -> Self {
+            Self {
+                m_link: Link::new(),
+                m_session: RefCell::new(None),
+                m_delegate: Some(d),
             }
         }
 
@@ -367,22 +398,50 @@ mod session_holder {
         }
 
         pub fn shift_to_session(&mut self, session: SessionHandle) {
-            self.release();
-            let _ = self.grab(session);
+            let shift = {
+                if let Some(delegate) = self.m_delegate.as_ref() {
+                    if (delegate.get_policy)(delegate.context) == NewSessionHandlingPolicy::KshiftToNewSession {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                }
+            };
+
+            if shift {
+                self.release();
+                let _ = self.grab(session);
+            }
         }
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
+            /*
+            if let Some(delegate) = self.m_delegate.as_ref() {
+                (delegate.on_hang)(delegate.context)
+            } else {
+                None
+            }
+            */
             None
         }
 
         pub fn session_released(&self) -> Option<SessionHandle> {
             //let session;
-            if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
-                return m_session.take();
-            } else {
-                panic!("cannot borrow mut for session released");
-                //return None;
+            let handle = { 
+                if let Ok(mut m_session) = self.m_session.try_borrow_mut() {
+                    m_session.take()
+                } else {
+                    panic!("cannot borrow mut for session released");
+                }
+            };
+
+            if let Some(delegate) = self.m_delegate.as_ref() {
+                (delegate.on_release)(delegate.context);
             }
+
+            handle
         }
     }
 
@@ -433,6 +492,9 @@ mod session_holder {
             let session = SessionHandle::try_new_handle(Session::new_unauthenticated(), ptr::addr_of_mut!(session_pool));
             assert!(session.is_ok());
             let session = session.unwrap();
+
+
+            assert!(session.try_mut().is_ok_and(|mut s| s.holders().front().is_null()));
 
             unsafe {
                 assert!((*holder).m_session.grab(session).is_ok());
@@ -523,7 +585,7 @@ mod session_holder {
             }
         }
     } // end of tests
-}
+} // session holder
 
 pub type SessionHolderHandle = session_holder::Handle;
 pub type SessionHolder = session_holder::SessionHolder;

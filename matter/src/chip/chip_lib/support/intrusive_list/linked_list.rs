@@ -4,6 +4,14 @@ use core::{
     num::NonZero,
     fmt,
 };
+
+/*
+use crate::chip_internal_log;
+use crate::chip_internal_log_impl;
+use crate::chip_log_error;
+use core::str::FromStr;
+*/
+
 use super::{
     pointer_ops::{self, PointerOps},
     adapter::Adapter,
