@@ -43,7 +43,7 @@ pub enum MsgType {
 }
 
 impl MessageTypeTrait for MsgType {
-    const PROTOCOL_ID: u16 = PROTOCOL_ID;
+    const PROTOCOL_ID: Id = ID;
 }
 
 impl MsgType {
@@ -67,33 +67,9 @@ impl MsgType {
     }
 }
 
-/*
 impl From<MsgType> for u8 {
     fn from(t: MsgType) -> u8 {
         t as u8
-    }
-}
-*/
-impl TryFrom<MsgType> for u8 {
-    type Error = ChipError;
-
-    fn try_from(value: MsgType) -> Result<u8, Self::Error> {
-        match value {
-            MsgType::MsgCounterSyncReq => "MsgCounterSyncReq",
-            MsgType::MsgCounterSyncRsp => "MsgCounterSyncRsp",
-            MsgType::StandaloneAck => "StandaloneAck",
-            MsgType::PbkdfParamRequest => "PbkdfParamRequest",
-            MsgType::PbkdfParamResponse => "PbkdfParamResponse",
-            MsgType::PasePake1 => "PasePake1",
-            MsgType::PasePake2 => "PasePake2",
-            MsgType::PasePake3 => "PasePake3",
-            MsgType::CaseSigma1 => "CaseSigma1",
-            MsgType::CaseSigma2 => "CaseSigma2",
-            MsgType::CaseSigma3 => "CaseSigma3",
-            MsgType::CaseSigma2Resume => "CaseSigma2Resume",
-            MsgType::StatusReport => "StatusReport",
-            MsgType::IcdCheckIn => "IcdCheckIn",
-        }
     }
 }
 

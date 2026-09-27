@@ -33,10 +33,11 @@ impl ExchangeContext {
     }
 
     pub fn send_message<MsgType: MessageTypeTrait>(&mut self, msg_type: MsgType, msg_payload: PacketBufferHandle,
-        send_flags: &SendFlags) -> ChipErrorResult {
-        /*
-        self.send_message_id_type(<MsgType as MessageTypeTrait>::PROTOCOL_ID, msg_type.try_into().map_err(|_|
-                Err(chip_error_invalid_argument!()))?, msg_payload, send_flags)
-        */
+        send_flags: &SendFlags) -> ChipErrorResult 
+        where
+            u8: From<MsgType>
+    {
+        self.send_message_id_type(<MsgType as MessageTypeTrait>::PROTOCOL_ID, msg_type.into()
+                , msg_payload, send_flags)
     }
 }

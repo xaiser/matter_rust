@@ -8,15 +8,16 @@ use crate::{
         transport::{
             session_mgr,
         },
+        protocols,
         messaging::{
+            error_category::is_send_error_non_critical,
             exchange_context::ExchangeContext,
             reliable_message_mgr::SharedReliableMessageMgr,
             reliable_message_protocol_config::CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT,
-            flags::MessageFlagValues,
+            flags::{MessageFlagValues, SendMessageFlags},
         },
         system::{
             system_clock::Timestamp,
-            system_packet_buffer::PacketBufferHandle,
         },
     },
     ChipErrorResult, chip_ok,
@@ -27,7 +28,7 @@ use crate::{
     chip_internal_log,
     chip_internal_log_impl,
     chip_log_detail,
-    //chip_log_error,
+    chip_log_error,
 };
 
 use core::str::FromStr;
@@ -121,7 +122,9 @@ pub trait ReliableMessageContext {
      * valid once we receive a message which requests an ack. Once
      * mPendingPeerAckMessageCounter is valid, it never stops being valid.
      */
-    fn has_piggyback_ack_pending(&self) -> bool;
+    fn has_piggyback_ack_pending(&self) -> bool {
+        self.base().has_piggyback_ack_pending()
+    }
 
     /*
      *  Send a SecureChannel::StandaloneAck message.
@@ -131,6 +134,7 @@ pub trait ReliableMessageContext {
      *  exchange.
      */
     fn send_standalone_ack_message(&mut self) -> ChipErrorResult {
+        // Allocate a buffer for the null message
         let msg_buf = match session_mgr::message_packet_buffer::new(0) {
             Some(buf) => {
                 if buf.is_null() {
@@ -144,7 +148,28 @@ pub trait ReliableMessageContext {
             }
         };
 
-        chip_ok!()
+        let result =  self.get_exchange_context().send_message(protocols::secure_channel::MsgType::StandaloneAck, msg_buf,
+            &SendMessageFlags::KnoAutoRequestAck);
+
+        match result {
+            Ok(()) => {
+                // do nothing
+            },
+            Err(e) => {
+                if is_send_error_non_critical(e.clone()) {
+                    chip_log_error!(ExchangeManager,
+                        "Non-crit err {} sending solitary ack for MessageCounter: {} on exchange {}",
+                        e, self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+                    return chip_ok!();
+                } else {
+                    chip_log_error!(ExchangeManager,
+                        "Failed to send Solitary ack for MessageCounter {} on exchange {} : {}",
+                        self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()), e);
+                }
+            }
+        }
+
+        result
     }
 
     /*

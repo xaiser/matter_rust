@@ -598,6 +598,13 @@ macro_rules! chip_error_inbound_message_too_big {
 }
 
 #[macro_export]
+macro_rules! chip_error_outbound_message_too_big {
+    () => {
+        chip_core_error!(0xc3)
+    };
+}
+
+#[macro_export]
 macro_rules! chip_error_duplicate_message_received {
     () => {
         chip_core_error!(0xc4)
