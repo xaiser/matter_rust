@@ -417,14 +417,11 @@ mod session_holder {
         }
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
-            /*
             if let Some(delegate) = self.m_delegate.as_ref() {
                 (delegate.on_hang)(delegate.context)
             } else {
                 None
             }
-            */
-            None
         }
 
         pub fn session_released(&self) -> Option<SessionHandle> {
