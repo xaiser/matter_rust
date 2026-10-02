@@ -229,11 +229,23 @@ mod session_holder {
         pub type OnRelease = fn(* mut u8);
         pub type GetPolicy = fn(* mut u8) -> super::NewSessionHandlingPolicy;
         pub type OnHang = fn(* mut u8) -> Option<super::SessionHangOp>;
+        pub type Context = *mut u8;
         pub struct Delegate {
             pub(super) on_release: OnRelease,
             pub(super) get_policy: GetPolicy,
             pub(super) on_hang: OnHang,
             pub(super) context: * mut u8,
+        }
+
+        impl Delegate {
+            pub fn new(on_release: OnRelease, get_policy: GetPolicy, on_hang: OnHang, context: Context) -> Self {
+                Self {
+                    on_release,
+                    get_policy,
+                    on_hang,
+                    context,
+                }
+            }
         }
     }
 
@@ -260,7 +272,7 @@ mod session_holder {
     }
 
     impl SessionHolder {
-        pub fn new() -> Self {
+        pub const fn new() -> Self {
             Self {
                 m_link: Link::new(),
                 m_session: RefCell::new(None),
@@ -587,7 +599,11 @@ mod session_holder {
 pub type SessionHolderHandle = session_holder::Handle;
 pub type SessionHolder = session_holder::SessionHolder;
 pub type SessionHolderList = session_holder::LinkedList;
-pub use session_holder::new_session_holder_list;
+pub use session_holder::{
+    new_session_holder_list,
+    delegate as session_holder_delegate,
+    NewSessionHandlingPolicy,
+};
 
 #[derive(Clone, Copy)]
 pub enum SessionHangOp {

@@ -225,9 +225,9 @@ pub trait ReliableMessageContext {
      */
     fn get_reliable_message_mgr(&self) -> SharedReliableMessageMgr;
 
-    fn get_exchange_context(&mut self) -> &mut ExchangeContext;
+    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'_>;
 
-    fn get_exchange_context_const(&self) -> &ExchangeContext;
+    fn get_exchange_context_const(&self) -> &ExchangeContext<'_>;
 
     fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
         where

@@ -7,7 +7,20 @@ use crate::{
             system_packet_buffer::PacketBufferHandle,
         },
         messaging::{
+            exchange_mgr::ExchangeManager,
+            exchange_delegate::ExchangeDelegate,
+            exchange_message_dispatch::ExchangeMessageDispatchHandle,
             flags::SendMessageFlags as SendFlags,
+        },
+        transport::{
+            session::{
+                SessionHolder, session_holder_delegate, SessionHandle,
+            },
+        },
+        system::{
+            system_clock::{
+                Timeout,
+            },
         },
     },
     ChipErrorResult, chip_ok,
@@ -15,9 +28,82 @@ use crate::{
     chip_core_error, chip_sdk_error,
 };
 
-pub struct ExchangeContext;
+use core::ptr::NonNull;
 
-impl ExchangeContext {
+struct ExchangeSessionHolder {
+    pub session_holder: SessionHolder,
+}
+
+impl ExchangeSessionHolder {
+    pub const fn new() -> Self {
+        Self {
+            session_holder: SessionHolder::new(),
+        }
+    }
+
+    pub fn new_with(exchange: session_holder_delegate::Context) -> Self {
+        Self {
+            session_holder: SessionHolder::new_with_delegate(
+                                session_holder_delegate::Delegate::new(
+                                    session_delegate::on_release,
+                                    session_delegate::get_policy,
+                                    session_delegate::on_hang,
+                                    exchange,
+                                )
+                            ),
+        }
+    }
+}
+
+pub(super) mod session_delegate {
+    use crate::{
+        chip::{
+            transport::{
+                session::{
+                    NewSessionHandlingPolicy,
+                    session_holder_delegate::{Context},
+                    SessionHangOp,
+                },
+            },
+        },
+    };
+    pub(super) fn on_release(_ec: Context) {}
+    pub(super) fn get_policy(_ec: Context) -> NewSessionHandlingPolicy {
+        NewSessionHandlingPolicy::KstayAtOldSession
+    }
+    pub(super) fn on_hang(_ec: Context) -> Option<SessionHangOp> {
+        None
+    }
+}
+
+pub struct ExchangeContext<'a> {
+    m_response_timeout: Timeout,
+    m_delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>,
+    m_exchange_mgr: Option<NonNull<ExchangeManager>>,
+    m_dispatch: ExchangeMessageDispatchHandle,
+    m_session: ExchangeSessionHolder,
+    m_exchange_id: u16,
+}
+
+impl<'a> ExchangeContext<'a> {
+    pub const fn new() -> Self {
+        Self {
+            m_response_timeout: Timeout::from_secs(0),
+            m_delegate: None,
+            m_exchange_mgr: None,
+            m_dispatch: ExchangeMessageDispatchHandle::new(),
+            m_session: ExchangeSessionHolder::new(),
+            m_exchange_id: 0,
+        }
+    }
+
+    /*
+    pub fn new_with(em: Option<NonNull<ExchangeManager>>, exchange_id: u16, session: &SessionHandle, initiator: bool,
+        delegate: NonNull<dyn ExchangeDelegate>, _is_ephemeral_exchange: bool) -> Self
+    {
+    }
+    */
+
     pub fn get_exchange_id(&self) -> u16 {
         0
     }
