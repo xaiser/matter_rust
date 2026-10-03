@@ -9,12 +9,16 @@ use crate::{
         messaging::{
             exchange_mgr::ExchangeManager,
             exchange_delegate::ExchangeDelegate,
-            exchange_message_dispatch::ExchangeMessageDispatchHandle,
+            exchange_message_dispatch::{
+                ExchangeMessageDispatchHandle,
+                ExchangeMessageDispatch,
+            },
             flags::SendMessageFlags as SendFlags,
         },
         transport::{
             session::{
                 SessionHolder, session_holder_delegate, SessionHandle,
+                Session, SessionAccess, AccessError, Variant, SessionBase,
             },
         },
         system::{
@@ -29,6 +33,8 @@ use crate::{
 };
 
 use core::ptr::NonNull;
+use core::cell::{Ref, RefMut};
+
 
 struct ExchangeSessionHolder {
     pub session_holder: SessionHolder,
@@ -52,6 +58,18 @@ impl ExchangeSessionHolder {
                                 )
                             ),
         }
+    }
+}
+
+impl SessionAccess for ExchangeSessionHolder {
+    fn with<ST: Variant, R>(&self, f: impl Fn(&ST) -> R) -> Result<R, AccessError>
+    {
+        self.session_holder.with(f)
+    }
+
+    fn with_mut<ST: Variant, R>(&mut self, f: impl Fn(&mut ST) -> R) -> Result<R, AccessError>
+    {
+        self.session_holder.with_mut(f)
     }
 }
 
@@ -103,6 +121,14 @@ impl<'a> ExchangeContext<'a> {
     {
     }
     */
+
+    pub fn is_encryption_required(&self) -> bool {
+        self.m_dispatch.is_encryption_required()
+    }
+
+    pub fn is_group_exchange_context(&self) -> bool {
+        self.m_session.with::<Session, bool>(|s| s.is_group_session()).is_ok_and(|b| b)
+    }
 
     pub fn get_exchange_id(&self) -> u16 {
         0

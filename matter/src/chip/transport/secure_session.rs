@@ -10,7 +10,8 @@ use crate::{
         },
         transport::{
             session::{
-                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate, SessionHandle
+                SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate, SessionHandle,
+                Session, Variant,
             },
             secure_session_table::SecureSessionTable,
             raw::peer_address::{self, PeerAddress},
@@ -692,6 +693,23 @@ pub fn newer_session_available(session_handle: SessionHandle, new_session: &Sess
         panic!("cannot borrow session mut in notify_release");
     };
 }
+
+impl Variant for SecureSession {
+    fn project(session: &Session) -> Option<&Self> {
+        match session {
+            Session::Secure(us) => Some(us),
+            _ => None,
+        }
+    }
+
+    fn project_mut(session: &mut Session) -> Option<&mut Self> {
+        match session {
+            Session::Secure(us) => Some(us),
+            _ => None,
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

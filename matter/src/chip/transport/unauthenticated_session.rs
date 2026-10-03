@@ -17,6 +17,7 @@ use crate::chip::{
             SessionType, SessionHolderList, SessionBase, new_session_holder_list, SessionBasePrivate,
             SharedSession, Alloactor as Pool, ALLOACTOR_CAP as POOL_SIZE, SessionHandle,
             Session, new_session_alloactor, new_shared_session, notify_shared_session_released,
+            Variant,
         },
         raw::peer_address::{self, PeerAddress},
     },
@@ -418,6 +419,22 @@ impl UnauthenticatedSessionTable
         }
 
         result
+    }
+}
+
+impl Variant for UnauthenticatedSession {
+    fn project(session: &Session) -> Option<&Self> {
+        match session {
+            Session::Unauthenticated(us) => Some(us),
+            _ => None,
+        }
+    }
+
+    fn project_mut(session: &mut Session) -> Option<&mut Self> {
+        match session {
+            Session::Unauthenticated(us) => Some(us),
+            _ => None,
+        }
     }
 }
 

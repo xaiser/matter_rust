@@ -31,7 +31,8 @@ pub mod incoming {
             },
             transport::session::{
                 SessionType, SessionHolderList, SessionBase, 
-                new_session_holder_list, SessionBasePrivate
+                new_session_holder_list, SessionBasePrivate,
+                Session, Variant,
             },
             messaging::session_parameters::SessionParameters,
             system::system_clock::{Milliseconds, Timestamp},
@@ -147,6 +148,22 @@ pub mod incoming {
             self.m_group_id
         }
     }
+
+    impl Variant for IncomingGroupSession {
+        fn project(session: &Session) -> Option<&Self> {
+            match session {
+                Session::IncomingGroupSession(us) => Some(us),
+                _ => None,
+            }
+        }
+
+        fn project_mut(session: &mut Session) -> Option<&mut Self> {
+            match session {
+                Session::IncomingGroupSession(us) => Some(us),
+                _ => None,
+            }
+        }
+    }
 }
 
 pub use incoming::IncomingGroupSession;
@@ -162,7 +179,8 @@ pub mod outgoing {
             },
             transport::session::{
                 SessionType, SessionHolderList, SessionBase, 
-                new_session_holder_list, SessionBasePrivate
+                new_session_holder_list, SessionBasePrivate,
+                Session, Variant,
             },
             messaging::session_parameters::SessionParameters,
             system::system_clock::{Milliseconds, Timestamp},
@@ -268,6 +286,22 @@ pub mod outgoing {
 
         pub fn get_group_id(&self) -> GroupId {
             self.m_group_id
+        }
+    }
+
+    impl Variant for OutgoingGroupSession {
+        fn project(session: &Session) -> Option<&Self> {
+            match session {
+                Session::OutgoingGroupSession(us) => Some(us),
+                _ => None,
+            }
+        }
+
+        fn project_mut(session: &mut Session) -> Option<&mut Self> {
+            match session {
+                Session::OutgoingGroupSession(us) => Some(us),
+                _ => None,
+            }
         }
     }
 

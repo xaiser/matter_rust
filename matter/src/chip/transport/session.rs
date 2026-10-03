@@ -20,6 +20,21 @@ use crate::{
 use core::str::FromStr;
 use core::fmt;
 
+pub trait Variant {
+    fn project(session: &Session) -> Option<&Self>;
+    fn project_mut(session: &mut Session) -> Option<&mut Self>;
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum AccessError {
+    Deny,
+}
+
+pub trait SessionAccess {
+    fn with<ST: Variant, R>(&self, f: impl Fn(&ST) -> R) -> Result<R, AccessError>;
+    fn with_mut<ST: Variant, R>(&mut self, f: impl Fn(&mut ST) -> R) -> Result<R, AccessError>;
+}
+
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SessionType {
@@ -44,12 +59,19 @@ impl fmt::Display for SessionType {
 
 mod session_handle {
     use crate::{
-        chip::chip_lib::{
-            core::reference_counted::rc::{DefaultAlloactor, Rc, Weak},
+        chip::{
+            chip_lib::{
+                core::reference_counted::rc::{DefaultAlloactor, Rc, Weak},
+            },
+            transport::{
+                unauthenticated_session::{self, UnauthenticatedSession},
+                secure_session::{self, SecureSession},
+                group_session::{self, IncomingGroupSession, OutgoingGroupSession},
+            },
         }
     };
 
-    use super::{Session, SessionBasePrivate, SessionHangOp};
+    use super::{Session, SessionBasePrivate, SessionHangOp, AccessError, SessionAccess, Variant};
 
     use core::cell::{RefCell, Ref, RefMut};
 
@@ -157,6 +179,30 @@ mod session_handle {
         }
     }
 
+    impl SessionAccess for SessionHandle {
+        fn with<ST: Variant, R>(&self, f: impl Fn(&ST) -> R) -> Result<R, AccessError>
+        {
+            if let Ok(session) = self.m_session.try_borrow() &&
+                let Some(a_session) = <ST as Variant>::project(&(*session))
+            {
+                return Ok(f(a_session));
+            } else {
+                return Err(AccessError::Deny);
+            }
+        }
+
+        fn with_mut<ST: Variant, R>(&mut self, f: impl Fn(&mut ST) -> R) -> Result<R, AccessError>
+        {
+            if let Ok(mut session) = self.m_session.try_borrow_mut() &&
+                let Some(a_session) = <ST as Variant>::project_mut(&mut (*session))
+            {
+                return Ok(f(a_session));
+            } else {
+                return Err(AccessError::Deny);
+            }
+        }
+    }
+
     pub const fn new_session_alloactor() -> Alloactor {
         Alloactor::new()
     }
@@ -207,7 +253,8 @@ mod session_holder {
         verify_or_die,
     };
 
-    use super::{SessionBase, session_handle::SessionHandle, SessionHangOp};
+    use super::{SessionBase, session_handle::SessionHandle, SessionHangOp, SessionAccess, AccessError, Variant};
+
     //use super::*;
     use core::cell::RefCell;
 
@@ -451,6 +498,30 @@ mod session_holder {
             }
 
             handle
+        }
+    }
+
+    impl SessionAccess for SessionHolder {
+        fn with<ST: Variant, R>(&self, f: impl Fn(&ST) -> R) -> Result<R, AccessError>
+        {
+            if let Ok(session_handle_opt) = self.m_session.try_borrow() &&
+                let Some(session_handle) = session_handle_opt.as_ref()
+            {
+                return session_handle.with(f);
+            } else {
+                return Err(AccessError::Deny);
+            }
+        }
+
+        fn with_mut<ST: Variant, R>(&mut self, f: impl Fn(&mut ST) -> R) -> Result<R, AccessError>
+        {
+            if let Ok(mut session_handle_opt) = self.m_session.try_borrow_mut() &&
+                let Some(session_handle) = session_handle_opt.as_mut()
+            {
+                return session_handle.with_mut(f);
+            } else {
+                return Err(AccessError::Deny);
+            }
         }
     }
 
@@ -1126,6 +1197,16 @@ impl Session {
 
     pub const fn new_outgoing_group_with(os: OutgoingGroupSession) -> Session {
         Session::OutgoingGroupSession(os)
+    }
+}
+
+impl Variant for Session {
+    fn project(session: &Session) -> Option<&Self> {
+        Some(session)
+    }
+
+    fn project_mut(session: &mut Session) -> Option<&mut Self> {
+        Some(session)
     }
 }
 
