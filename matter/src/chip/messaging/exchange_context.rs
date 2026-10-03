@@ -13,6 +13,8 @@ use crate::{
                 ExchangeMessageDispatchHandle,
                 ExchangeMessageDispatch,
             },
+            reliable_message_mgr::SharedReliableMessageMgr,
+            reliable_message_context::{ReliableMessageContext, BaseReliableMessageContext},
             flags::SendMessageFlags as SendFlags,
         },
         transport::{
@@ -101,6 +103,7 @@ pub struct ExchangeContext<'a> {
     m_dispatch: ExchangeMessageDispatchHandle,
     m_session: ExchangeSessionHolder,
     m_exchange_id: u16,
+    m_reliable_message_context: BaseReliableMessageContext,
 }
 
 impl<'a> ExchangeContext<'a> {
@@ -112,6 +115,7 @@ impl<'a> ExchangeContext<'a> {
             m_dispatch: ExchangeMessageDispatchHandle::new(),
             m_session: ExchangeSessionHolder::new(),
             m_exchange_id: 0,
+            m_reliable_message_context: BaseReliableMessageContext::new(),
         }
     }
 
@@ -127,7 +131,7 @@ impl<'a> ExchangeContext<'a> {
     }
 
     pub fn is_group_exchange_context(&self) -> bool {
-        self.m_session.with::<Session, bool>(|s| s.is_group_session()).is_ok_and(|b| b)
+        self.m_session.with(|s: &Session| s.is_group_session()).is_ok_and(|b| b)
     }
 
     pub fn get_exchange_id(&self) -> u16 {
@@ -151,5 +155,37 @@ impl<'a> ExchangeContext<'a> {
     {
         self.send_message_id_type(<MsgType as MessageTypeTrait>::PROTOCOL_ID, msg_type.into()
                 , msg_payload, send_flags)
+    }
+}
+
+impl ReliableMessageContext for ExchangeContext<'_> {
+    fn base(&self) -> &BaseReliableMessageContext {
+        &self.m_reliable_message_context
+    }
+
+    fn base_mut(&self) -> &mut BaseReliableMessageContext {
+        &mut self.m_reliable_message_context
+    }
+
+
+    // Set if this exchange is requesting Sleepy End Device active mode
+    fn set_requesting_active_mode(&mut self, _active_mode: bool) {}
+
+    /*
+     * Get the reliable message manager that corresponds to this reliable
+     * message context.
+     */
+    fn get_reliable_message_mgr(&self) -> Option<SharedReliableMessageMgr> {
+        let mgr = self.m_exchange_mgr?.as_ref().get_reliable_message_mgr();
+
+        Some(mgr)
+    }
+
+    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'_> {
+        self
+    }
+
+    fn get_exchange_context_const(&self) -> &ExchangeContext<'_> {
+        self
     }
 }

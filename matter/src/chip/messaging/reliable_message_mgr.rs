@@ -7,6 +7,7 @@ use crate::{
     chip_static_assert,
 };
 use core::time::Duration;
+use core::ptr::NonNull;
 
 // TODO: make this config-able
 static ADDITIONAL_MRP_BACKOFF_TIME: Duration = Duration::from_millis(1);
@@ -21,6 +22,12 @@ pub mod shared {
     }
 
     impl SharedReliableMessageMgr<'_> {
+        pub fn new(&self, mgr: &'_ RefCell<ReliableMessageMgr>) -> Self {
+            Self {
+                m_inner: mgr,
+            }
+        }
+
         pub fn get(&self) -> Ref<'_, ReliableMessageMgr> {
             self.m_inner.borrow()
         }
@@ -31,7 +38,8 @@ pub mod shared {
     }
 }
 
-pub type SharedReliableMessageMgr = shared::SharedReliableMessageMgr<'static>;
+//pub type SharedReliableMessageMgr = shared::SharedReliableMessageMgr<'static>;
+pub type SharedReliableMessageMgr = NonNull<ReliableMessageMgr>;
 
 impl ReliableMessageMgr {
     /*
@@ -119,6 +127,10 @@ impl ReliableMessageMgr {
         mrp_backoff_time = mrp_backoff_time.saturating_mul(jitter).checked_div(MRP_BACKOFF_JITTER_BASE).unwrap().saturating_add(ADDITIONAL_MRP_BACKOFF_TIME);
 
         mrp_backoff_time
+    }
+
+    pub fn shared(&self) -> SharedReliableMessageMgr {
+        NonNull::from_ref(self)
     }
 }
 

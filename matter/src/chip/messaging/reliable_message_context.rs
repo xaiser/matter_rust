@@ -234,13 +234,15 @@ pub trait ReliableMessageContext {
             Self: Sized,
     {
         let mgr = self.get_reliable_message_mgr();
-        if mgr.get_mut().check_and_rem_retrans_table(self, ack_message_counter) {
-            self.base_mut().set_waiting_for_response_or_ack(false);
-        } else {
-            // This can happen quite easily due to a packet with a piggyback ack
-            // being lost and retransmitted.
-            chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
-                ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+        unsafe {
+            if mgr.as_mut().check_and_rem_retrans_table(self, ack_message_counter) {
+                self.base_mut().set_waiting_for_response_or_ack(false);
+            } else {
+                // This can happen quite easily due to a packet with a piggyback ack
+                // being lost and retransmitted.
+                chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
+                    ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+            }
         }
     }
 
