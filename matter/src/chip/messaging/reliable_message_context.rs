@@ -22,6 +22,7 @@ use crate::{
     },
     ChipErrorResult, chip_ok,
     chip_error_no_memory,
+    chip_error_internal,
     chip_core_error,
     chip_sdk_error,
 
@@ -36,7 +37,7 @@ use bitflags::bitflags;
 
 bitflags! {
     #[derive(Copy, Clone)]
-    struct MessageFlags: u16 {
+    pub struct MessageFlags: u16 {
         // When set, signifies that this context is the initiator of the exchange.
         const KflagInitiator = (1u16 << 0);
 
@@ -86,9 +87,9 @@ bitflags! {
     }
 }
 
-pub trait ReliableMessageContext {
+pub trait ReliableMessageContext<'a> {
     fn base(&self) -> &BaseReliableMessageContext;
-    fn base_mut(&self) -> &mut BaseReliableMessageContext;
+    fn base_mut(&mut self) -> &mut BaseReliableMessageContext;
 
     /*
      * Flush the pending Ack for current exchange.
@@ -223,17 +224,24 @@ pub trait ReliableMessageContext {
      * Get the reliable message manager that corresponds to this reliable
      * message context.
      */
-    fn get_reliable_message_mgr(&self) -> SharedReliableMessageMgr;
+    fn get_reliable_message_mgr(&self) -> Option<SharedReliableMessageMgr>;
 
-    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'_>;
+    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'a>;
 
-    fn get_exchange_context_const(&self) -> &ExchangeContext<'_>;
+    fn get_exchange_context_const(&self) -> &ExchangeContext<'a>;
 
     fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
         where
             Self: Sized,
     {
-        let mgr = self.get_reliable_message_mgr();
+        let mut mgr = {
+            if let Some(mgr) = self.get_reliable_message_mgr() {
+                mgr
+            } else {
+                chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
+                return;
+            }
+        };
         unsafe {
             if mgr.as_mut().check_and_rem_retrans_table(self, ack_message_counter) {
                 self.base_mut().set_waiting_for_response_or_ack(false);
@@ -250,8 +258,18 @@ pub trait ReliableMessageContext {
         let result = self.handle_needs_ack_inner(message_counter, message_flags);
 
         // Schedule next physical wakeup on function exit
-        let mgr = self.get_reliable_message_mgr();
-        mgr.get_mut().start_timer();
+        //let mgr = self.get_reliable_message_mgr();
+        let mut mgr = {
+            if let Some(mgr) = self.get_reliable_message_mgr() {
+                mgr
+            } else {
+                chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
+                return Err(chip_error_no_memory!());
+            }
+        };
+        unsafe {
+            mgr.as_mut().start_timer();
+        }
 
         result
     }
@@ -307,13 +325,17 @@ pub trait ReliableMessageContext {
     fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
         self.base_mut().set_pending_peer_ack_message_counter(peer_ack_message_counter)
     }
+
+    fn set_waiting_for_response_or_ack(&mut self, waiting_for_response_or_ack: bool) {
+        self.base_mut().set_waiting_for_response_or_ack(waiting_for_response_or_ack)
+    }
 }
 
 pub struct BaseReliableMessageContext {
-    m_flags: MessageFlags,
+    pub(super) m_flags: MessageFlags,
     // Next time for triggering Solo Ack
-    m_next_ack_time: Timestamp,
-    m_pending_peer_ack_message_counter: u32,
+    pub(super) m_next_ack_time: Timestamp,
+    pub(super) m_pending_peer_ack_message_counter: u32,
 }
 
 impl BaseReliableMessageContext {

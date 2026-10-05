@@ -14,6 +14,7 @@ static ADDITIONAL_MRP_BACKOFF_TIME: Duration = Duration::from_millis(1);
 
 pub struct ReliableMessageMgr;
 
+/*
 pub mod shared {
     use super::ReliableMessageMgr;
     use core::cell::{RefCell, Ref, RefMut};
@@ -37,16 +38,20 @@ pub mod shared {
         }
     }
 }
-
 //pub type SharedReliableMessageMgr = shared::SharedReliableMessageMgr<'static>;
+*/
+
 pub type SharedReliableMessageMgr = NonNull<ReliableMessageMgr>;
 
 impl ReliableMessageMgr {
+    pub const fn new() -> Self {
+        Self
+    }
     /*
      *  Iterate through active exchange contexts and retrans table entries. Clear the entry matching
      *  the specified ExchangeContext and the message ID from the retransmision table.
      */
-    pub fn check_and_rem_retrans_table<Context: ReliableMessageContext>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
+    pub fn check_and_rem_retrans_table<'a, Context: ReliableMessageContext<'a>>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
         false
     }
 

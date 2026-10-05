@@ -1,3 +1,5 @@
+use core::fmt;
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum VendorId {
     Common = 0x0,
@@ -18,5 +20,11 @@ impl From<u16> for VendorId {
 impl Into<u16> for VendorId {
     fn into(self) -> u16 {
         self as u16
+    }
+}
+
+impl fmt::Display for VendorId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", *self as u16)
     }
 }
