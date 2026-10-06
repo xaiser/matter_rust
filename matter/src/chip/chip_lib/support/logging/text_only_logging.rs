@@ -5,7 +5,7 @@ use crate::chip::{
         },
     },
     messaging::{
-        exchange_context::ExchangeContext,
+        exchange_context::exchange_context::ExchangeContext,
     },
     transport::{
         raw::{

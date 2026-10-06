@@ -11,7 +11,7 @@ use crate::{
         protocols,
         messaging::{
             error_category::is_send_error_non_critical,
-            exchange_context::ExchangeContext,
+            exchange_context::exchange_context::ExchangeContext,
             reliable_message_mgr::SharedReliableMessageMgr,
             reliable_message_protocol_config::CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT,
             flags::{MessageFlagValues, SendMessageFlags},
