@@ -1,11 +1,94 @@
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum AccessError {
+    Invalid,
     Deny,
 }
 
 pub trait Access {
     fn with<R>(&self, f: impl Fn(&exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
     fn with_mut<R>(&mut self, f: impl Fn(&mut exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
+}
+
+pub mod shared {
+    use super::{
+        Access,
+        AccessError,
+        exchange_context::ExchangeContext,
+    };
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::reference_counted::rc::{DefaultAlloactor, Rc, Weak},
+            },
+        }
+    };
+
+    use core::cell::RefCell;
+
+    const ALLOACTOR_CAP: usize = 10;
+    pub type Alloactor<'a> = DefaultAlloactor<RefCell<ExchangeContext<'a>>, ALLOACTOR_CAP>;
+    pub type SharedExchangeContext<'a> = Rc<RefCell<ExchangeContext<'a>>, Alloactor<'a>>;
+    pub type WeakSharedExchangeContext<'a> = Weak<RefCell<ExchangeContext<'a>>, Alloactor<'a>>;
+
+    pub fn try_new_shared<'a>(ec: ExchangeContext<'a>, allocator: * mut Alloactor<'a>) -> Result<SharedExchangeContext<'a>, ()> 
+        // a rustc bug trigger by generic_const_exprs, this is the workaround suggested by AI
+        where
+            'a: 'a,
+    {
+        SharedExchangeContext::try_new_in(RefCell::new(ec), allocator)
+    }
+
+    pub struct WeakExchangeContextHandle<'a> {
+        ec: WeakSharedExchangeContext<'a>,
+    }
+
+    impl Access for WeakExchangeContextHandle<'_> {
+        fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
+            if let Some(shared_handle) = self.ec.upgrade() {
+                if let Ok(handle) = shared_handle.try_borrow() {
+                    return Ok(f(&(*handle)));
+                } else {
+                    return Err(AccessError::Deny);
+                }
+            } else {
+                return Err(AccessError::Invalid);
+            }
+        }
+
+        fn with_mut<R>(&mut self, f: impl Fn(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
+            if let Some(shared_handle) = self.ec.upgrade() {
+                if let Ok(mut handle) = shared_handle.try_borrow_mut() {
+                    return Ok(f(&mut (*handle)));
+                } else {
+                    return Err(AccessError::Deny);
+                }
+            } else {
+                return Err(AccessError::Invalid);
+            }
+        }
+    }
+
+    pub struct ExchangeContextHandle<'a> {
+        ec: SharedExchangeContext<'a>,
+    }
+
+    impl Access for ExchangeContextHandle<'_> {
+        fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
+            if let Ok(handle) = self.ec.try_borrow() {
+                return Ok(f(&(*handle)));
+            } else {
+                return Err(AccessError::Deny);
+            }
+        }
+
+        fn with_mut<R>(&mut self, f: impl Fn(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
+            if let Ok(mut handle) = self.ec.try_borrow_mut() {
+                return Ok(f(&mut (*handle)));
+            } else {
+                return Err(AccessError::Deny);
+            }
+        }
+    }
 }
 
 pub mod exchange_context {
@@ -52,14 +135,18 @@ pub mod exchange_context {
         chip_error_invalid_argument,
         chip_core_error, chip_sdk_error,
         verify_or_die,
+        system_stats_increment,
 
         chip_internal_log,
         chip_internal_log_impl,
         chip_log_error,
     };
 
+    #[cfg(feature="chip_exchange_context_detail_logging")]
+    use crate::chip_log_detail;
+
     use core::str::FromStr;
-    use core::ptr::NonNull;
+    use core::ptr::{self, NonNull};
     use core::cell::{Ref, RefMut};
 
     /*
@@ -166,19 +253,60 @@ pub mod exchange_context {
                 m_response_timeout: Timeout::from_secs(0),
                 m_delegate: None,
                 m_exchange_mgr: None,
-                m_dispatch: ExchangeMessageDispatchHandle::new(),
+                m_dispatch: ExchangeMessageDispatchHandle::new_application_exchange_dispatch(),
                 m_session: ExchangeSessionHolder::new(),
                 m_exchange_id: 0,
                 m_reliable_message_context: BaseReliableMessageContext::new(),
             }
         }
 
-        /*
-        pub fn new_with(em: Option<NonNull<ExchangeManager>>, exchange_id: u16, session: &SessionHandle, initiator: bool,
-            delegate: NonNull<dyn ExchangeDelegate>, _is_ephemeral_exchange: bool) -> Self
+        pub fn new_with(em: Option<NonNull<ExchangeManager>>, exchange_id: u16, session: SessionHandle, initiator: bool,
+            delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Self
         {
+            let mut ec = Self::new();
+
+            ec.m_dispatch = Self::get_message_dispatch(is_ephemeral_exchange, delegate);
+            ec.m_session = ExchangeSessionHolder::new_with(ptr::addr_of_mut!(ec) as _);
+
+            ec.m_exchange_mgr = em;
+            ec.m_exchange_id = exchange_id;
+
+            let is_allow_mrp = session.with(|s: &Session| s.allows_mrp()).is_ok_and(|b| b);
+
+            if ec.m_session.session_holder.grab(session).is_err() {
+                panic!("cannot grab session in exchange context");
+            }
+
+            ec.base_mut().m_flags.insert(Flags::KflagInitiator);
+            ec.base_mut().m_flags.set(Flags::KflagEphemeralExchange, is_ephemeral_exchange);
+            ec.m_delegate = delegate;
+
+            //
+            // If we're an initiator and we just created this exchange, we obviously did so to send a message. Let's go ahead and
+            // set the flag on this to correctly mark it as so.
+            //
+            // This only applies to non-ephemeral exchanges. Ephemeral exchanges do not have an intention of sending out a message
+            // since they're created expressly for the purposes of sending out a standalone ACK when the message could not be handled
+            // through normal means.
+            //
+            if initiator && !is_ephemeral_exchange {
+                ec.will_send_message();
+            }
+
+            ec.set_ack_pending(false);
+
+            // Try to use MRP by default, if it is allowed.
+            ec.set_auto_request_ack(is_allow_mrp);
+
+            #[cfg(feature="chip_exchange_context_detail_logging")]
+            {
+                chip_log_detail!(ExchangeManager, "ec++ id: {}", chip_log_value_exchange(&ec));
+            }
+
+            system_stats_increment!(crate::chip::system::system_stats::Stats::KexchangeMgrNumContext);
+
+            ec
         }
-        */
 
         pub fn is_encryption_required(&self) -> bool {
             self.m_dispatch.is_encryption_required()
@@ -313,6 +441,20 @@ pub mod exchange_context {
             self.base_mut().m_flags.set(Flags::KflagResponseExpected, response_expected);
             self.set_waiting_for_response_or_ack(response_expected);
         }
+
+        fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) -> ExchangeMessageDispatchHandle {
+            if is_ephemeral_exchange {
+                return ExchangeMessageDispatchHandle::new_ephemeral_exchange_dispatch();
+            }
+
+            if let Some(ptr) = delegate {
+                unsafe {
+                    return ptr.as_ref().get_message_dispatch();
+                }
+            }
+
+            ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
+        }
     }
 
     impl<'a> ReliableMessageContext<'a> for ExchangeContext<'a> {
@@ -349,4 +491,5 @@ pub mod exchange_context {
         }
     }
 } // end of mod exchange context
+
 

@@ -10,3 +10,4 @@ pub mod exchange_delegate;
 pub mod exchange_message_dispatch;
 pub mod exchange_mgr;
 pub mod application_exchange_dispatch;
+pub mod ephemeral_exchange_dispatch;

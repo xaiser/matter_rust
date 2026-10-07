@@ -362,6 +362,14 @@ pub mod rc {
         }
     }
 
+    impl<T: Clone, A: Allocator<T>> Rc<T, A> {
+        pub fn try_from_ref(value: &T, alloc: * mut A) -> Result<Rc<T, A>, ()> {
+            let t = value.clone();
+
+            Self::try_new_in(t, alloc)
+        }
+    }
+
     impl<T, A: Allocator<T>> Deref for Rc<T, A> {
         type Target = T;
 

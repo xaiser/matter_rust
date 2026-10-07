@@ -329,6 +329,10 @@ pub trait ReliableMessageContext<'a> {
     fn set_waiting_for_response_or_ack(&mut self, waiting_for_response_or_ack: bool) {
         self.base_mut().set_waiting_for_response_or_ack(waiting_for_response_or_ack)
     }
+
+    fn set_ack_pending(&mut self, in_ack_pending: bool) {
+        self.base_mut().set_ack_pending(in_ack_pending)
+    }
 }
 
 pub struct BaseReliableMessageContext {
