@@ -149,28 +149,6 @@ pub mod exchange_context {
     use core::ptr::{self, NonNull};
     use core::cell::{Ref, RefMut};
 
-    /*
-    pub mod handle {
-        use crate::{
-            chip::{
-                chip_lib::{
-                    core::reference_counted::rc::{DefaultAlloactor, Rc},
-                },
-            }
-        };
-
-        const ALLOACTOR_CAP: usize = 10;
-        type Alloactor = DefaultAlloactor<ExchangeContext, ALLOACTOR_CAP>;
-        type SharedExchangeContext = Rc<ExchangeContext, Alloactor>;
-
-        pub fn try_new(ec: ExchangeContext) -> Result<SharedExchangeContext, ()> {
-            SharedExchangeContext::try_new_in(ec)
-        }
-    }
-
-    pub type ExchangeHandle = handle::SharedExchangeContext;
-    */
-
     fn default_on_message_received(ec: &ExchangeContext, protocol_id: protocols::Id, msg_type: u8, message_counter: u32,
         _payload: PacketBufferHandle)
     {
@@ -418,6 +396,10 @@ pub mod exchange_context {
             self.is_initiator()), chip_log_option_non_null(self.m_delegate));
         }
 
+        pub fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_> {
+            self as _
+        }
+
         #[inline]
         fn set_ignor_session_release(&mut self, should_ignore: bool) {
             self.base_mut().m_flags.set(Flags::KflagIgnoreSessionRelease, should_ignore);
@@ -490,6 +472,97 @@ pub mod exchange_context {
             self
         }
     }
+
 } // end of mod exchange context
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        chip::{
+            chip_lib::{
+                core::{
+                    case_auth_tag::CATValues,
+                },
+            },
+            messaging::{
+                exchange_mgr::ExchangeManager,
+                reliable_message_protocol_config::ReliableMessageProtocolConfig,
+                exchange_message_dispatch::ExchangeMessageDispatchHandle,
+                exchange_context::{
+                    exchange_context::ExchangeContext,
+                },
+                exchange_delegate::ExchangeDelegate,
+            },
+            transport::{
+                raw::{
+                    message_header::PayloadHeader,
+                },
+                secure_session_table::SecureSessionTable,
+                secure_session,
+                session::{
+                    SessionHandle,
+                },
+            },
+            system::system_packet_buffer::PacketBufferHandle,
+        },
+
+        ChipErrorResult, chip_ok,
+        chip_core_error, chip_sdk_error,
+    };
+
+    use core::ptr::NonNull;
+
+    struct MockDelegate;
+
+    impl MockDelegate {
+        pub const fn new() -> Self {
+            Self
+        }
+    }
+
+    impl ExchangeDelegate for MockDelegate {
+        fn on_message_received(&mut self, _ec: &mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+            chip_ok!()
+        }
+
+        fn on_response_timeout(&mut self, _ec: &mut ExchangeContext) {
+        }
+
+        fn on_exchange_closing(&mut self, _ec: &mut ExchangeContext) {
+        }
+
+        fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
+            ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
+        }
+    }
+
+    fn get_session_handle(table: &mut SecureSessionTable) -> SessionHandle {
+        let cat = CATValues::new();
+        let config = ReliableMessageProtocolConfig::new();
+        let ss = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 0, 1, 2, cat, 1, 2, &config);
+        assert!(ss.is_some());
+        let ss = ss.unwrap();
+        let sh = SessionHandle::new_with(&ss);
+
+        sh
+    }
+
+    #[test]
+    fn new() {
+        let mgr = ExchangeManager::new();
+        let id = 1u16;
+
+        // to create a secure session
+        let mut table = SecureSessionTable::new();
+        let sh = get_session_handle(&mut table);
+
+        // delegate
+        let delegate = MockDelegate::new();
+
+        let ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+
+        assert_eq!(id, ec.get_exchange_id());
+    }
+} // end of mod tests

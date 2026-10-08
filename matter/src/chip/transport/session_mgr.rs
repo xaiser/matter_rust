@@ -188,6 +188,16 @@ impl EncryptedPacketBufferHandle {
     }
 }
 
+pub trait Dependencies<'d> {
+    type PeresistentStorage: PersistentStorageDelegate + 'd + 'static;
+    type OperationalKeystore: crypto::OperationalKeystore + 'd;
+    type OperationalCertStore: credentials::OperationalCertificateStore + 'd;
+    type SessionKeystore: SessionKeystore + 'd + 'static;
+    type SessionMessageDelegate: SessionMessageDelegate + 'd;
+    type TransportMgr: TransportMgrBase + 'd;
+    type MessageCounterManager: MessageCounterManagerInterface + 'd;
+}
+
 pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd + 'static,
