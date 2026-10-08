@@ -189,7 +189,7 @@ impl EncryptedPacketBufferHandle {
 }
 
 pub trait Dependencies<'d> {
-    type PeresistentStorage: PersistentStorageDelegate + 'd + 'static;
+    type PersistentStorage: PersistentStorageDelegate + 'd + 'static;
     type OperationalKeystore: crypto::OperationalKeystore + 'd;
     type OperationalCertStore: credentials::OperationalCertificateStore + 'd;
     type SessionKeystore: SessionKeystore + 'd + 'static;
@@ -198,6 +198,7 @@ pub trait Dependencies<'d> {
     type MessageCounterManager: MessageCounterManagerInterface + 'd;
 }
 
+/*
 pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd + 'static,
@@ -224,7 +225,37 @@ where
     m_group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS>>>,
     m_group_sessions: GroupSessionTable,
 }
+*/
+pub struct SessionManager<'d, Dep: Dependencies<'d> + 'd>
+/*
+where
+    PSD: PersistentStorageDelegate + 'd + 'static,
+    OK: crypto::OperationalKeystore + 'd,
+    OCS: credentials::OperationalCertificateStore + 'd,
+    SKS: SessionKeystore + 'd + 'static,
+    SMD: SessionMessageDelegate + 'd,
+    TMB: TransportMgrBase + 'd,
+    MCMI: MessageCounterManagerInterface + 'd,
+*/
+{
+    m_system_layer: Option<NonNull<LayerImpl>>,
+    m_fabric_table: Option<NonNull<FabricTable<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>>>,
+    m_session_keystore: Option<NonNull<Dep::SessionKeystore>>,
+    m_unauthenticated_sessions: UnauthenticatedSessionTable,
+    m_secure_sessions: SecureSessionTable,
+    m_state: State,
+    m_group_clinent_counter: GroupOutgoingCounters<Dep::PersistentStorage>,
+    m_cb: Option<NonNull<Dep::SessionMessageDelegate>>,
+    m_transport_mgr: Option<NonNull<Dep::TransportMgr>>,
+    m_message_counter_manager: Option<NonNull<Dep::MessageCounterManager>>,
+    m_global_unencrypted_message_counter: MessageCounter,
+    // TODO: use linkedlist
+    m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore> + 'd)>,
+    m_group_data_provider: Option<NonNull<GroupDataProviderImpl<Dep::PersistentStorage, Dep::SessionKeystore>>>,
+    m_group_sessions: GroupSessionTable,
+}
 
+/*
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd + 'static,
@@ -239,7 +270,15 @@ where
         self.shutdown();
     }
 }
+*/
+impl<'d, Dep: Dependencies<'d> + 'd> Drop for SessionManager<'d, Dep>
+{
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
 
+/*
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd + 'static,
@@ -249,6 +288,8 @@ where
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
+*/
+impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 {
     pub const fn new() -> Self {
         Self {
@@ -258,7 +299,7 @@ where
             m_unauthenticated_sessions: UnauthenticatedSessionTable::new(),
             m_secure_sessions: SecureSessionTable::new(),
             m_state: State::KnotReady,
-            m_group_clinent_counter: GroupOutgoingCounters::<PSD>::new(),
+            m_group_clinent_counter: GroupOutgoingCounters::<Dep::PersistentStorage>::new(),
             m_cb: None,
             m_transport_mgr: None,
             m_message_counter_manager: None,
@@ -269,12 +310,19 @@ where
         }
     }
 
+    /*
     pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<TMB>>, 
         message_counter_manager: Option<NonNull<MCMI>>,
         storage_delegate: Option<NonNull<PSD>>, mut fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>, 
         session_keystore: Option<NonNull<SKS>>,
-        //) -> ChipErrorResult
         group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS>>>) -> ChipErrorResult
+    */
+    pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<Dep::TransportMgr>>, 
+        message_counter_manager: Option<NonNull<Dep::MessageCounterManager>>,
+        storage_delegate: Option<NonNull<Dep::PersistentStorage>>,
+        mut fabric_table: Option<NonNull<FabricTable<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>>>, 
+        session_keystore: Option<NonNull<Dep::SessionKeystore>>,
+        group_data_provider: Option<NonNull<GroupDataProviderImpl<Dep::PersistentStorage, Dep::SessionKeystore>>>) -> ChipErrorResult
     {
         verify_or_return_error!(self.m_state == State::KnotReady, Err(chip_error_incorrect_state!()));
 
@@ -334,7 +382,8 @@ where
         self.m_cb = None;
     }
 
-    pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
+    //pub fn set_delegate(&mut self, cb: NonNull<SMD>) {
+    pub fn set_delegate(&mut self, cb: NonNull<Dep::SessionMessageDelegate>) {
         self.m_cb = Some(cb);
     }
 
@@ -902,7 +951,8 @@ where
         verify_or_return_error!(!msg_buf.has_chained_buffer(), Err(chip_error_invalid_message_length!()));
 
         if let Some(mut transport_ptr) = self.m_transport_mgr {
-            let transport_mgr: &mut TMB = unsafe { transport_ptr.as_mut() };
+            //let transport_mgr: &mut TMB = unsafe { transport_ptr.as_mut() };
+            let transport_mgr: &mut Dep::TransportMgr = unsafe { transport_ptr.as_mut() };
             let result = transport_mgr.send_message(destination, msg_buf);
             #[cfg(feature = "chip_error_logging")]
             {
@@ -1597,7 +1647,8 @@ where
         }
     }
 
-    pub fn get_transport_manager(&self) -> Option<&TMB> {
+    //pub fn get_transport_manager(&self) -> Option<&TMB> {
+    pub fn get_transport_manager(&self) -> Option<&Dep::TransportMgr> {
         unsafe {
             self.m_transport_mgr.and_then(|p| Some(p.as_ref()))
         }
@@ -1607,13 +1658,15 @@ where
         &mut self.m_secure_sessions
     }
 
-    pub fn get_fabric_table(&self) -> Option<&FabricTable<'d, PSD, OK, OCS>> {
+    //pub fn get_fabric_table(&self) -> Option<&FabricTable<'d, PSD, OK, OCS>> {
+    pub fn get_fabric_table(&self) -> Option<&FabricTable<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>> {
         unsafe {
             self.m_fabric_table.and_then(|p| Some(p.as_ref()))
         }
     }
 
-    pub fn get_session_keystore(&self) -> Option<&SKS> {
+    //pub fn get_session_keystore(&self) -> Option<&SKS> {
+    pub fn get_session_keystore(&self) -> Option<&Dep::SessionKeystore> {
         unsafe {
             self.m_session_keystore.and_then(|p| Some(p.as_ref()))
         }
@@ -1625,6 +1678,7 @@ where
     }
 }
 
+/*
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> fabric_table::Delegate<'d, PSD, OK, OCS> for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd,
@@ -1634,22 +1688,27 @@ where
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
+*/
+impl<'d, Dep: Dependencies<'d> + 'd> fabric_table::Delegate<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore> for SessionManager<'d, Dep>
 {
     fn fabric_will_be_removed(
         &mut self,
-        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        //_fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_table: &FabricTable<Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>,
         _fabric_index: FabricIndex,
     ) {}
 
     fn on_fabric_removed(
         &mut self,
-        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        //_fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_table: &FabricTable<Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>,
         _fabric_index: FabricIndex,
     ) {}
 
     fn on_fabric_updated(
         &mut self,
-        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        //_fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_table: &FabricTable<Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>,
         fabric_index: FabricIndex,
     ) 
     {
@@ -1658,11 +1717,13 @@ where
 
     fn on_fabric_commit(
         &mut self,
-        _fabric_table: &FabricTable<PSD, OK, OCS>,
+        //_fabric_table: &FabricTable<PSD, OK, OCS>,
+        _fabric_table: &FabricTable<Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>,
         _fabric_index: FabricIndex,
     ) {}
 
-    fn next(&self) -> Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)> {
+    //fn next(&self) -> Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)> {
+    fn next(&self) -> Option<*mut (dyn fabric_table::Delegate<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore> + 'd)> {
         return self.m_next_table_delegate.clone();
     }
 
@@ -1670,11 +1731,13 @@ where
         self.m_next_table_delegate = None;
     }
 
-    fn set_next(&mut self, next: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>) {
+    //fn set_next(&mut self, next: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>) {
+    fn set_next(&mut self, next: Option<*mut (dyn fabric_table::Delegate<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore> + 'd)>) {
         self.m_next_table_delegate = next;
     }
 }
 
+/*
 impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
 where
     PSD: PersistentStorageDelegate + 'd + 'static,
@@ -1684,6 +1747,8 @@ where
     SMD: SessionMessageDelegate + 'd,
     TMB: TransportMgrBase + 'd,
     MCMI: MessageCounterManagerInterface + 'd,
+*/
+impl<'d, Dep: Dependencies<'d> + 'd> TransportMgrDelegate for SessionManager<'d, Dep>
 {
     fn on_message_received(
         &mut self,
@@ -1946,8 +2011,23 @@ mod tests {
         }
     }
 
+    struct TestDependencies;
+
+    impl<'d> Dependencies<'d> for TestDependencies {
+        type PersistentStorage = TestPersistentStorage;
+        type OperationalKeystore = OK;
+        type OperationalCertStore = OCS;
+        type SessionKeystore = TestSKS;
+        type SessionMessageDelegate = TestSessionMessageDelegate;
+        type TransportMgr = TestTransportMgr<'d>;
+        type MessageCounterManager = TestMessageCounterMgr;
+    }
+
+    /*
     type TestSessionManager<'a> = SessionManager<'a, TestPersistentStorage, OK, OCS, TestSKS,
        TestSessionMessageDelegate, TestTransportMgr<'a>, TestMessageCounterMgr>;
+    */
+    type TestSessionManager<'a> = SessionManager<'a, TestDependencies>;
 
     type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
