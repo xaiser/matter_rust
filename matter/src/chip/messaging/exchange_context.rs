@@ -26,23 +26,24 @@ pub mod shared {
     use core::cell::RefCell;
 
     const ALLOACTOR_CAP: usize = 10;
-    pub type Alloactor<'a> = DefaultAlloactor<RefCell<ExchangeContext<'a>>, ALLOACTOR_CAP>;
-    pub type SharedExchangeContext<'a> = Rc<RefCell<ExchangeContext<'a>>, Alloactor<'a>>;
-    pub type WeakSharedExchangeContext<'a> = Weak<RefCell<ExchangeContext<'a>>, Alloactor<'a>>;
+    pub type Alloactor<'a, 'b> = DefaultAlloactor<RefCell<ExchangeContext<'a, 'b>>, ALLOACTOR_CAP>;
+    pub type SharedExchangeContext<'a, 'b> = Rc<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
+    pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
 
-    pub fn try_new_shared<'a>(ec: ExchangeContext<'a>, allocator: * mut Alloactor<'a>) -> Result<SharedExchangeContext<'a>, ()> 
+    pub fn try_new_shared<'a, 'b>(ec: ExchangeContext<'a, 'b>, allocator: * mut Alloactor<'a, 'b>) -> Result<SharedExchangeContext<'a, 'b>, ()> 
         // a rustc bug trigger by generic_const_exprs, this is the workaround suggested by AI
         where
             'a: 'a,
+            'b: 'b,
     {
         SharedExchangeContext::try_new_in(RefCell::new(ec), allocator)
     }
 
-    pub struct WeakExchangeContextHandle<'a> {
-        ec: WeakSharedExchangeContext<'a>,
+    pub struct WeakExchangeContextHandle<'a, 'b> {
+        ec: WeakSharedExchangeContext<'a, 'b>,
     }
 
-    impl Access for WeakExchangeContextHandle<'_> {
+    impl Access for WeakExchangeContextHandle<'_, '_> {
         fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Some(shared_handle) = self.ec.upgrade() {
                 if let Ok(handle) = shared_handle.try_borrow() {
@@ -68,11 +69,11 @@ pub mod shared {
         }
     }
 
-    pub struct ExchangeContextHandle<'a> {
-        ec: SharedExchangeContext<'a>,
+    pub struct ExchangeContextHandle<'a, 'b> {
+        ec: SharedExchangeContext<'a, 'b>,
     }
 
-    impl Access for ExchangeContextHandle<'_> {
+    impl Access for ExchangeContextHandle<'_, '_> {
         fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Ok(handle) = self.ec.try_borrow() {
                 return Ok(f(&(*handle)));
@@ -215,17 +216,18 @@ pub mod exchange_context {
         }
     }
 
-    pub struct ExchangeContext<'a> {
+    pub struct ExchangeContext<'a, 'b> {
         m_response_timeout: Timeout,
         m_delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>,
-        m_exchange_mgr: Option<NonNull<ExchangeManager>>,
+        m_exchange_mgr: Option<NonNull<ExchangeManager<'b>>>,
+        //m_exchange_mgr: Option<NonNull<ExchangeManager>>,
         m_dispatch: ExchangeMessageDispatchHandle,
         m_session: ExchangeSessionHolder,
         m_exchange_id: u16,
         m_reliable_message_context: BaseReliableMessageContext,
     }
 
-    impl<'a> ExchangeContext<'a> {
+    impl<'a, 'b> ExchangeContext<'a, 'b> {
         pub const fn new() -> Self {
             Self {
                 m_response_timeout: Timeout::from_secs(0),
@@ -238,7 +240,7 @@ pub mod exchange_context {
             }
         }
 
-        pub fn new_with(em: Option<NonNull<ExchangeManager>>, exchange_id: u16, session: SessionHandle, initiator: bool,
+        pub fn new_with(em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, session: SessionHandle, initiator: bool,
             delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Self
         {
             let mut ec = Self::new();
@@ -396,7 +398,7 @@ pub mod exchange_context {
             self.is_initiator()), chip_log_option_non_null(self.m_delegate));
         }
 
-        pub fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_> {
+        pub fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_> {
             self as _
         }
 
@@ -439,7 +441,7 @@ pub mod exchange_context {
         }
     }
 
-    impl<'a> ReliableMessageContext<'a> for ExchangeContext<'a> {
+    impl<'a, 'b> ReliableMessageContext<'a, 'b> for ExchangeContext<'a, 'b> {
         fn base(&self) -> &BaseReliableMessageContext {
             &self.m_reliable_message_context
         }
@@ -464,11 +466,11 @@ pub mod exchange_context {
             Some(mgr)
         }
 
-        fn get_exchange_context(&mut self) -> &mut ExchangeContext<'a> {
+        fn get_exchange_context(&mut self) -> &mut ExchangeContext<'a, 'b> {
             self
         }
 
-        fn get_exchange_context_const(&self) -> &ExchangeContext<'a> {
+        fn get_exchange_context_const(&self) -> &ExchangeContext<'a, 'b> {
             self
         }
     }

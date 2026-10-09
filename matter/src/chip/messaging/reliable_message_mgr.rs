@@ -51,7 +51,7 @@ impl ReliableMessageMgr {
      *  Iterate through active exchange contexts and retrans table entries. Clear the entry matching
      *  the specified ExchangeContext and the message ID from the retransmision table.
      */
-    pub fn check_and_rem_retrans_table<'a, Context: ReliableMessageContext<'a>>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
+    pub fn check_and_rem_retrans_table<'a, 'b, Context: ReliableMessageContext<'a, 'b>>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
         false
     }
 

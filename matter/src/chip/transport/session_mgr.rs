@@ -199,44 +199,21 @@ pub trait Dependencies<'d> {
 }
 
 /*
-pub struct SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
-where
-    PSD: PersistentStorageDelegate + 'd + 'static,
-    OK: crypto::OperationalKeystore + 'd,
-    OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd + 'static,
-    SMD: SessionMessageDelegate + 'd,
-    TMB: TransportMgrBase + 'd,
-    MCMI: MessageCounterManagerInterface + 'd,
-{
-    m_system_layer: Option<NonNull<LayerImpl>>,
-    m_fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>,
-    m_session_keystore: Option<NonNull<SKS>>,
-    m_unauthenticated_sessions: UnauthenticatedSessionTable,
-    m_secure_sessions: SecureSessionTable,
-    m_state: State,
-    m_group_clinent_counter: GroupOutgoingCounters<PSD>,
-    m_cb: Option<NonNull<SMD>>,
-    m_transport_mgr: Option<NonNull<TMB>>,
-    m_message_counter_manager: Option<NonNull<MCMI>>,
-    m_global_unencrypted_message_counter: MessageCounter,
-    // TODO: use linkedlist
-    m_next_table_delegate: Option<*mut (dyn fabric_table::Delegate<'d, PSD, OK, OCS> + 'd)>,
-    m_group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS>>>,
-    m_group_sessions: GroupSessionTable,
+pub trait SessionManagerGetter {
+    fn session_manager(&self) -> *mut impl SessionManagerTrait;
 }
 */
+pub struct SessoinManagerHandle<'a> {
+    m_inner: NonNull<dyn SessionManagerTrait + 'a>,
+}
+
+pub trait SessionManagerTrait{
+    fn fabric_removed(&mut self, fabric_index: FabricIndex);
+    //fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, f: F)
+    fn for_each_matching_session(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession));
+}
+
 pub struct SessionManager<'d, Dep: Dependencies<'d> + 'd>
-/*
-where
-    PSD: PersistentStorageDelegate + 'd + 'static,
-    OK: crypto::OperationalKeystore + 'd,
-    OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd + 'static,
-    SMD: SessionMessageDelegate + 'd,
-    TMB: TransportMgrBase + 'd,
-    MCMI: MessageCounterManagerInterface + 'd,
-*/
 {
     m_system_layer: Option<NonNull<LayerImpl>>,
     m_fabric_table: Option<NonNull<FabricTable<'d, Dep::PersistentStorage, Dep::OperationalKeystore, Dep::OperationalCertStore>>>,
@@ -255,22 +232,6 @@ where
     m_group_sessions: GroupSessionTable,
 }
 
-/*
-impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> Drop for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
-where
-    PSD: PersistentStorageDelegate + 'd + 'static,
-    OK: crypto::OperationalKeystore + 'd,
-    OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd + 'static,
-    SMD: SessionMessageDelegate + 'd,
-    TMB: TransportMgrBase + 'd,
-    MCMI: MessageCounterManagerInterface + 'd,
-{
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-*/
 impl<'d, Dep: Dependencies<'d> + 'd> Drop for SessionManager<'d, Dep>
 {
     fn drop(&mut self) {
@@ -278,17 +239,6 @@ impl<'d, Dep: Dependencies<'d> + 'd> Drop for SessionManager<'d, Dep>
     }
 }
 
-/*
-impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
-where
-    PSD: PersistentStorageDelegate + 'd + 'static,
-    OK: crypto::OperationalKeystore + 'd,
-    OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd + 'static,
-    SMD: SessionMessageDelegate + 'd,
-    TMB: TransportMgrBase + 'd,
-    MCMI: MessageCounterManagerInterface + 'd,
-*/
 impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 {
     pub const fn new() -> Self {
@@ -310,13 +260,6 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
         }
     }
 
-    /*
-    pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<TMB>>, 
-        message_counter_manager: Option<NonNull<MCMI>>,
-        storage_delegate: Option<NonNull<PSD>>, mut fabric_table: Option<NonNull<FabricTable<'d, PSD, OK, OCS>>>, 
-        session_keystore: Option<NonNull<SKS>>,
-        group_data_provider: Option<NonNull<GroupDataProviderImpl<PSD, SKS>>>) -> ChipErrorResult
-    */
     pub fn init(&mut self, system_layer: Option<NonNull<LayerImpl>>, transport_mgr: Option<NonNull<Dep::TransportMgr>>, 
         message_counter_manager: Option<NonNull<Dep::MessageCounterManager>>,
         storage_delegate: Option<NonNull<Dep::PersistentStorage>>,
@@ -387,12 +330,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
         self.m_cb = Some(cb);
     }
 
-    pub fn fabric_removed(&mut self, fabric_index: FabricIndex) {
-        unsafe {
-            let _ = group_peer_table().as_mut().fabric_removed(fabric_index);
-        }
-    }
-
+    /*
     pub fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
         where
             F: FnOnce(&SharedSession) + FnMut(&SharedSession)
@@ -405,6 +343,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
             Loop::Continue
         });
     }
+    */
 
     pub fn for_each_matching_session_const<F>(&self, node: &ScopedNodeId, mut f: F)
         where
@@ -969,7 +908,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 
     pub fn expire_all_sessions(&mut self, node: &ScopedNodeId) {
         chip_log_detail!(Inet, "Expireing all sessions for node {}!!", node);
-        self.for_each_matching_session(node, |shared_session| {
+        self.for_each_matching_session(node, &mut |shared_session| {
             let handle = SessionHandle::new_with(shared_session);
             mark_for_evication(handle);
         });
@@ -1737,17 +1676,6 @@ impl<'d, Dep: Dependencies<'d> + 'd> fabric_table::Delegate<'d, Dep::PersistentS
     }
 }
 
-/*
-impl<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI> TransportMgrDelegate for SessionManager<'d, PSD, OK, OCS, SKS, SMD, TMB, MCMI>
-where
-    PSD: PersistentStorageDelegate + 'd + 'static,
-    OK: crypto::OperationalKeystore + 'd,
-    OCS: credentials::OperationalCertificateStore + 'd,
-    SKS: SessionKeystore + 'd,
-    SMD: SessionMessageDelegate + 'd,
-    TMB: TransportMgrBase + 'd,
-    MCMI: MessageCounterManagerInterface + 'd,
-*/
 impl<'d, Dep: Dependencies<'d> + 'd> TransportMgrDelegate for SessionManager<'d, Dep>
 {
     fn on_message_received(
@@ -1773,6 +1701,31 @@ impl<'d, Dep: Dependencies<'d> + 'd> TransportMgrDelegate for SessionManager<'d,
         } else {
             self.unauthenticated_message_dispatch(&partial_packet_header, peer_address, msg_buf, ctext);
         }
+    }
+}
+
+impl<'d, Dep: Dependencies<'d> + 'd> SessionManagerTrait for SessionManager<'d, Dep>
+{
+    fn fabric_removed(&mut self, fabric_index: FabricIndex) {
+        unsafe {
+            let _ = group_peer_table().as_mut().fabric_removed(fabric_index);
+        }
+    }
+
+    /*
+    fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
+        where
+            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
+    */
+    fn for_each_matching_session(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession))
+    {
+        self.m_secure_sessions.for_each_session(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
     }
 }
 
