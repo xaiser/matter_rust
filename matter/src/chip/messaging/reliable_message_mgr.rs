@@ -64,6 +64,14 @@ impl ReliableMessageMgr {
      */
     pub fn start_timer(&mut self) { }
 
+    /*
+     *  Clear entries matching a specified ExchangeContext.
+     *
+     *
+     */
+    pub fn clear_retrans_table<'a, 'b>(&mut self, _rc: &impl ReliableMessageContext<'a, 'b>) {
+    }
+
     pub fn get_backoff(base_interval: Duration, send_count: u8, compute_max_possible: bool) -> Duration {
         // See section "4.11.8. Parameters and Constants" for the parameters below:
         // MRP_BACKOFF_JITTER = 0.25

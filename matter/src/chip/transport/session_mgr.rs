@@ -198,19 +198,30 @@ pub trait Dependencies<'d> {
     type MessageCounterManager: MessageCounterManagerInterface + 'd;
 }
 
-/*
-pub trait SessionManagerGetter {
-    fn session_manager(&self) -> *mut impl SessionManagerTrait;
-}
-*/
 pub struct SessoinManagerHandle<'a> {
     m_inner: NonNull<dyn SessionManagerTrait + 'a>,
 }
 
 pub trait SessionManagerTrait{
     fn fabric_removed(&mut self, fabric_index: FabricIndex);
-    //fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, f: F)
+
     fn for_each_matching_session(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession));
+
+    fn for_each_matching_session_const(&self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession));
+
+    fn for_each_matching_fabric_index_session(&mut self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession));
+
+    fn for_each_matching_fabric_index_session_const(&self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession));
+
+    fn for_each_matching_session_on_logical_fabric(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult;
+
+    fn for_each_matching_session_on_logical_fabric_const(&self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult;
+
+    fn for_each_matching_fabric_index_session_on_logical_fabric(&mut self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult;
+
+    fn for_each_matching_fabric_index_session_on_logical_fabric_const(&self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult;
+
+    fn system_layer(&mut self) -> Option<&mut LayerImpl>;
 }
 
 pub struct SessionManager<'d, Dep: Dependencies<'d> + 'd>
@@ -343,7 +354,6 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
             Loop::Continue
         });
     }
-    */
 
     pub fn for_each_matching_session_const<F>(&self, node: &ScopedNodeId, mut f: F)
         where
@@ -584,6 +594,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 
         chip_ok!()
     }
+    */
 
     pub fn create_unauthenticated_session(&mut self, peer_address: &PeerAddress, config: &ReliableMessageProtocolConfig) -> Option<SessionHandle> {
         let mut ephemeral_initiator_node_id = KUNDEFINED_NODE_ID;
@@ -916,7 +927,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 
     pub fn expire_all_sessions_for_fabric(&mut self, fabric_index: FabricIndex) {
         chip_log_detail!(Inet, "Expireing all sessions for fabric 0x{:x}!!", fabric_index);
-        self.for_each_matching_fabric_index_session(fabric_index, |shared_session| {
+        self.for_each_matching_fabric_index_session(fabric_index, &mut |shared_session| {
             let handle = SessionHandle::new_with(shared_session);
             mark_for_evication(handle);
         });
@@ -924,7 +935,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 
     pub fn expire_all_sessions_on_logical_fabric(&mut self, node: &ScopedNodeId) -> ChipErrorResult {
         chip_log_detail!(Inet, "Expireing all sessions to peer {} that are on the same logcial fabric!!", node);
-        self.for_each_matching_session_on_logical_fabric(node, |shared_session| {
+        self.for_each_matching_session_on_logical_fabric(node, &mut |shared_session| {
             let handle = SessionHandle::new_with(shared_session);
             mark_for_evication(handle);
         })
@@ -932,7 +943,7 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
 
     pub fn expire_all_sessions_on_logical_fabric_for_fabic(&mut self, fabric_index: FabricIndex) -> ChipErrorResult {
         chip_log_detail!(Inet, "Expireing all sessions on the same logical fabric as fabric 0x{:x}!!", fabric_index);
-        self.for_each_matching_fabric_index_session_on_logical_fabric(fabric_index, |shared_session| {
+        self.for_each_matching_fabric_index_session_on_logical_fabric(fabric_index, &mut |shared_session| {
             let handle = SessionHandle::new_with(shared_session);
             mark_for_evication(handle);
         })
@@ -1580,11 +1591,13 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManager<'d, Dep>
         chip_ok!()
     }
 
+    /*
     pub fn system_layer(&mut self) -> Option<&mut LayerImpl> {
         unsafe {
             self.m_system_layer.and_then(|mut p| Some(p.as_mut()))
         }
     }
+    */
 
     //pub fn get_transport_manager(&self) -> Option<&TMB> {
     pub fn get_transport_manager(&self) -> Option<&Dep::TransportMgr> {
@@ -1712,11 +1725,6 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManagerTrait for SessionManager<'d, 
         }
     }
 
-    /*
-    fn for_each_matching_session<F>(&mut self, node: &ScopedNodeId, mut f: F)
-        where
-            F: FnOnce(&SharedSession) + FnMut(&SharedSession)
-    */
     fn for_each_matching_session(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession))
     {
         self.m_secure_sessions.for_each_session(|session| {
@@ -1726,6 +1734,234 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManagerTrait for SessionManager<'d, 
 
             Loop::Continue
         });
+    }
+
+    fn for_each_matching_session_const(&self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession))
+    {
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_peer() == *node) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    fn for_each_matching_fabric_index_session(&mut self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession))
+    {
+        self.m_secure_sessions.for_each_session(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    fn for_each_matching_fabric_index_session_const(&self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession))
+    {
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if session.try_borrow().is_ok_and(|session_ref| session_ref.get_fabric_index() == fabric_index) {
+                f(session);
+            }
+
+            Loop::Continue
+        });
+    }
+
+    fn for_each_matching_session_on_logical_fabric(&mut self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult {
+        let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(node.get_fabric_index())?;
+        self.m_secure_sessions.for_each_session(|session| {
+            if let Ok(session_ref) = session.try_borrow() {
+                let (is_case_session, peer_node_id) = {
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
+                    if let Some(ss) = secure_session {
+                        (ss.is_case_session(), ss.get_peer_node_id())
+                    } else {
+                        (false, KUNDEFINED_NODE_ID)
+                    }
+                };
+
+                //
+                // It's entirely possible to either come across a PASE session OR, a CASE session
+                // that has yet to be activated (i.e a CASEServer holding onto a SecureSession object
+                // waiting for a Sigma1 message to arrive). Let's skip those.
+                //
+                if !is_case_session || (session_ref.get_fabric_index() == KUNDEFINED_FABRIC_INDEX) {
+                    return Loop::Continue;
+                }
+
+                let compare_fabric_option = unsafe {
+                    if let Some(table) = self.m_fabric_table.as_ref() {
+                        table.as_ref().find_fabric_with_index(session_ref.get_fabric_index())
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(compare_fabric) = compare_fabric_option &&
+                    let Ok(compare_pub_key) = compare_fabric.fetch_root_pubkey() 
+                {
+                    if compare_pub_key.matches(&target_pub_key) && target_fabric_id == compare_fabric.get_fabric_id() &&
+                        peer_node_id == node.get_node_id() {
+                            f(session);
+                    }
+                }
+            }
+
+            Loop::Continue
+        });
+
+
+        chip_ok!()
+    }
+
+    fn for_each_matching_session_on_logical_fabric_const(&self, node: &ScopedNodeId, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult {
+        let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(node.get_fabric_index())?;
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if let Ok(session_ref) = session.try_borrow() {
+                let (is_case_session, peer_node_id) = {
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
+                    if let Some(ss) = secure_session {
+                        (ss.is_case_session(), ss.get_peer_node_id())
+                    } else {
+                        (false, KUNDEFINED_NODE_ID)
+                    }
+                };
+
+                //
+                // It's entirely possible to either come across a PASE session OR, a CASE session
+                // that has yet to be activated (i.e a CASEServer holding onto a SecureSession object
+                // waiting for a Sigma1 message to arrive). Let's skip those.
+                //
+                if !is_case_session || (session_ref.get_fabric_index() == KUNDEFINED_FABRIC_INDEX) {
+                    return Loop::Continue;
+                }
+
+                let compare_fabric_option = unsafe {
+                    if let Some(table) = self.m_fabric_table.as_ref() {
+                        table.as_ref().find_fabric_with_index(session_ref.get_fabric_index())
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(compare_fabric) = compare_fabric_option &&
+                    let Ok(compare_pub_key) = compare_fabric.fetch_root_pubkey() 
+                {
+                    if compare_pub_key.matches(&target_pub_key) && target_fabric_id == compare_fabric.get_fabric_id() &&
+                        peer_node_id == node.get_node_id() {
+                            f(session);
+                    }
+                }
+            }
+
+            Loop::Continue
+        });
+
+
+        chip_ok!()
+    }
+
+    fn for_each_matching_fabric_index_session_on_logical_fabric(&mut self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult {
+        let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
+        self.m_secure_sessions.for_each_session(|session| {
+            if let Ok(session_ref) = session.try_borrow() {
+                let is_case_session = {
+                    //let secure_session: Option<&SecureSession> = session_ref.as_ref();
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
+                    if let Some(ss) = secure_session {
+                        ss.is_case_session()
+                    } else {
+                        false
+                    }
+                };
+
+                //
+                // It's entirely possible to either come across a PASE session OR, a CASE session
+                // that has yet to be activated (i.e a CASEServer holding onto a SecureSession object
+                // waiting for a Sigma1 message to arrive). Let's skip those.
+                //
+                if !is_case_session || (session_ref.get_fabric_index() == KUNDEFINED_FABRIC_INDEX) {
+                    return Loop::Continue;
+                }
+
+                let compare_fabric_option = unsafe {
+                    if let Some(table) = self.m_fabric_table.as_ref() {
+                        table.as_ref().find_fabric_with_index(session_ref.get_fabric_index())
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(compare_fabric) = compare_fabric_option &&
+                    let Ok(compare_pub_key) = compare_fabric.fetch_root_pubkey() 
+                {
+                    if compare_pub_key.matches(&target_pub_key) && target_fabric_id == compare_fabric.get_fabric_id() {
+                            f(session);
+                    }
+                }
+            }
+
+            Loop::Continue
+        });
+
+
+        chip_ok!()
+    }
+
+    fn for_each_matching_fabric_index_session_on_logical_fabric_const(&self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult {
+        let (target_pub_key, target_fabric_id) = self.get_fabric_and_pub_key(fabric_index)?;
+        self.m_secure_sessions.for_each_session_const(|session| {
+            if let Ok(session_ref) = session.try_borrow() {
+                let is_case_session = {
+                    let secure_session = SecureSessionAsRef::as_ref(&(*session_ref));
+                    if let Some(ss) = secure_session {
+                        ss.is_case_session()
+                    } else {
+                        false
+                    }
+                };
+
+                //
+                // It's entirely possible to either come across a PASE session OR, a CASE session
+                // that has yet to be activated (i.e a CASEServer holding onto a SecureSession object
+                // waiting for a Sigma1 message to arrive). Let's skip those.
+                //
+                if !is_case_session || (session_ref.get_fabric_index() == KUNDEFINED_FABRIC_INDEX) {
+                    return Loop::Continue;
+                }
+
+                let compare_fabric_option = unsafe {
+                    if let Some(table) = self.m_fabric_table.as_ref() {
+                        table.as_ref().find_fabric_with_index(session_ref.get_fabric_index())
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(compare_fabric) = compare_fabric_option &&
+                    let Ok(compare_pub_key) = compare_fabric.fetch_root_pubkey() 
+                {
+                    if compare_pub_key.matches(&target_pub_key) && target_fabric_id == compare_fabric.get_fabric_id() {
+                            f(session);
+                    }
+                }
+            }
+
+            Loop::Continue
+        });
+
+
+        chip_ok!()
+    }
+
+    fn system_layer(&mut self) -> Option<&mut LayerImpl> {
+        unsafe {
+            self.m_system_layer.as_mut().and_then(|mut p| Some(p.as_mut()))
+        }
     }
 }
 
@@ -2612,7 +2848,7 @@ mod tests {
         let peer_scope_id = ScopedNodeId::default_with_ids(TEST_PEER_NODE_ID, TEST_FABRIC_INDEX);
         let mut count = 0usize;
         // make sure there is no session before allocate
-        rs.sm.for_each_matching_session_const(&peer_scope_id, |_| {
+        rs.sm.for_each_matching_session_const(&peer_scope_id, &mut |_| {
             count += 1;
         });
         assert_eq!(0, count);
@@ -2633,7 +2869,7 @@ mod tests {
 
         let mut count = 0usize;
         // there should be 1 session
-        rs.sm.for_each_matching_session_const(&peer_scope_id, |_| {
+        rs.sm.for_each_matching_session_const(&peer_scope_id, &mut |_| {
             count += 1;
         });
         assert_eq!(1, count);

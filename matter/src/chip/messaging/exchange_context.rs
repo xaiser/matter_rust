@@ -108,6 +108,8 @@ pub mod exchange_context {
             },
             system::{
                 system_packet_buffer::PacketBufferHandle,
+                system_layer::TimerCallbackContext,
+                LayerImpl,
             },
             messaging::{
                 exchange_mgr::ExchangeManager,
@@ -216,11 +218,13 @@ pub mod exchange_context {
         }
     }
 
+    pub fn handle_response_timeout(_system_layer: &mut LayerImpl, app_state: TimerCallbackContext) {
+    }
+
     pub struct ExchangeContext<'a, 'b> {
         m_response_timeout: Timeout,
         m_delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>,
         m_exchange_mgr: Option<NonNull<ExchangeManager<'b>>>,
-        //m_exchange_mgr: Option<NonNull<ExchangeManager>>,
         m_dispatch: ExchangeMessageDispatchHandle,
         m_session: ExchangeSessionHolder,
         m_exchange_id: u16,
@@ -368,7 +372,7 @@ pub mod exchange_context {
             self.m_delegate = delegate;
         }
 
-        pub fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager>> {
+        pub fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager<'b>>> {
             self.m_exchange_mgr
         }
 
@@ -438,6 +442,54 @@ pub mod exchange_context {
             }
 
             ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
+        }
+
+        fn do_close(&mut self, clear_retrans_table: bool) {
+            if self.base().m_flags.intersects(Flags::KflagClosed) {
+                return;
+            }
+
+            self.base_mut().m_flags.insert(Flags::KflagClosed);
+
+            // Clear protocol callbacks
+            if let Some(mut delegate) = self.m_delegate.take() {
+                unsafe {
+                    delegate.as_mut().on_exchange_closing(self);
+                }
+            }
+
+            // Closure of an exchange context is based on ref counting. The Protocol, when it calls DoClose(), indicates that
+            // it is done with the exchange context and the message layer sets all callbacks to NULL and does not send anything
+            // received on the exchange context up to higher layers.  At this point, the message layer needs to handle the
+            // remaining work to be done on that exchange, (e.g. send all pending acks) before truly cleaning it up.
+            let _ = self.flush_acks();
+
+            if clear_retrans_table {
+                if let Some(mgr) = self.m_exchange_mgr {
+                    let rm_mgr = unsafe {
+                        mgr.as_ref().get_reliable_message_mgr().as_mut()
+                    };
+                    rm_mgr.clear_retrans_table(self);
+                } else {
+                    chip_log_error!(ExchangeManager, "cannot get mgr in clear retrans table");
+                }
+            }
+
+            if self.is_response_expected() {
+                // Cancel the response timer.
+            }
+        }
+
+        fn cancel_response_timer(&self) {
+            unsafe {
+                if let Some(exchange_mgr) = self.m_exchange_mgr &&
+                    let Some(session_mgr) = exchange_mgr.as_ref().get_session_manager()
+                {
+                } else {
+                    chip_log_error!(ExchangeManager, "cannot get system layer in cancel timer");
+                    return;
+                }
+            }
         }
     }
 
@@ -514,7 +566,7 @@ mod tests {
         chip_core_error, chip_sdk_error,
     };
 
-    use core::ptr::NonNull;
+    use core::ptr::{NonNull, addr_of, addr_eq};
 
     struct MockDelegate;
 
@@ -566,5 +618,25 @@ mod tests {
         let ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
 
         assert_eq!(id, ec.get_exchange_id());
+    }
+
+    #[test]
+    fn reliable_compare() {
+        let mgr = ExchangeManager::new();
+        let id = 1u16;
+
+        // to create a secure session
+        let mut table = SecureSessionTable::new();
+        let sh = get_session_handle(&mut table);
+
+        // delegate
+        let delegate = MockDelegate::new();
+
+        let ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+
+        let ep = addr_of!(ec);
+        let rp: *const dyn crate::chip::messaging::reliable_message_context::ReliableMessageContext = addr_of!(ec) as _;
+
+        assert!(addr_eq(ep, rp));
     }
 } // end of mod tests

@@ -55,7 +55,10 @@ impl Layer for LayerImplThreadX {
         self.m_layer_state.is_initialized()
     }
 
-    fn start_timer(&self, _delay: Timeout, _complete: TimerCompleteCallback, _app_state: TimerCallbackContext) {
+    fn start_timer<S: Layer>(&self, _delay: Timeout, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
+    }
+
+    fn cancel_timer<S: Layer>(&self, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
     }
 }
 
