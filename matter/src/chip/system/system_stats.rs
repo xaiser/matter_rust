@@ -14,3 +14,9 @@ macro_rules! system_stats_increment {
     ($entry:expr) => {
     };
 }
+
+#[macro_export]
+macro_rules! system_stats_decrement {
+    ($entry:expr) => {
+    };
+}

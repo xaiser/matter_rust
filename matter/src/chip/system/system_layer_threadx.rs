@@ -17,7 +17,8 @@ use crate::chip_no_error;
 use crate::chip_sdk_error;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;
-use crate::ChipError;
+use crate::ChipErrorResult;
+use crate::chip_ok;
 
 pub type LayerImpl = LayerImplThreadX;
 
@@ -34,17 +35,17 @@ impl LayerImplThreadX {
 }
 
 impl Layer for LayerImplThreadX {
-    fn init(&mut self) -> ChipError {
+    fn init(&mut self) -> ChipErrorResult {
         verify_or_return_error!(
             self.m_layer_state.set_initializing(),
-            chip_error_incorrect_state!()
+            Err(chip_error_incorrect_state!())
         );
         verify_or_return_error!(
             self.m_layer_state.set_initialized(),
-            chip_error_incorrect_state!()
+            Err(chip_error_incorrect_state!())
         );
 
-        return chip_no_error!();
+        return chip_ok!();
     }
 
     fn shutdown(&mut self) {
@@ -55,10 +56,18 @@ impl Layer for LayerImplThreadX {
         self.m_layer_state.is_initialized()
     }
 
-    fn start_timer<S: Layer>(&self, _delay: Timeout, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
+    /*
+    fn start_timer<S: Layer>(&mut self, _delay: Timeout, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
     }
 
-    fn cancel_timer<S: Layer>(&self, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
+    fn cancel_timer<S: Layer>(&mut self, _complete: TimerCompleteCallback<S>, _app_state: TimerCallbackContext) {
+    }
+    */
+
+    fn start_timer(&mut self, _delay: Timeout, _complete: TimerCompleteCallback, _app_state: TimerCallbackContext) {
+    }
+
+    fn cancel_timer(&mut self, _complete: TimerCompleteCallback, _app_state: TimerCallbackContext) {
     }
 }
 
@@ -92,7 +101,7 @@ mod test {
             set_up();
             let mut l = LayerImpl::default();
 
-            l.init();
+            let _ = l.init();
 
             assert_eq!(true, l.is_initialized());
         }

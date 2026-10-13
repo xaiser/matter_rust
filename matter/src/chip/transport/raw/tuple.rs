@@ -167,7 +167,7 @@ mod test {
             unsafe {
                 /* reinit system layer */
                 let sl = system_layer();
-                (*sl).init();
+                let _ = (*sl).init();
 
                 /* reinit end point manager */
                 END_POINT_MANAGER = TestEndPointManager::default();
@@ -268,7 +268,7 @@ mod test {
             unsafe {
                 /* reinit system layer */
                 let sl = system_layer();
-                (*sl).init();
+                let _ = (*sl).init();
 
                 /* reinit end point manager */
                 END_POINT_MANAGER = TestEndPointManager::default();
@@ -406,7 +406,7 @@ mod test {
             unsafe {
                 /* reinit system layer */
                 let sl = system_layer();
-                (*sl).init();
+                let _ = (*sl).init();
 
                 /* reinit end point manager */
                 END_POINT_MANAGER = TestEndPointManager::default();

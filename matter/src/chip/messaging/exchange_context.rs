@@ -108,8 +108,11 @@ pub mod exchange_context {
             },
             system::{
                 system_packet_buffer::PacketBufferHandle,
-                system_layer::TimerCallbackContext,
+                system_layer::{Layer, TimerCallbackContext},
                 LayerImpl,
+                system_clock::{
+                    Timeout,
+                },
             },
             messaging::{
                 exchange_mgr::ExchangeManager,
@@ -128,17 +131,14 @@ pub mod exchange_context {
                     Session, SessionAccess, AccessError, Variant, SessionBase,
                 },
             },
-            system::{
-                system_clock::{
-                    Timeout,
-                },
-            },
         },
         ChipErrorResult, chip_ok,
         chip_error_invalid_argument,
+        chip_error_internal,
         chip_core_error, chip_sdk_error,
         verify_or_die,
         system_stats_increment,
+        system_stats_decrement,
 
         chip_internal_log,
         chip_internal_log_impl,
@@ -218,7 +218,14 @@ pub mod exchange_context {
         }
     }
 
-    pub fn handle_response_timeout(_system_layer: &mut LayerImpl, app_state: TimerCallbackContext) {
+    pub fn handle_response_timeout(_system_layer: *mut u8, app_state: TimerCallbackContext) {
+        let ptr: *mut ExchangeContext = app_state.cast();
+
+        unsafe {
+            if let Some(ec) = ptr.as_mut() {
+                ec.notify_response_timeout(true);
+            }
+        }
     }
 
     pub struct ExchangeContext<'a, 'b> {
@@ -229,6 +236,28 @@ pub mod exchange_context {
         m_session: ExchangeSessionHolder,
         m_exchange_id: u16,
         m_reliable_message_context: BaseReliableMessageContext,
+    }
+
+    impl<'a, 'b> Drop for ExchangeContext<'a, 'b> {
+        fn drop(&mut self) {
+            //
+            // Ensure that DoClose has been called by the time we get here. If not, we have a leak somewhere.
+            //
+            verify_or_die!(self.base().m_flags.intersects(Flags::KflagClosed));
+
+            // Ideally, in this scenario, the retransmit table should
+            // be clear of any outstanding messages for this context and
+            // the boolean parameter passed to DoClose() should not matter.
+            self.do_close(false);
+            self.m_exchange_mgr = None;
+
+            #[cfg(feature="chip_exchange_context_detail_logging")]
+            {
+                chip_log_detail!(ExchangeManager, "ec-- id: {}", chip_log_value_exchange(self));
+            }
+
+            system_stats_decrement!(crate::chip::system::system_stats::Stats::KexchangeMgrNumContext);
+        }
     }
 
     impl<'a, 'b> ExchangeContext<'a, 'b> {
@@ -406,6 +435,9 @@ pub mod exchange_context {
             self as _
         }
 
+        pub fn notify_response_timeout(&mut self, _close_if_needed: bool) {
+        }
+
         #[inline]
         fn set_ignor_session_release(&mut self, should_ignore: bool) {
             self.base_mut().m_flags.set(Flags::KflagIgnoreSessionRelease, should_ignore);
@@ -477,14 +509,32 @@ pub mod exchange_context {
 
             if self.is_response_expected() {
                 // Cancel the response timer.
+                self.cancel_response_timer();
+            }
+        }
+
+        fn start_response_timer(&self) -> ChipErrorResult {
+            unsafe {
+                if let Some(exchange_mgr) = self.m_exchange_mgr &&
+                    let Some(session_mgr) = exchange_mgr.as_ref().get_session_manager() &&
+                        let Some(system) = session_mgr.system_layer()
+                {
+                    system.start_timer(self.m_response_timeout, handle_response_timeout, self as *const Self as TimerCallbackContext);
+                    return chip_ok!();
+                } else {
+                    chip_log_error!(ExchangeManager, "cannot get system layer in start timer");
+                    return Err(chip_error_internal!());
+                }
             }
         }
 
         fn cancel_response_timer(&self) {
             unsafe {
                 if let Some(exchange_mgr) = self.m_exchange_mgr &&
-                    let Some(session_mgr) = exchange_mgr.as_ref().get_session_manager()
+                    let Some(session_mgr) = exchange_mgr.as_ref().get_session_manager() &&
+                        let Some(system) = session_mgr.system_layer()
                 {
+                    system.cancel_timer(handle_response_timeout, self as *const Self as TimerCallbackContext);
                 } else {
                     chip_log_error!(ExchangeManager, "cannot get system layer in cancel timer");
                     return;
@@ -527,116 +577,256 @@ pub mod exchange_context {
         }
     }
 
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            chip::{
+                chip_lib::{
+                    core::{
+                        case_auth_tag::CATValues,
+                    },
+                },
+                messaging::{
+                    exchange_mgr::ExchangeManager,
+                    reliable_message_protocol_config::ReliableMessageProtocolConfig,
+                    exchange_message_dispatch::ExchangeMessageDispatchHandle,
+                    exchange_context::{
+                        exchange_context::ExchangeContext,
+                    },
+                    exchange_delegate::ExchangeDelegate,
+                },
+                transport::{
+                    raw::{
+                        message_header::PayloadHeader,
+                    },
+                    secure_session_table::SecureSessionTable,
+                    secure_session,
+                    session_mgr::SessionManagerTrait,
+                    session::{
+                        SessionHandle, SharedSession,
+                    },
+                },
+                system::{
+                    system_packet_buffer::PacketBufferHandle,
+                    system_layer::{Layer, TimerCallbackContext, TimerCompleteCallback},
+                    system_clock::{
+                        Timeout,
+                    },
+                },
+                FabricIndex, ScopedNodeId,
+            },
+
+            ChipErrorResult, chip_ok, ChipError,
+            chip_core_error, chip_sdk_error,
+        };
+
+        use core::ptr::{NonNull, addr_of, addr_eq, null_mut};
+
+        struct MockSystemLayer {
+            pub ec: TimerCallbackContext,
+        }
+
+        impl MockSystemLayer {
+            pub fn new() -> Self {
+                Self {
+                    ec: null_mut(),
+                }
+            }
+        }
+
+        impl Layer for MockSystemLayer {
+
+            fn init(&mut self) -> ChipErrorResult {
+                self.ec = null_mut();
+                chip_ok!()
+            }
+
+            fn shutdown(&mut self) {}
+
+            fn is_initialized(&self) -> bool { true }
+
+            fn start_timer(&mut self, _delay: Timeout, _complete: TimerCompleteCallback, app_state: TimerCallbackContext) {
+                self.ec = app_state;
+            }
+
+            fn cancel_timer(&mut self, complete: TimerCompleteCallback, app_state: TimerCallbackContext) {
+                self.ec = null_mut();
+            }
+        }
+
+        struct MockSessionMgr {
+            pub system_layer: MockSystemLayer,
+        }
+
+        impl MockSessionMgr {
+            pub fn new() -> Self {
+                Self {
+                    system_layer: MockSystemLayer::new(),
+                }
+            }
+        }
+
+        impl SessionManagerTrait for MockSessionMgr {
+            fn fabric_removed(&mut self, _fabric_index: FabricIndex) {}
+
+            fn for_each_matching_session(&mut self, _node: &ScopedNodeId, _f: &mut dyn FnMut(&SharedSession)) {}
+
+            fn for_each_matching_session_const(&self, _node: &ScopedNodeId, _f: &mut dyn FnMut(&SharedSession)) {}
+
+            fn for_each_matching_fabric_index_session(&mut self, _fabric_index: FabricIndex, _f: &mut dyn FnMut(&SharedSession)) {}
+
+            fn for_each_matching_fabric_index_session_const(&self, _fabric_index: FabricIndex, _f: &mut dyn FnMut(&SharedSession)) {}
+
+            fn for_each_matching_session_on_logical_fabric(&mut self, _node: &ScopedNodeId, _f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult { chip_ok!() }
+
+            fn for_each_matching_session_on_logical_fabric_const(&self, _node: &ScopedNodeId, _f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult { chip_ok!() }
+
+            fn for_each_matching_fabric_index_session_on_logical_fabric(&mut self, _fabric_index: FabricIndex, _f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult { chip_ok!() }
+
+            fn for_each_matching_fabric_index_session_on_logical_fabric_const(&self, _fabric_index: FabricIndex, _f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult { chip_ok!() }
+
+            fn system_layer(&mut self) -> Option<&mut dyn Layer> { Some(&mut self.system_layer as _) }
+        }
+
+        struct MockDelegate {
+            pub on_exchange_closing_calls: usize,
+        }
+
+        impl MockDelegate {
+            pub const fn new() -> Self {
+                Self {
+                    on_exchange_closing_calls: 0,
+                }
+            }
+        }
+
+        impl ExchangeDelegate for MockDelegate {
+            fn on_message_received(&mut self, _ec: &mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+                chip_ok!()
+            }
+
+            fn on_response_timeout(&mut self, _ec: &mut ExchangeContext) {
+            }
+
+            fn on_exchange_closing(&mut self, _ec: &mut ExchangeContext) {
+                self.on_exchange_closing_calls += 1;
+            }
+
+            fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
+                ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
+            }
+        }
+
+        fn get_session_handle(table: &mut SecureSessionTable) -> SessionHandle {
+            let cat = CATValues::new();
+            let config = ReliableMessageProtocolConfig::new();
+            let ss = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 0, 1, 2, cat, 1, 2, &config);
+            assert!(ss.is_some());
+            let ss = ss.unwrap();
+            let sh = SessionHandle::new_with(&ss);
+
+            sh
+        }
+
+        #[test]
+        fn new() {
+            let mgr = ExchangeManager::new();
+            let id = 1u16;
+
+            // to create a secure session
+            let mut table = SecureSessionTable::new();
+            let sh = get_session_handle(&mut table);
+
+            // delegate
+            let delegate = MockDelegate::new();
+
+            let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+
+            assert_eq!(id, ec.get_exchange_id());
+
+            // must close it for safe drop
+            ec.do_close(false);
+        }
+
+        #[test]
+        fn reliable_compare() {
+            let mgr = ExchangeManager::new();
+            let id = 1u16;
+
+            // to create a secure session
+            let mut table = SecureSessionTable::new();
+            let sh = get_session_handle(&mut table);
+
+            // delegate
+            let delegate = MockDelegate::new();
+
+            let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+
+            let ep = addr_of!(ec);
+            let rp: *const dyn crate::chip::messaging::reliable_message_context::ReliableMessageContext = addr_of!(ec) as _;
+
+            assert!(addr_eq(ep, rp));
+
+            // must close it for safe drop
+            ec.do_close(false);
+        }
+
+        #[test]
+        fn do_clsoe() {
+            let mut mgr = ExchangeManager::new();
+            let session_mgr = MockSessionMgr::new();
+            let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+            let id = 1u16;
+
+            // to create a secure session
+            let mut table = SecureSessionTable::new();
+            let sh = get_session_handle(&mut table);
+
+            // delegate
+            let delegate = MockDelegate::new();
+
+            let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+            ec.set_response_expected(true);
+            assert!(ec.start_response_timer().is_ok());
+
+            assert_eq!(0, delegate.on_exchange_closing_calls);
+            assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+            ec.do_close(true);
+            assert_eq!(1, delegate.on_exchange_closing_calls);
+            assert_eq!(null_mut(), session_mgr.system_layer.ec);
+        }
+
+        #[test]
+        fn do_clsoe_twice() {
+            let mut mgr = ExchangeManager::new();
+            let session_mgr = MockSessionMgr::new();
+            let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+            let id = 1u16;
+
+            // to create a secure session
+            let mut table = SecureSessionTable::new();
+            let sh = get_session_handle(&mut table);
+
+            // delegate
+            let delegate = MockDelegate::new();
+
+            let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+            ec.set_response_expected(true);
+            assert!(ec.start_response_timer().is_ok());
+
+            assert_eq!(0, delegate.on_exchange_closing_calls);
+            assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+            ec.do_close(true);
+            assert_eq!(1, delegate.on_exchange_closing_calls);
+            assert_eq!(null_mut(), session_mgr.system_layer.ec);
+
+            ec.do_close(true);
+            assert_eq!(1, delegate.on_exchange_closing_calls);
+        }
+    } // end of mod tests
 } // end of mod exchange context
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        chip::{
-            chip_lib::{
-                core::{
-                    case_auth_tag::CATValues,
-                },
-            },
-            messaging::{
-                exchange_mgr::ExchangeManager,
-                reliable_message_protocol_config::ReliableMessageProtocolConfig,
-                exchange_message_dispatch::ExchangeMessageDispatchHandle,
-                exchange_context::{
-                    exchange_context::ExchangeContext,
-                },
-                exchange_delegate::ExchangeDelegate,
-            },
-            transport::{
-                raw::{
-                    message_header::PayloadHeader,
-                },
-                secure_session_table::SecureSessionTable,
-                secure_session,
-                session::{
-                    SessionHandle,
-                },
-            },
-            system::system_packet_buffer::PacketBufferHandle,
-        },
-
-        ChipErrorResult, chip_ok,
-        chip_core_error, chip_sdk_error,
-    };
-
-    use core::ptr::{NonNull, addr_of, addr_eq};
-
-    struct MockDelegate;
-
-    impl MockDelegate {
-        pub const fn new() -> Self {
-            Self
-        }
-    }
-
-    impl ExchangeDelegate for MockDelegate {
-        fn on_message_received(&mut self, _ec: &mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
-            chip_ok!()
-        }
-
-        fn on_response_timeout(&mut self, _ec: &mut ExchangeContext) {
-        }
-
-        fn on_exchange_closing(&mut self, _ec: &mut ExchangeContext) {
-        }
-
-        fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
-            ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
-        }
-    }
-
-    fn get_session_handle(table: &mut SecureSessionTable) -> SessionHandle {
-        let cat = CATValues::new();
-        let config = ReliableMessageProtocolConfig::new();
-        let ss = table.create_new_secure_session_for_test(secure_session::Type::Kcase, 0, 1, 2, cat, 1, 2, &config);
-        assert!(ss.is_some());
-        let ss = ss.unwrap();
-        let sh = SessionHandle::new_with(&ss);
-
-        sh
-    }
-
-    #[test]
-    fn new() {
-        let mgr = ExchangeManager::new();
-        let id = 1u16;
-
-        // to create a secure session
-        let mut table = SecureSessionTable::new();
-        let sh = get_session_handle(&mut table);
-
-        // delegate
-        let delegate = MockDelegate::new();
-
-        let ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
-
-        assert_eq!(id, ec.get_exchange_id());
-    }
-
-    #[test]
-    fn reliable_compare() {
-        let mgr = ExchangeManager::new();
-        let id = 1u16;
-
-        // to create a secure session
-        let mut table = SecureSessionTable::new();
-        let sh = get_session_handle(&mut table);
-
-        // delegate
-        let delegate = MockDelegate::new();
-
-        let ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
-
-        let ep = addr_of!(ec);
-        let rp: *const dyn crate::chip::messaging::reliable_message_context::ReliableMessageContext = addr_of!(ec) as _;
-
-        assert!(addr_eq(ep, rp));
-    }
-} // end of mod tests

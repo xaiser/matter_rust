@@ -54,6 +54,11 @@ use crate::{
             peer_message_counter::PeerMessageCounter,
             secure_message_codec,
         },
+        system::{
+            system_packet_buffer::PacketBufferHandle,
+            system_layer::Layer,
+            LayerImpl,
+        },
         ScopedNodeId, FabricIndex, FabricId, NodeId, GroupId,
     },
     ChipError,
@@ -78,8 +83,6 @@ use crate::{
     //verify_or_die,
 };
 
-use crate::chip::system::system_packet_buffer::PacketBufferHandle;
-use crate::chip::system::LayerImpl;
 
 use core::ptr::{self, NonNull};
 
@@ -221,7 +224,7 @@ pub trait SessionManagerTrait{
 
     fn for_each_matching_fabric_index_session_on_logical_fabric_const(&self, fabric_index: FabricIndex, f: &mut dyn FnMut(&SharedSession)) -> ChipErrorResult;
 
-    fn system_layer(&mut self) -> Option<&mut LayerImpl>;
+    fn system_layer(&mut self) -> Option<&mut dyn Layer>;
 }
 
 pub struct SessionManager<'d, Dep: Dependencies<'d> + 'd>
@@ -1958,9 +1961,9 @@ impl<'d, Dep: Dependencies<'d> + 'd> SessionManagerTrait for SessionManager<'d, 
         chip_ok!()
     }
 
-    fn system_layer(&mut self) -> Option<&mut LayerImpl> {
+    fn system_layer(&mut self) -> Option<&mut dyn Layer> {
         unsafe {
-            self.m_system_layer.as_mut().and_then(|mut p| Some(p.as_mut()))
+            self.m_system_layer.as_mut().and_then(|mut p| Some(p.as_mut() as _))
         }
     }
 }
@@ -2276,7 +2279,7 @@ mod tests {
 
         let system = system_layer();
         unsafe {
-            (*system).init();
+            let _ = (*system).init();
         }
         // init transport mgr
         let mut end_point_mgr = TestEndPointManager::default();
@@ -2442,7 +2445,7 @@ mod tests {
     fn init_no_table() {
         let system = system_layer();
         unsafe {
-            (*system).init();
+            let _ = (*system).init();
         }
         // init transport mgr
         let mut end_point_mgr = TestEndPointManager::default();
@@ -2472,7 +2475,7 @@ mod tests {
     fn init_no_storage() {
         let system = system_layer();
         unsafe {
-            (*system).init();
+            let _ = (*system).init();
         }
         // init transport mgr
         let mut end_point_mgr = TestEndPointManager::default();
