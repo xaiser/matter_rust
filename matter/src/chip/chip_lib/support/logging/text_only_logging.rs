@@ -5,7 +5,7 @@ use crate::chip::{
         },
     },
     messaging::{
-        exchange_context::exchange_context::ExchangeContext,
+        exchange_context::ExchangeContextTrait,
     },
     transport::{
         raw::{
@@ -47,7 +47,7 @@ pub fn chip_log_value_exchange_id_from_received_header(payload_header: &PayloadH
     chip_log_value_exchange_id(payload_header.get_exchange_id(), payload_header.is_initiator())
 }
 
-pub fn chip_log_value_exchange(ec: &ExchangeContext) -> DefaultString<EXCHANGED_ID_MAX_LENGTH>{
+pub fn chip_log_value_exchange<'a, 'b>(ec: &impl ExchangeContextTrait<'a, 'b>) -> DefaultString<EXCHANGED_ID_MAX_LENGTH>{
     chip_log_value_exchange_id(ec.get_exchange_id(), ec.is_initiator())
 }
 

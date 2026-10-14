@@ -1,3 +1,37 @@
+use crate::{
+    chip::{
+        system::{
+            system_packet_buffer::PacketBufferHandle,
+            system_layer::TimerCallbackContext,
+            system_clock::{
+                Timeout,
+            },
+        },
+        protocols::{
+            self, protocols::MessageTypeTrait,
+        },
+        messaging::{
+            exchange_mgr::ExchangeManager,
+            exchange_delegate::ExchangeDelegate,
+            exchange_message_dispatch::{
+                ExchangeMessageDispatchHandle,
+                ExchangeMessageDispatch,
+            },
+            reliable_message_mgr::SharedReliableMessageMgr,
+            reliable_message_context::{ReliableMessageContext, BaseReliableMessageContext, MessageFlags as Flags},
+            flags::SendMessageFlags as SendFlags,
+        },
+        transport::{
+            session::{
+                SessionHandle,
+            },
+        },
+    },
+    ChipErrorResult,
+};
+
+use core::ptr::NonNull;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum AccessError {
     Invalid,
@@ -7,6 +41,60 @@ pub enum AccessError {
 pub trait Access {
     fn with<R>(&self, f: impl Fn(&exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
     fn with_mut<R>(&mut self, f: impl Fn(&mut exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
+}
+
+pub trait ExchangeContextTrait<'a, 'b> {
+    fn is_encryption_required(&self) -> bool;
+
+    fn is_group_exchange_context(&self) -> bool;
+
+    fn get_exchange_id(&self) -> u16;
+
+    fn is_initiator(&self) -> bool;
+
+    fn is_response_expected(&self) -> bool;
+
+    fn use_suggested_response_timeout(&mut self, application_processing_timeout: Timeout);
+
+    fn set_response_timeout(&mut self, timeout: Timeout);
+
+    fn send_message_id_type(&mut self, protocol_id: protocols::Id, msg_type: u8, msg_payload: PacketBufferHandle,
+            send_flags: &SendFlags) -> ChipErrorResult;
+
+    fn send_message<MsgType: MessageTypeTrait>(&mut self, msg_type: MsgType, msg_payload: PacketBufferHandle,
+        send_flags: &SendFlags) -> ChipErrorResult 
+        where
+            u8: From<MsgType>
+    {
+        self.send_message_id_type(<MsgType as MessageTypeTrait>::PROTOCOL_ID, msg_type.into()
+                , msg_payload, send_flags)
+    }
+
+    fn will_send_message(&mut self);
+
+    fn get_delegaet(&self) -> Option<NonNull<dyn ExchangeDelegate + 'a>>;
+
+    fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>);
+
+    fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager<'b>>>;
+
+    fn get_session_handle(&self) -> SessionHandle;
+
+    fn has_session_handle(&self) -> bool;
+
+    fn is_send_expected(&self) -> bool;
+
+    fn has_received_at_least_one_message(&self) -> bool;
+
+    fn dump_to_log(&self);
+
+    fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_>;
+
+    fn notify_response_timeout(&mut self, close_if_needed: bool);
+
+    fn close(&mut self);
+
+    fn abort(&mut self);
 }
 
 pub mod shared {
@@ -28,7 +116,7 @@ pub mod shared {
     const ALLOACTOR_CAP: usize = 10;
     pub type Alloactor<'a, 'b> = DefaultAlloactor<RefCell<ExchangeContext<'a, 'b>>, ALLOACTOR_CAP>;
     pub type SharedExchangeContext<'a, 'b> = Rc<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
-    pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
+    //pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
 
     pub fn try_new_shared<'a, 'b>(ec: ExchangeContext<'a, 'b>, allocator: * mut Alloactor<'a, 'b>) -> Result<SharedExchangeContext<'a, 'b>, ()> 
         // a rustc bug trigger by generic_const_exprs, this is the workaround suggested by AI
@@ -39,6 +127,7 @@ pub mod shared {
         SharedExchangeContext::try_new_in(RefCell::new(ec), allocator)
     }
 
+    /*
     pub struct WeakExchangeContextHandle<'a, 'b> {
         ec: WeakSharedExchangeContext<'a, 'b>,
     }
@@ -68,6 +157,7 @@ pub mod shared {
             }
         }
     }
+    */
 
     pub struct ExchangeContextHandle<'a, 'b> {
         ec: SharedExchangeContext<'a, 'b>,
@@ -93,6 +183,7 @@ pub mod shared {
 }
 
 pub mod exchange_context {
+    use super::ExchangeContextTrait;
     use crate::{
         chip::{
             chip_lib::{
@@ -131,12 +222,17 @@ pub mod exchange_context {
                     Session, SessionAccess, AccessError, Variant, SessionBase,
                 },
             },
+            platform::assert_chip_stack_locked_by_current_thread,
         },
         ChipErrorResult, chip_ok,
         chip_error_invalid_argument,
         chip_error_internal,
+        chip_error_incorrect_state,
+        chip_error_missing_secure_session,
         chip_core_error, chip_sdk_error,
         verify_or_die,
+        verify_or_return_value,
+        verify_or_return_error,
         system_stats_increment,
         system_stats_decrement,
 
@@ -321,123 +417,6 @@ pub mod exchange_context {
             ec
         }
 
-        pub fn is_encryption_required(&self) -> bool {
-            self.m_dispatch.is_encryption_required()
-        }
-
-        pub fn is_group_exchange_context(&self) -> bool {
-            self.m_session.with(|s: &Session| s.is_group_session()).is_ok_and(|b| b)
-        }
-
-        pub fn get_exchange_id(&self) -> u16 {
-            self.m_exchange_id
-        }
-
-        pub fn is_initiator(&self) -> bool {
-            self.base().m_flags.intersects(Flags::KflagInitiator)
-        }
-
-        pub fn is_response_expected(&self) -> bool {
-            self.base().m_flags.intersects(Flags::KflagResponseExpected)
-        }
-
-        // Applies a suggested response timeout value based on the session type and the given upper layer processing time for
-        // the next message to the exchange. The exchange context must have a valid session when calling this function.
-        //
-        // This function is an equivalent of SetResponseTimeout(mSession->ComputeRoundTripTimeout(applicationProcessingTimeout))
-        pub fn use_suggested_response_timeout(&mut self, application_processing_timeout: Timeout) {
-            let _ = self.m_session.with(|s: &Session| 
-                s.compute_round_trip_timeout(application_processing_timeout, !self.has_received_at_least_one_message())).
-                and_then(|timeout| {
-                    self.set_response_timeout(timeout);
-                    chip_ok!()
-                });
-        }
-
-        // Set the response timeout for the exchange context, regardless of the underlying session type. Using
-        // UseSuggestedResponseTimeout to set a timeout based on the type of the session and the application processing time instead of
-        // using this function is recommended.
-        //
-        // If a timeout of 0 is provided, it implies no response is expected. Consequently, ExchangeDelegate::OnResponseTimeout will not
-        // be called.
-        //
-        pub fn set_response_timeout(&mut self, timeout: Timeout) {
-            self.m_response_timeout = timeout;
-        }
-
-        /*
-         *  Send a CHIP message on this exchange.
-         *
-         *  If SendMessage returns success and the message was not expecting a
-         *  response, the exchange will close itself before returning, unless the
-         *  message being sent is a standalone ack.  If SendMessage returns failure,
-         *  the caller is responsible for deciding what to do (e.g. closing the
-         *  exchange, trying to re-establish a secure session, etc).
-         */
-        pub fn send_message_id_type(&mut self, _protocol_id: protocols::Id, _msg_type: u8, _msg_payload: PacketBufferHandle,
-            _send_flags: &SendFlags) -> ChipErrorResult {
-
-            chip_ok!()
-        }
-
-        pub fn send_message<MsgType: MessageTypeTrait>(&mut self, msg_type: MsgType, msg_payload: PacketBufferHandle,
-            send_flags: &SendFlags) -> ChipErrorResult 
-            where
-                u8: From<MsgType>
-        {
-            self.send_message_id_type(<MsgType as MessageTypeTrait>::PROTOCOL_ID, msg_type.into()
-                    , msg_payload, send_flags)
-        }
-
-        pub fn will_send_message(&mut self) {
-            self.base_mut().m_flags.insert(Flags::KflagWillSendMessage);
-        }
-
-        pub fn get_delegaet(&self) -> Option<NonNull<dyn ExchangeDelegate + 'a>> {
-            self.m_delegate
-        }
-
-        pub fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) {
-            self.m_delegate = delegate;
-        }
-
-        pub fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager<'b>>> {
-            self.m_exchange_mgr
-        }
-
-        pub fn get_session_handle(&self) -> SessionHandle {
-            if let Some(session) = self.m_session.session_holder.get() {
-                session
-            } else {
-                panic!("cannot get session handle");
-            }
-        }
-
-        pub fn has_session_handle(&self) -> bool {
-            self.m_session.session_holder.is_some()
-        }
-
-        pub fn is_send_expected(&self) -> bool {
-            self.base().m_flags.intersects(Flags::KflagWillSendMessage)
-        }
-
-        #[inline]
-        pub fn has_received_at_least_one_message(&self) -> bool {
-            self.base().m_flags.intersects(Flags::KflagReceivedAtLeastOneMessage)
-        }
-
-        pub fn dump_to_log(&self) {
-            chip_log_error!(ExchangeManager, "ExchangeContext: {} delegate={}", chip_log_value_exchange_id(self.get_exchange_id(),
-            self.is_initiator()), chip_log_option_non_null(self.m_delegate));
-        }
-
-        pub fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_> {
-            self as _
-        }
-
-        pub fn notify_response_timeout(&mut self, _close_if_needed: bool) {
-        }
-
         #[inline]
         fn set_ignor_session_release(&mut self, should_ignore: bool) {
             self.base_mut().m_flags.set(Flags::KflagIgnoreSessionRelease, should_ignore);
@@ -540,6 +519,210 @@ pub mod exchange_context {
                     return;
                 }
             }
+        }
+
+        fn message_handle(&mut self) {
+            if self.base().m_flags.intersects(Flags::KflagClosed) || self.is_response_expected() || self.is_send_expected() {
+                return;
+            }
+
+            self.close();
+        }
+    }
+
+    impl<'a, 'b> ExchangeContextTrait<'a, 'b> for ExchangeContext<'a, 'b> {
+        fn is_encryption_required(&self) -> bool {
+            self.m_dispatch.is_encryption_required()
+        }
+
+        fn is_group_exchange_context(&self) -> bool {
+            self.m_session.with(|s: &Session| s.is_group_session()).is_ok_and(|b| b)
+        }
+
+        fn get_exchange_id(&self) -> u16 {
+            self.m_exchange_id
+        }
+
+        fn is_initiator(&self) -> bool {
+            self.base().m_flags.intersects(Flags::KflagInitiator)
+        }
+
+        fn is_response_expected(&self) -> bool {
+            self.base().m_flags.intersects(Flags::KflagResponseExpected)
+        }
+
+        // Applies a suggested response timeout value based on the session type and the given upper layer processing time for
+        // the next message to the exchange. The exchange context must have a valid session when calling this function.
+        //
+        // This function is an equivalent of SetResponseTimeout(mSession->ComputeRoundTripTimeout(applicationProcessingTimeout))
+        fn use_suggested_response_timeout(&mut self, application_processing_timeout: Timeout) {
+            let _ = self.m_session.with(|s: &Session| 
+                s.compute_round_trip_timeout(application_processing_timeout, !self.has_received_at_least_one_message())).
+                and_then(|timeout| {
+                    self.set_response_timeout(timeout);
+                    chip_ok!()
+                });
+        }
+
+        // Set the response timeout for the exchange context, regardless of the underlying session type. Using
+        // UseSuggestedResponseTimeout to set a timeout based on the type of the session and the application processing time instead of
+        // using this function is recommended.
+        //
+        // If a timeout of 0 is provided, it implies no response is expected. Consequently, ExchangeDelegate::OnResponseTimeout will not
+        // be called.
+        //
+        fn set_response_timeout(&mut self, timeout: Timeout) {
+            self.m_response_timeout = timeout;
+        }
+
+        /*
+         *  Send a CHIP message on this exchange.
+         *
+         *  If SendMessage returns success and the message was not expecting a
+         *  response, the exchange will close itself before returning, unless the
+         *  message being sent is a standalone ack.  If SendMessage returns failure,
+         *  the caller is responsible for deciding what to do (e.g. closing the
+         *  exchange, trying to re-establish a secure session, etc).
+         */
+        fn send_message_id_type(&mut self, protocol_id: protocols::Id, msg_type: u8, msg_payload: PacketBufferHandle,
+            send_flags: &SendFlags) -> ChipErrorResult
+        {
+            // This is the first point all outgoing messages funnel through.  Ensure
+            // that our message sends are all synchronized correctly.
+            assert_chip_stack_locked_by_current_thread();
+
+            let is_standalone_ack = 
+                (protocol_id == protocols::secure_channel::ID) && msg_type == u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+            let exchange_mgr = {
+                if let Some(mut mgr_ptr) = self.m_exchange_mgr {
+                    unsafe { mgr_ptr.as_mut() }
+                } else {
+                    return Err(chip_error_internal!());
+                }
+            };
+
+            verify_or_return_error!(self.m_session.session_holder.is_some(), Err(chip_error_internal!()));
+
+            // should increase ref count
+            
+            // If session requires MRP, NoAutoRequestAck send flag is not specified and is not a group exchange context, request reliable
+            // transmission.
+            let reliable_transmission_requested = 
+                self.m_session.with(|s: &Session| s.allows_mrp()).is_ok_and(|b| b) && !send_flags.intersects(SendFlags::KnoAutoRequestAck) && !self.is_group_exchange_context();
+
+            let current_message_expect_response = {
+                // If a response message is expected...
+                if send_flags.intersects(SendFlags::KexpectResponse) && !self.is_group_exchange_context() {
+                    // Only one 'response expected' message can be outstanding at a time.
+                    if self.is_response_expected() {
+                        // TODO: add a test for this case.
+                        return Err(chip_error_incorrect_state!());
+                    }
+
+                    self.set_response_expected(true);
+
+                    // Arm the response timer if a timeout has been specified.
+                    if self.m_response_timeout > Timeout::ZERO {
+                        self.start_response_timer().inspect_err(|_| self.set_response_expected(false) )?;
+
+                        true
+                    } else { false }
+                } else { false }
+            };
+
+            {
+                // ExchangeContext for group are supposed to always be Initiator
+                if self.is_group_exchange_context() && !self.is_initiator() {
+                    return Err(chip_error_internal!());
+                }
+
+                //
+                // It is possible that we might have evicted a session as a side-effect of processing an inbound message on this exchange.
+                // We cannot proceed any further sending a message since we don't have an attached session, so let's error out.
+                //
+                // This should not happen to well-behaved logic attempting to sending messages on exchanges, so let's print out a warning
+                // to ensure it alerts someone to fixing their logic...
+                //
+                // Why we need to check this again?
+                if !self.m_session.session_holder.is_some() {
+                    chip_log_error!(ExchangeManager, "WARNING: We shouldn't be sending a message on an exchange that has no attached session...");
+                    return Err(chip_error_missing_secure_session!());
+                }
+
+                let session = self.get_session_handle();
+                //match self.m_dispatch.send_message(
+            }
+
+            chip_ok!()
+        }
+
+        fn will_send_message(&mut self) {
+            self.base_mut().m_flags.insert(Flags::KflagWillSendMessage);
+        }
+
+        fn get_delegaet(&self) -> Option<NonNull<dyn ExchangeDelegate + 'a>> {
+            self.m_delegate
+        }
+
+        fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) {
+            self.m_delegate = delegate;
+        }
+
+        fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager<'b>>> {
+            self.m_exchange_mgr
+        }
+
+        fn get_session_handle(&self) -> SessionHandle {
+            if let Some(session) = self.m_session.session_holder.get() {
+                session
+            } else {
+                panic!("cannot get session handle");
+            }
+        }
+
+        fn has_session_handle(&self) -> bool {
+            self.m_session.session_holder.is_some()
+        }
+
+        fn is_send_expected(&self) -> bool {
+            self.base().m_flags.intersects(Flags::KflagWillSendMessage)
+        }
+
+        fn has_received_at_least_one_message(&self) -> bool {
+            self.base().m_flags.intersects(Flags::KflagReceivedAtLeastOneMessage)
+        }
+
+        fn dump_to_log(&self) {
+            chip_log_error!(ExchangeManager, "ExchangeContext: {} delegate={}", chip_log_value_exchange_id(self.get_exchange_id(),
+            self.is_initiator()), chip_log_option_non_null(self.m_delegate));
+        }
+
+        fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_> {
+            self as _
+        }
+
+        fn notify_response_timeout(&mut self, _close_if_needed: bool) {
+        }
+
+        fn close(&mut self) {
+            #[cfg(feature="chip_exchange_context_detail_logging")]
+            {
+                chip_log_detail!(ExchangeManager, "ec - close[{}]", chip_log_value_exchange(self));
+            }
+
+            self.do_close(false);
+            // should release()
+        }
+
+        fn abort(&mut self) {
+            #[cfg(feature="chip_exchange_context_detail_logging")]
+            {
+                chip_log_detail!(ExchangeManager, "ec - abort[{}]", chip_log_value_exchange(self));
+            }
+
+            self.do_close(true);
+            // should release()
         }
     }
 
