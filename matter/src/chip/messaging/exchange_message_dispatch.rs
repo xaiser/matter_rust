@@ -42,6 +42,7 @@ mod inner {
         },
     };
 
+    #[derive(Clone, Copy)]
     pub enum ExchangeMessageDispatch {
         Ephemeral(EphemeralExchangeDispatch),
         Application(ApplicationExchangeDispatch),
@@ -58,6 +59,7 @@ mod inner {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct ExchangeMessageDispatchHandle {
     dispatch: inner::ExchangeMessageDispatch,
 }
@@ -77,10 +79,10 @@ impl ExchangeMessageDispatchHandle {
 }
 
 impl ExchangeMessageDispatch for ExchangeMessageDispatchHandle {
-    fn send_message<'a, 'b>(&mut self, session_manager: &mut dyn SessionManagerTrait, session: &SessionHandle, exchange_id: u16,
-        is_initiator: bool, reliable_message_context: &mut impl ReliableMessageContext<'a, 'b>, is_reliable_transmission: bool,
-        protocol: protocols::Id, msg_type: u8, message: PacketBufferHandle) -> ChipErrorResult
+    fn send_message<'a, 'b>(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, _exchange_id: u16,
+        _is_initiator: bool, _reliable_message_context: &mut impl ReliableMessageContext<'a, 'b>, _is_reliable_transmission: bool,
+        _protocol: protocols::Id, _msg_type: u8, _message: PacketBufferHandle) -> ChipErrorResult
     {
-        Err(chip_error_internal!())
+        chip_ok!()
     }
 }

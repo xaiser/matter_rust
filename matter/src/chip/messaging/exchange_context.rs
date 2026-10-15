@@ -221,6 +221,7 @@ pub mod exchange_context {
                     SessionHolder, session_holder_delegate, SessionHandle,
                     Session, SessionAccess, AccessError, Variant, SessionBase,
                 },
+                secure_session::SecureSession,
             },
             platform::assert_chip_stack_locked_by_current_thread,
         },
@@ -247,6 +248,8 @@ pub mod exchange_context {
     use core::str::FromStr;
     use core::ptr::{self, NonNull};
     use core::cell::{Ref, RefMut};
+
+    use bitflags::Flags as BitFlags;
 
     fn default_on_message_received(ec: &ExchangeContext, protocol_id: protocols::Id, msg_type: u8, message_counter: u32,
         _payload: PacketBufferHandle)
@@ -521,7 +524,7 @@ pub mod exchange_context {
             }
         }
 
-        fn message_handle(&mut self) {
+        fn message_handled(&mut self) {
             if self.base().m_flags.intersects(Flags::KflagClosed) || self.is_response_expected() || self.is_send_expected() {
                 return;
             }
@@ -650,8 +653,43 @@ pub mod exchange_context {
                     return Err(chip_error_missing_secure_session!());
                 }
 
-                let session = self.get_session_handle();
-                //match self.m_dispatch.send_message(
+                let mut session = self.get_session_handle();
+                let session_mgr = exchange_mgr.get_session_manager().ok_or(chip_error_internal!())?;
+                // a WA to avoid calling mutable self after imutable self.
+                let mut dispatch = self.m_dispatch.clone();
+
+                match dispatch.send_message(session_mgr, &session, self.m_exchange_id, self.is_initiator(),
+                    self, reliable_transmission_requested, protocol_id, msg_type, msg_payload)
+                {
+                    Ok(()) => {
+                        // Standalone acks are not application-level message sends.
+                        if !is_standalone_ack {
+                            //
+                            // Once we've sent the message successfully, we can clear out the WillSendMessage flag.
+                            //
+                            self.base_mut().m_flags.remove(Flags::KflagWillSendMessage);
+                            self.message_handled();
+                        }
+                    },
+                    Err(e) => {
+                        // We should only cancel the response timer if the ExchangeContext fails to send the message that expects a
+                        // response.
+                        if current_message_expect_response {
+                            self.cancel_response_timer();
+                            self.set_response_expected(false);
+                        }
+                        // If we can't even send a message (send failed with a non-transient
+                        // error), mark the session as defunct, just like we would if we
+                        // thought we sent the message and never got a response.
+                        let _ = session.with_mut(|s: &mut SecureSession| {
+                            if s.is_case_session() {
+                                s.mark_as_defunct();
+                            }
+                        });
+
+                        return Err(e);
+                    },
+                }
             }
 
             chip_ok!()
