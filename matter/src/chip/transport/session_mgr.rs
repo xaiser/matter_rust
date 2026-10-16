@@ -2137,18 +2137,6 @@ mod tests {
         }
     }
 
-    /*
-    impl TestSessionMessageDelegate {
-        pub const fn new() -> Self {
-            TestSessionMessageDelegate(false)
-        }
-
-        pub fn reset(&mut self) {
-            self.0 = false;
-        }
-    }
-    */
-
     impl SessionMessageDelegate for TestSessionMessageDelegate {
         fn on_message_received(&mut self, _packet_header: &PacketHeader, _payload_header: &PayloadHeader,
             _session: &SessionHandle, is_duplicate: DuplicateMessage, _msg_buf: PacketBufferHandle) {
@@ -2215,40 +2203,10 @@ mod tests {
         type MessageCounterManager = TestMessageCounterMgr;
     }
 
-    /*
-    type TestSessionManager<'a> = SessionManager<'a, TestPersistentStorage, OK, OCS, TestSKS,
-       TestSessionMessageDelegate, TestTransportMgr<'a>, TestMessageCounterMgr>;
-    */
     type TestSessionManager<'a> = SessionManager<'a, TestDependencies>;
 
     type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
-    /*
-    struct TestGroupListener {
-        pub last_add: Option<(FabricIndex, GroupInfo)>,
-        pub last_remove: Option<(FabricIndex, GroupInfo)>,
-    }
-
-    impl TestGroupListener {
-        const fn new() -> Self {
-            Self {
-                last_add: None,
-                last_remove: None,
-            }
-        }
-    }
-
-    impl GroupListener for TestGroupListener {
-        fn on_group_added(&mut self, fabric_index: FabricIndex, new_group: &GroupInfo) {
-            self.last_add = Some((fabric_index, new_group.clone()));
-        }
-        fn on_group_removed(&mut self, fabric_index: FabricIndex, old_group: &GroupInfo) {
-            self.last_remove = Some((fabric_index, old_group.clone()));
-        }
-    }
-    */
-
-    //type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, RawKeySessionKeystore, TestGroupListener>;
     type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, TestSKS>;
 
     #[allow(dead_code)]
