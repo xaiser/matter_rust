@@ -838,6 +838,9 @@ pub mod exchange_context {
                     session::{
                         SessionHandle, SharedSession,
                     },
+                    group_session::{
+                        GroupSessionTable,
+                    },
                 },
                 system::{
                     system_packet_buffer::PacketBufferHandle,
@@ -1103,7 +1106,6 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_successfully() {
-                //let rs = SessionMgrTest::setup().unwrap();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1116,6 +1118,7 @@ pub mod exchange_context {
                 // to create a secure session
                 let mut table = SecureSessionTable::new();
                 let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
@@ -1128,6 +1131,309 @@ pub mod exchange_context {
                 let mut dispatch = TestDispatch::new();
 
                 assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                // ensure we start the timer
+                assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn send_message_no_ex_mgr() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let flags = SendFlags::KexpectResponse;
+
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(None, id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn send_message_no_session() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+                // release the session
+                ec.m_session.session_holder.release();
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn send_message_not_udp_successfully() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(!dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn send_message_auto_request_ack_successfully() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KnoAutoRequestAck;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(!dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn send_message_already_set_response_expected() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                // set response expected first
+                ec.set_response_expected(true);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn send_message_group_but_not_initiator() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut group_session_table = GroupSessionTable::new();
+                let sh = group_session_table.alloc_outgoing_group_session(1, 1);
+                assert!(sh.is_ok());
+                let sh = sh.unwrap();
+
+                // not initiator
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, false, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+                // remove initiator flag
+                ec.base_mut().m_flags.remove(Flags::KflagInitiator);
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn send_message_not_standalone_ack_successfully() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                // setup will_send first to verify if it gets removed after send
+                ec.will_send_message();
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                // not a standalone ack
+                let msg_type = u8::from(protocols::secure_channel::MsgType::PasePake1);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(!ec.base().m_flags.intersects(Flags::KflagWillSendMessage));
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn send_message_not_expected_response_successfully() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                // ensure we do NOT start the timer
+                assert_ne!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn send_message_failed_and_cancel_timer_and_defunct_session() {
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                // Must set to UDP to ensure the reliabe retransition is required
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+                dispatch.is_ok = false;
+
+                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                // ensure we do NOT start the timer
+                assert_ne!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+                // ensure the session is defunct
+                assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
                 ec.do_close(false);
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
