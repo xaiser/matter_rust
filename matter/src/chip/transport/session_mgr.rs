@@ -2026,7 +2026,7 @@ pub mod message_packet_buffer {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::{
         chip::{
@@ -2103,19 +2103,26 @@ mod tests {
 
     use core::ptr;
 
-    const TEST_GROUP_ID: GroupId = 1;
-    const TEST_KEYSET_ID: KeysetId = 1;
-    const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
-    const TEST_SESSION_ID: u16 = 1;
-    const TEST_NODE_ID: NodeId = 1;
-    const TEST_PEER_NODE_ID: NodeId = TEST_NODE_ID + 1;
-    //const TEST_SCOPED_NODE_ID: ScopedNodeId = ScopedNodeId::default_with_ids(TEST_NODE_ID, TEST_FABRIC_INDEX);
+    pub mod prelude {
+        pub use super::{
+            TEST_GROUP_ID, TEST_KEYSET_ID, TEST_FABRIC_INDEX, TEST_SESSION_ID, TEST_NODE_ID, TEST_PEER_NODE_ID,
+            OCS, OK, TestSKS, TestSessionMessageDelegate, SessionMgrOp, TestTransportMgr, TestMessageCounterMgr,
+            TestDependencies, TestSessionManager, TestFabricTable, TestGroupDataProvider, Resource, setup,
+        };
+    }
 
-    type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
-    type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
-    type TestSKS = TestKeySessionKeystore;
+    pub const TEST_GROUP_ID: GroupId = 1;
+    pub const TEST_KEYSET_ID: KeysetId = 1;
+    pub const TEST_FABRIC_INDEX: FabricIndex = KMIN_VALID_FABRIC_INDEX;
+    pub const TEST_SESSION_ID: u16 = 1;
+    pub const TEST_NODE_ID: NodeId = 1;
+    pub const TEST_PEER_NODE_ID: NodeId = TEST_NODE_ID + 1;
 
-    struct TestSessionMessageDelegate{
+    pub type OCS = PersistentStorageOpCertStore<TestPersistentStorage>;
+    pub type OK = PersistentStorageOperationalKeystore<TestPersistentStorage>;
+    pub type TestSKS = TestKeySessionKeystore;
+
+    pub struct TestSessionMessageDelegate{
         is_run: bool,
         is_duplicate: DuplicateMessage,
     }
@@ -2145,7 +2152,7 @@ mod tests {
         }
     }
 
-    struct SessionMgrOp<'a> {
+    pub struct SessionMgrOp<'a> {
         session_mgr: * mut TestSessionManager<'a>,
     }
 
@@ -2163,14 +2170,14 @@ mod tests {
         }
     }
 
-    type TestTransportMgr<'a> = TransportMgr<
+    pub type TestTransportMgr<'a> = TransportMgr<
         (
             Test<TransportMgrReceiver<SessionMgrOp<'a>>>,
         ),
         SessionMgrOp<'a>,
     >;
 
-    struct TestMessageCounterMgr;
+    pub struct TestMessageCounterMgr;
 
     impl TestMessageCounterMgr {
         pub const fn new() -> Self {
@@ -2191,7 +2198,7 @@ mod tests {
         }
     }
 
-    struct TestDependencies;
+    pub struct TestDependencies;
 
     impl<'d> Dependencies<'d> for TestDependencies {
         type PersistentStorage = TestPersistentStorage;
@@ -2203,14 +2210,14 @@ mod tests {
         type MessageCounterManager = TestMessageCounterMgr;
     }
 
-    type TestSessionManager<'a> = SessionManager<'a, TestDependencies>;
+    pub type TestSessionManager<'a> = SessionManager<'a, TestDependencies>;
 
-    type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
+    pub type TestFabricTable<'d> = FabricTable<'d, TestPersistentStorage, OK, OCS>;
 
-    type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, TestSKS>;
+    pub type TestGroupDataProvider = GroupDataProviderImpl<TestPersistentStorage, TestSKS>;
 
     #[allow(dead_code)]
-    struct Resource<'a> {
+    pub struct Resource<'a> {
         system: *mut crate::chip::system::LayerImpl,
         end_point_mgr: TestEndPointManager,
         transport_mgr: TestTransportMgr<'a>,
@@ -2226,7 +2233,7 @@ mod tests {
         unauthenticated_session_table: UnauthenticatedSessionTable,
     }
 
-    fn setup<'a>() -> Result<Resource<'a> , ChipError>
+    pub fn setup<'a>() -> Result<Resource<'a> , ChipError>
     {
         // reset system packet buffer pool
         reset_pool();

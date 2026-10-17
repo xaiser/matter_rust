@@ -824,12 +824,16 @@ pub mod exchange_context {
                     },
                     exchange_delegate::ExchangeDelegate,
                 },
+                inet::{
+                    ip_address::IPAddress,
+                },
                 transport::{
                     raw::{
                         message_header::PayloadHeader,
+                        peer_address::{self, PeerAddress},
                     },
                     secure_session_table::SecureSessionTable,
-                    secure_session,
+                    secure_session::{self, SecureSession},
                     session_mgr::SessionManagerTrait,
                     session::{
                         SessionHandle, SharedSession,
@@ -961,6 +965,44 @@ pub mod exchange_context {
                 sh
             }
 
+            pub struct TestDispatch {
+                pub len: usize,
+                pub exchange_id: u16,
+                pub first: Option<u8>,
+                pub is_ok: bool,
+                pub is_reliable_trans_requested: bool,
+            }
+
+            impl TestDispatch {
+                pub const fn new() -> Self {
+                    Self {
+                        len: 0,
+                        exchange_id: 0,
+                        first: None,
+                        is_ok: true,
+                        is_reliable_trans_requested: false,
+                    }
+                }
+            }
+
+            impl ExchangeMessageDispatch for TestDispatch {
+                fn send_message<'a, 'b>(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, exchange_id: u16,
+                    _is_initiator: bool, _eliable_message_context: &mut impl ReliableMessageContext<'a, 'b>, is_reliable_transmission: bool,
+                    _rotocol: protocols::Id, _sg_type: u8, message: PacketBufferHandle) -> ChipErrorResult
+                {
+                    self.len = message.data_len() as _;
+                    self.exchange_id = exchange_id;
+                    self.first = message.as_slice().get(0).copied();
+                    self.is_reliable_trans_requested = is_reliable_transmission;
+
+                    if self.is_ok {
+                        return chip_ok!();
+                    }
+
+                    Err(chip_error_internal!())
+                }
+            }
+
             #[test]
             fn new() {
                 let mgr = ExchangeManager::new();
@@ -1057,6 +1099,41 @@ pub mod exchange_context {
 
                 ec.do_close(true);
                 assert_eq!(1, delegate.on_exchange_closing_calls);
+            }
+
+            #[test]
+            fn send_message_successfully() {
+                //let rs = SessionMgrTest::setup().unwrap();
+                let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
+                let expected_payload_len = payload.data_len();
+                let flags = SendFlags::KexpectResponse;
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+                let id = 1u16;
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let mut sh = get_session_handle(&mut table);
+                let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
+                assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
+
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                ec.set_response_timeout(Timeout::from_secs(1));
+
+                let protocol_id = protocols::secure_channel::ID;
+                let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
+
+                let mut dispatch = TestDispatch::new();
+
+                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                ec.do_close(false);
+
+                assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
+                assert_eq!(id, dispatch.exchange_id);
+                assert_eq!(Some(1), dispatch.first);
+                assert!(dispatch.is_reliable_trans_requested);
             }
         } // end of with_mock_session_mgr
     } // end of mod tests
