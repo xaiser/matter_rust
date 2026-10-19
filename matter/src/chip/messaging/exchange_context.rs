@@ -22,6 +22,9 @@ use crate::{
             flags::SendMessageFlags as SendFlags,
         },
         transport::{
+            raw::{
+                message_header::{PacketHeader, PayloadHeader},
+            },
             session::{
                 SessionHandle,
             },
@@ -95,6 +98,8 @@ pub trait ExchangeContextTrait<'a, 'b> {
     fn close(&mut self);
 
     fn abort(&mut self);
+
+    fn match_exchange(&self, session: &SessionHandle, packet_header: &PacketHeader, payload_header: &PayloadHeader) -> bool;
 }
 
 pub mod shared {
@@ -180,6 +185,8 @@ pub mod shared {
             }
         }
     }
+
+    // TODO: Maybe impelment SessionDelegate on shared
 }
 
 pub mod exchange_context {
@@ -217,6 +224,9 @@ pub mod exchange_context {
                 flags::SendMessageFlags as SendFlags,
             },
             transport::{
+                raw::{
+                    message_header::{self, PacketHeader, PayloadHeader},
+                },
                 session::{
                     SessionHolder, session_holder_delegate, SessionHandle,
                     Session, SessionAccess, AccessError, Variant, SessionBase,
@@ -281,6 +291,14 @@ pub mod exchange_context {
                                     )
                                 ),
             }
+        }
+
+        pub fn contains(&self, session: &SessionHandle) -> bool {
+            self.session_holder.contains(session)
+        }
+
+        pub fn is_some(&self) -> bool {
+            self.session_holder.is_some()
         }
     }
 
@@ -637,6 +655,45 @@ pub mod exchange_context {
 
             chip_ok!()
         }
+
+        fn notify_response_timeout(&mut self, close_if_needed: bool) {
+            // Grab the value of WaitingForResponseOrAck() before we mess with our state.
+            let got_mrp_ack = !self.waiting_for_response_or_ack();
+
+            self.set_response_expected(false);
+
+            // Hold a ref to ourselves so we can make calls into our delegate that might
+            // decrease our refcount (e.g. by expiring out session) without worrying
+            // about use-after-free.
+            //TODO: ensure we have a copy here
+            
+            // mSession might be null if this timeout is due to the session being
+            // evicted.
+            if self.m_session.is_some() {
+                // If we timed out _after_ getting an ack for the message, that means
+                // the session is probably fine (since our message and the ack got
+                // through), so don't mark the session defunct if we got an MRP ack.
+                if !got_mrp_ack {
+                    if self.m_session.with(|s: &SecureSession| s.is_case_session()).is_ok_and(|b| b) {
+                        if self.m_session.with_mut(|s: &mut SecureSession| s.mark_as_defunct()).is_err() {
+                            chip_log_error!(ExchangeManager, "cannot mark session defunct");
+                        }
+                    }
+                    let mut session = self.get_session_handle();
+                    session.notify_session_hang();
+                }
+            }
+
+            if let Some(mut delegate_ptr) = self.m_delegate {
+                unsafe {
+                    delegate_ptr.as_mut().on_response_timeout(self);
+                }
+            }
+
+            if close_if_needed {
+                self.message_handled();
+            }
+        }
     }
 
     impl<'a, 'b> ExchangeContextTrait<'a, 'b> for ExchangeContext<'a, 'b> {
@@ -768,7 +825,28 @@ pub mod exchange_context {
             self.do_close(true);
             // should release()
         }
-    }
+
+        fn match_exchange(&self, session: &SessionHandle, packet_header: &PacketHeader, payload_header: &PayloadHeader) -> bool {
+            // A given message is part of a particular exchange if...
+            return
+
+                // The exchange identifier of the message matches the exchange identifier of the context.
+                (self.m_exchange_id == payload_header.get_exchange_id())
+
+                // AND The Session associated with the incoming message matches the Session associated with the exchange.
+                && (self.m_session.contains(session))
+
+                // TODO: This check should be already implied by the equality of session check,
+                // It should be removed after we have implemented the temporary node id for PASE and CASE sessions
+                && (self.is_encryption_required() == packet_header.is_encrypted())
+
+                // AND The message was sent by an initiator and the exchange context is a responder (IsInitiator==false)
+                //    OR The message was sent by a responder and the exchange context is an initiator (IsInitiator==true) (for the broadcast
+                //    case, the initiator is ill defined)
+
+                && (payload_header.is_initiator() != self.is_initiator());
+        }
+    } // end of ExchangeContextTrait
 
     impl<'a, 'b> ReliableMessageContext<'a, 'b> for ExchangeContext<'a, 'b> {
         fn base(&self) -> &BaseReliableMessageContext {
@@ -930,12 +1008,14 @@ pub mod exchange_context {
 
             struct MockDelegate {
                 pub on_exchange_closing_calls: usize,
+                pub on_response_timeout_calls: usize,
             }
 
             impl MockDelegate {
                 pub const fn new() -> Self {
                     Self {
                         on_exchange_closing_calls: 0,
+                        on_response_timeout_calls: 0,
                     }
                 }
             }
@@ -946,6 +1026,7 @@ pub mod exchange_context {
                 }
 
                 fn on_response_timeout(&mut self, _ec: &mut ExchangeContext) {
+                    self.on_response_timeout_calls += 1;
                 }
 
                 fn on_exchange_closing(&mut self, _ec: &mut ExchangeContext) {
@@ -1440,6 +1521,169 @@ pub mod exchange_context {
                 assert_eq!(id, dispatch.exchange_id);
                 assert_eq!(Some(1), dispatch.first);
                 assert!(dispatch.is_reliable_trans_requested);
+            }
+
+            #[test]
+            fn matched_exchange() {
+                let id = 1u16;
+                let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
+                
+                // to ensure is_encrypted() == true
+                let packet_header = PacketHeader::default().set_session_id(message_header::KMSG_UNICAST_SESSION_ID_UNSECURED + 1);
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                assert!(ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn not_matched_exchange_id() {
+                let id = 1u16;
+                let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id + 1);
+                
+                // to ensure is_encrypted() == true
+                let packet_header = PacketHeader::default().set_session_id(message_header::KMSG_UNICAST_SESSION_ID_UNSECURED + 1);
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+
+                ec.do_close(false);
+
+            }
+
+            #[test]
+            fn not_matched_exchange_session() {
+                let id = 1u16;
+                let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
+                
+                // to ensure is_encrypted() == true
+                let packet_header = PacketHeader::default().set_session_id(message_header::KMSG_UNICAST_SESSION_ID_UNSECURED + 1);
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = get_session_handle(&mut table);
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn not_matched_exchange_encryption() {
+                let id = 1u16;
+                let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
+                
+                // to ensure is_encrypted() == false
+                let packet_header = PacketHeader::default().set_session_id(message_header::KMSG_UNICAST_SESSION_ID_UNSECURED).
+                    set_session_type(message_header::header::SessionType::KUnicastSession);
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn not_matched_exchange_initiator() {
+                let id = 1u16;
+                let payload_header = PayloadHeader::default().set_initiator(true).set_exchange_id(id);
+                
+                // to ensure is_encrypted() == true
+                let packet_header = PacketHeader::default().set_session_id(message_header::KMSG_UNICAST_SESSION_ID_UNSECURED + 1);
+
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+
+                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+
+                ec.do_close(false);
+            }
+
+            #[test]
+            fn notify_response_timeout() {
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+
+                // delegate
+                let delegate = MockDelegate::new();
+
+                // this imply dispatch::is_encrypted = true
+                let mut ec = ExchangeContext::new_with(
+                    Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+
+                // to ensure calling on session defunct
+                ec.set_waiting_for_response_or_ack(true);
+
+                assert_eq!(0, delegate.on_response_timeout_calls);
+                ec.notify_response_timeout(false);
+                /*
+                assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+                assert_eq!(1, delegate.on_response_timeout_calls);
+                */
+
+                ec.do_close(false);
             }
         } // end of with_mock_session_mgr
     } // end of mod tests

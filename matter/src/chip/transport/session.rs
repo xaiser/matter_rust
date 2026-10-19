@@ -144,7 +144,7 @@ mod session_handle {
             */
         }
 
-        fn notify_session_hang(&mut self) {
+        pub fn notify_session_hang(&mut self) {
             let _copy = self.clone();
 
             if let Ok(mut session) = self.m_session.try_borrow_mut() {
@@ -335,7 +335,7 @@ mod session_holder {
             }
         }
 
-        pub fn contain(&self, session: &SessionHandle) -> bool {
+        pub fn contains(&self, session: &SessionHandle) -> bool {
             if let Ok(m_session) = self.m_session.try_borrow() {
                 m_session.as_ref().is_some_and(|s| SessionHandle::eq(s, session))
             } else {
@@ -607,8 +607,8 @@ mod session_holder {
 
             unsafe {
                 // ensure there is only one holders
-                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some_and(|h| h.contain(&session_copy_2))));
-                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().back().get().is_some_and(|h| h.contain(&session_copy_2))));
+                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().front().get().is_some_and(|h| h.contains(&session_copy_2))));
+                assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().back().get().is_some_and(|h| h.contains(&session_copy_2))));
                 core::ptr::drop_in_place(holder);
                 // ensure the holder list is empty
                 assert!(session_copy.try_mut().is_ok_and(|mut s| s.holders().front().get().is_none()));
