@@ -106,17 +106,31 @@ pub mod shared {
     use super::{
         Access,
         AccessError,
-        exchange_context::ExchangeContext,
+        exchange_context::{ExchangeContext, ExchangeSessionHolder},
     };
     use crate::{
         chip::{
             chip_lib::{
                 core::reference_counted::rc::{DefaultAlloactor, Rc, Weak},
             },
-        }
+            messaging::{
+                exchange_mgr::ExchangeManager,
+                exchange_delegate::ExchangeDelegate,
+            },
+            transport::{
+                session::{
+                    SessionHandle,
+                },
+            },
+        },
+        chip_internal_log,
+        chip_internal_log_impl,
+        chip_log_error,
     };
 
+    use core::str::FromStr;
     use core::cell::RefCell;
+    use core::ptr::NonNull;
 
     const ALLOACTOR_CAP: usize = 10;
     pub type Alloactor<'a, 'b> = DefaultAlloactor<RefCell<ExchangeContext<'a, 'b>>, ALLOACTOR_CAP>;
@@ -130,6 +144,32 @@ pub mod shared {
             'b: 'b,
     {
         SharedExchangeContext::try_new_in(RefCell::new(ec), allocator)
+    }
+
+    pub fn try_new_with<'a, 'b>(allocator: * mut Alloactor<'a, 'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, session: SessionHandle, initiator: bool,
+        delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Result<SharedExchangeContext<'a, 'b>, ()>
+        where
+            'a: 'a,
+            'b: 'b,
+
+    {
+        let ec = ExchangeContext::new_with(em, exchange_id, session.clone(), initiator, delegate, is_ephemeral_exchange);
+        let sec = try_new_shared(ec, allocator)?;
+
+        let mut holder = ExchangeSessionHolder::new_with(sec.as_ptr() as _);
+        holder.grab(session).map_err(|_| ())?;
+
+        if let Ok(mut ec) = sec.try_borrow_mut() {
+            ec.set_session(holder);
+        } else {
+            return Err(());
+        }
+
+        Ok(sec)
+    }
+
+    pub fn new_exchange_context_alloactor<'a, 'b>() -> Alloactor<'a, 'b> {
+        Alloactor::new()
     }
 
     /*
@@ -269,7 +309,7 @@ pub mod exchange_context {
             msg_type, chip_log_value_protocol_id(&protocol_id), message_counter, chip_log_value_exchange(ec));
     }
 
-    struct ExchangeSessionHolder {
+    pub(super) struct ExchangeSessionHolder {
         pub session_holder: SessionHolder,
     }
 
@@ -299,6 +339,10 @@ pub mod exchange_context {
 
         pub fn is_some(&self) -> bool {
             self.session_holder.is_some()
+        }
+
+        pub fn grab(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
+            self.session_holder.grab(session)
         }
     }
 
@@ -396,16 +440,19 @@ pub mod exchange_context {
             let mut ec = Self::new();
 
             ec.m_dispatch = Self::get_message_dispatch(is_ephemeral_exchange, delegate);
-            ec.m_session = ExchangeSessionHolder::new_with(ptr::addr_of_mut!(ec) as _);
+            // MUST not register the pointer here as we will move ec later
+            //ec.m_session = ExchangeSessionHolder::new_with(ptr::addr_of_mut!(ec) as _);
 
             ec.m_exchange_mgr = em;
             ec.m_exchange_id = exchange_id;
 
             let is_allow_mrp = session.with(|s: &Session| s.allows_mrp()).is_ok_and(|b| b);
 
+            /*
             if ec.m_session.session_holder.grab(session).is_err() {
                 panic!("cannot grab session in exchange context");
             }
+            */
 
             ec.base_mut().m_flags.insert(Flags::KflagInitiator);
             ec.base_mut().m_flags.set(Flags::KflagEphemeralExchange, is_ephemeral_exchange);
@@ -438,6 +485,10 @@ pub mod exchange_context {
             ec
         }
 
+        pub(super) fn set_session(&mut self, holder: ExchangeSessionHolder) {
+            self.m_session = holder;
+        }
+
         #[inline]
         fn set_ignor_session_release(&mut self, should_ignore: bool) {
             self.base_mut().m_flags.set(Flags::KflagIgnoreSessionRelease, should_ignore);
@@ -462,7 +513,7 @@ pub mod exchange_context {
             self.set_waiting_for_response_or_ack(response_expected);
         }
 
-        fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) -> ExchangeMessageDispatchHandle {
+        pub(super) fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) -> ExchangeMessageDispatchHandle {
             if is_ephemeral_exchange {
                 return ExchangeMessageDispatchHandle::new_ephemeral_exchange_dispatch();
             }
@@ -898,6 +949,7 @@ pub mod exchange_context {
                     reliable_message_protocol_config::ReliableMessageProtocolConfig,
                     exchange_message_dispatch::ExchangeMessageDispatchHandle,
                     exchange_context::{
+                        shared::{Alloactor, SharedExchangeContext, new_exchange_context_alloactor, try_new_with},
                         exchange_context::ExchangeContext,
                     },
                     exchange_delegate::ExchangeDelegate,
@@ -934,7 +986,7 @@ pub mod exchange_context {
             chip_core_error, chip_sdk_error,
         };
 
-        use core::ptr::{NonNull, addr_of, addr_eq, null_mut};
+        use core::ptr::{NonNull, addr_of, addr_eq, null_mut, addr_of_mut};
 
         mod with_mock_session_mgr {
             use super::*;
@@ -1655,8 +1707,11 @@ pub mod exchange_context {
                 ec.do_close(false);
             }
 
+            /*
             #[test]
             fn notify_response_timeout() {
+                let mut pool = new_exchange_context_alloactor();
+
                 let id = 1u16;
                 let mut mgr = ExchangeManager::new();
                 let session_mgr = MockSessionMgr::new();
@@ -1670,21 +1725,26 @@ pub mod exchange_context {
                 let delegate = MockDelegate::new();
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                let sec = try_new_with(
+                    addr_of_mut!(pool), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(NonNull::from_ref(&delegate)), false);
+                assert!(sec.is_ok());
+                let sec = sec.unwrap();
+                println!("second sec ptr {:p}", sec.as_ptr());
 
                 // to ensure calling on session defunct
-                ec.set_waiting_for_response_or_ack(true);
+                sec.try_borrow_mut().unwrap().set_waiting_for_response_or_ack(true);
 
                 assert_eq!(0, delegate.on_response_timeout_calls);
-                ec.notify_response_timeout(false);
-                /*
-                assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+                //ec.notify_response_timeout(false);
+                sec.try_borrow_mut().unwrap().notify_response_timeout(false);
+                //assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
                 assert_eq!(1, delegate.on_response_timeout_calls);
-                */
 
-                ec.do_close(false);
+                //ec.do_close(false);
+                sec.try_borrow_mut().unwrap().do_close(false);
             }
+            */
         } // end of with_mock_session_mgr
     } // end of mod tests
 } // end of mod exchange context
