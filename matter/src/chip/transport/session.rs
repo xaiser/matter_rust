@@ -248,7 +248,10 @@ mod session_holder {
                     },
                 },
             },
-            transport::secure_session::AsRef,
+            transport::{
+                secure_session::AsRef,
+                session_delegate::{NewSessionHandlingPolicy, SessionDelegateTrait, SessionDelegate},
+            },
         },
         verify_or_die,
     };
@@ -265,13 +268,7 @@ mod session_holder {
     // Handle for holder
     pub type Handle = UnsafeRef<SessionHolder>;
 
-    #[repr(u8)]
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    pub enum NewSessionHandlingPolicy {
-        KshiftToNewSession,
-        KstayAtOldSession,
-    }
-
+    /*
     pub mod delegate {
         pub type OnRelease = fn(* mut u8);
         pub type GetPolicy = fn(* mut u8) -> super::NewSessionHandlingPolicy;
@@ -295,6 +292,7 @@ mod session_holder {
             }
         }
     }
+    */
 
     const fn new_session_holder_adapter() -> Adapter {
         Adapter::new()
@@ -309,7 +307,7 @@ mod session_holder {
         #[allow(dead_code)]
         m_link: Link,
         m_session: RefCell<Option<SessionHandle>>,
-        m_delegate: Option<delegate::Delegate>,
+        m_delegate: Option<SessionDelegate>,
     }
 
     impl Drop for SessionHolder {
@@ -327,7 +325,7 @@ mod session_holder {
             }
         }
 
-        pub fn new_with_delegate(d: delegate::Delegate) -> Self {
+        pub fn new_with_delegate(d: SessionDelegate) -> Self {
             Self {
                 m_link: Link::new(),
                 m_session: RefCell::new(None),
@@ -459,7 +457,7 @@ mod session_holder {
         pub fn shift_to_session(&mut self, session: SessionHandle) {
             let shift = {
                 if let Some(delegate) = self.m_delegate.as_ref() {
-                    if (delegate.get_policy)(delegate.context) == NewSessionHandlingPolicy::KshiftToNewSession {
+                    if delegate.get_new_session_handling_policy() == NewSessionHandlingPolicy::KshiftToNewSession {
                         true
                     } else {
                         false
@@ -477,7 +475,7 @@ mod session_holder {
 
         pub fn on_session_hang(&self) -> Option<SessionHangOp> {
             if let Some(delegate) = self.m_delegate.as_ref() {
-                (delegate.on_hang)(delegate.context)
+                delegate.on_session_hang()
             } else {
                 None
             }
@@ -494,7 +492,7 @@ mod session_holder {
             };
 
             if let Some(delegate) = self.m_delegate.as_ref() {
-                (delegate.on_release)(delegate.context);
+                delegate.on_session_released()
             }
 
             handle
@@ -672,8 +670,6 @@ pub type SessionHolder = session_holder::SessionHolder;
 pub type SessionHolderList = session_holder::LinkedList;
 pub use session_holder::{
     new_session_holder_list,
-    delegate as session_holder_delegate,
-    NewSessionHandlingPolicy,
 };
 
 #[derive(Clone, Copy)]

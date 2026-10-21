@@ -13,7 +13,7 @@ use crate::{
 };
 use crate::chip_core_error;
 use crate::chip_error_incorrect_state;
-use crate::chip_no_error;
+//use crate::chip_no_error;
 use crate::chip_sdk_error;
 use crate::verify_or_return_error;
 use crate::verify_or_return_value;

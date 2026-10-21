@@ -26,7 +26,10 @@ use crate::{
                 message_header::{PacketHeader, PayloadHeader},
             },
             session::{
-                SessionHandle,
+                SessionHandle, SessionHangOp
+            },
+            session_delegate::{
+                SessionDelegateTrait, NewSessionHandlingPolicy
             },
         },
     },
@@ -102,6 +105,48 @@ pub trait ExchangeContextTrait<'a, 'b> {
     fn match_exchange(&self, session: &SessionHandle, packet_header: &PacketHeader, payload_header: &PayloadHeader) -> bool;
 }
 
+pub struct ExchangeContextSessionDelegate {
+    //m_ec: shared::WeakExchangeContextHandle,
+    m_ec: u8,
+}
+
+impl ExchangeContextSessionDelegate {
+    pub(super) fn new_with<'a, 'b>(_weak_ec: shared::WeakSharedExchangeContext<'a, 'b>) -> Self 
+        where
+            'a: 'a,
+            'b: 'b,
+    {
+        Self {
+            //m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
+            m_ec: 0,
+        }
+    }
+
+    pub(super) fn new_with_hanele<'a, 'b>(_weak_ec: shared::WeakExchangeContextHandle<'a, 'b>) -> Self 
+        where
+            'a: 'a,
+            'b: 'b,
+    {
+        Self {
+            //m_ec: weak_ec,
+            m_ec: 0,
+        }
+    }
+}
+
+impl SessionDelegateTrait for ExchangeContextSessionDelegate {
+    fn get_new_session_handling_policy(&self) -> NewSessionHandlingPolicy {
+        NewSessionHandlingPolicy::KstayAtOldSession
+    }
+
+    fn on_session_released(&self) {}
+
+    fn on_session_hang(&self) -> Option<SessionHangOp> {
+        None
+    }
+}
+
+
 pub mod shared {
     use super::{
         Access,
@@ -135,7 +180,7 @@ pub mod shared {
     const ALLOACTOR_CAP: usize = 10;
     pub type Alloactor<'a, 'b> = DefaultAlloactor<RefCell<ExchangeContext<'a, 'b>>, ALLOACTOR_CAP>;
     pub type SharedExchangeContext<'a, 'b> = Rc<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
-    //pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
+    pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
 
     pub fn try_new_shared<'a, 'b>(ec: ExchangeContext<'a, 'b>, allocator: * mut Alloactor<'a, 'b>) -> Result<SharedExchangeContext<'a, 'b>, ()> 
         // a rustc bug trigger by generic_const_exprs, this is the workaround suggested by AI
@@ -156,7 +201,7 @@ pub mod shared {
         let ec = ExchangeContext::new_with(em, exchange_id, session.clone(), initiator, delegate, is_ephemeral_exchange);
         let sec = try_new_shared(ec, allocator)?;
 
-        let mut holder = ExchangeSessionHolder::new_with(sec.as_ptr() as _);
+        let mut holder = ExchangeSessionHolder::new_with(&sec);
         holder.grab(session).map_err(|_| ())?;
 
         if let Ok(mut ec) = sec.try_borrow_mut() {
@@ -168,13 +213,28 @@ pub mod shared {
         Ok(sec)
     }
 
-    pub fn new_exchange_context_alloactor<'a, 'b>() -> Alloactor<'a, 'b> {
+    pub fn new_exchange_context_alloactor<'a, 'b>() -> Alloactor<'a, 'b> 
+        where
+            'a: 'a,
+            'b: 'b,
+    {
         Alloactor::new()
     }
 
-    /*
     pub struct WeakExchangeContextHandle<'a, 'b> {
         ec: WeakSharedExchangeContext<'a, 'b>,
+    }
+
+    impl<'a, 'b> WeakExchangeContextHandle<'a, 'b> 
+        where
+            'a: 'a,
+            'b: 'b,
+    {
+        pub(super) fn new_with(ec: WeakSharedExchangeContext<'a, 'b>) -> Self {
+            Self {
+                ec,
+            }
+        }
     }
 
     impl Access for WeakExchangeContextHandle<'_, '_> {
@@ -202,7 +262,6 @@ pub mod shared {
             }
         }
     }
-    */
 
     pub struct ExchangeContextHandle<'a, 'b> {
         ec: SharedExchangeContext<'a, 'b>,
@@ -230,7 +289,12 @@ pub mod shared {
 }
 
 pub mod exchange_context {
-    use super::ExchangeContextTrait;
+    use super::{
+        ExchangeContextTrait, ExchangeContextSessionDelegate,
+        shared::{
+            WeakSharedExchangeContext, SharedExchangeContext
+        }
+    };
     use crate::{
         chip::{
             chip_lib::{
@@ -268,10 +332,13 @@ pub mod exchange_context {
                     message_header::{self, PacketHeader, PayloadHeader},
                 },
                 session::{
-                    SessionHolder, session_holder_delegate, SessionHandle,
+                    SessionHolder, SessionHandle,
                     Session, SessionAccess, AccessError, Variant, SessionBase,
                 },
                 secure_session::SecureSession,
+                session_delegate::{
+                    SessionDelegateTrait, SessionDelegate,
+                },
             },
             platform::assert_chip_stack_locked_by_current_thread,
         },
@@ -320,14 +387,15 @@ pub mod exchange_context {
             }
         }
 
-        pub fn new_with(exchange: session_holder_delegate::Context) -> Self {
+        pub fn new_with<'a, 'b>(shared_ec: &SharedExchangeContext<'a, 'b>) -> Self 
+            where
+                'a: 'a,
+                'b: 'b,
+        {
             Self {
                 session_holder: SessionHolder::new_with_delegate(
-                                    session_holder_delegate::Delegate::new(
-                                        session_delegate::on_release,
-                                        session_delegate::get_policy,
-                                        session_delegate::on_hang,
-                                        exchange,
+                                    SessionDelegate::new_exchange_context(
+                                            ExchangeContextSessionDelegate::new_with(SharedExchangeContext::downgrade(shared_ec))
                                     )
                                 ),
             }
@@ -358,6 +426,7 @@ pub mod exchange_context {
         }
     }
 
+    /*
     pub(super) mod session_delegate {
         use crate::{
             chip::{
@@ -378,6 +447,7 @@ pub mod exchange_context {
             None
         }
     }
+    */
 
     pub fn handle_response_timeout(_system_layer: *mut u8, app_state: TimerCallbackContext) {
         let ptr: *mut ExchangeContext = app_state.cast();
