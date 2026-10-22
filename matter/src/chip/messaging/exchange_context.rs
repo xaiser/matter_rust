@@ -285,7 +285,17 @@ pub mod shared {
         }
     }
 
-    // TODO: Maybe impelment SessionDelegate on shared
+    pub fn try_new_handle_with<'a, 'b>(alloactor: * mut Alloactor<'a, 'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, 
+        session: SessionHandle, initiator: bool,
+        delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Result<ExchangeContextHandle<'a, 'b>, ()>
+        where
+            'a: 'a,
+            'b: 'b,
+    {
+        Ok(ExchangeContextHandle {
+            ec: try_new_with(alloactor, em, exchange_id, session, initiator, delegate, is_ephemeral_exchange)?
+        })
+    }
 }
 
 pub mod exchange_context {
@@ -1019,7 +1029,8 @@ pub mod exchange_context {
                     reliable_message_protocol_config::ReliableMessageProtocolConfig,
                     exchange_message_dispatch::ExchangeMessageDispatchHandle,
                     exchange_context::{
-                        shared::{Alloactor, SharedExchangeContext, new_exchange_context_alloactor, try_new_with},
+                        Access,
+                        shared::{Alloactor, SharedExchangeContext, new_exchange_context_alloactor, try_new_with, try_new_handle_with},
                         exchange_context::ExchangeContext,
                     },
                     exchange_delegate::ExchangeDelegate,
@@ -1647,6 +1658,8 @@ pub mod exchange_context {
 
             #[test]
             fn matched_exchange() {
+                let mut alloactor = new_exchange_context_alloactor();
+
                 let id = 1u16;
                 let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
                 
@@ -1663,16 +1676,20 @@ pub mod exchange_context {
                 let sh_copy = sh.clone();
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
-                assert!(ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+                assert!(handle.with(
+                        |ec: &ExchangeContext| ec.match_exchange(&sh_copy, &packet_header, &payload_header)).is_ok_and(|b| b));
 
-                ec.do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
 
             #[test]
             fn not_matched_exchange_id() {
+                let mut alloactor = new_exchange_context_alloactor();
+
                 let id = 1u16;
                 let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id + 1);
                 
@@ -1689,17 +1706,19 @@ pub mod exchange_context {
                 let sh_copy = sh.clone();
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
-                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+                assert!(handle.with(
+                        |ec: &ExchangeContext| ec.match_exchange(&sh_copy, &packet_header, &payload_header)).is_ok_and(|b| !b));
 
-                ec.do_close(false);
-
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
 
             #[test]
             fn not_matched_exchange_session() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let id = 1u16;
                 let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
                 
@@ -1716,16 +1735,19 @@ pub mod exchange_context {
                 let sh_copy = get_session_handle(&mut table);
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
-                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+                assert!(handle.with(
+                        |ec: &ExchangeContext| ec.match_exchange(&sh_copy, &packet_header, &payload_header)).is_ok_and(|b| !b));
 
-                ec.do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
 
             #[test]
             fn not_matched_exchange_encryption() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let id = 1u16;
                 let payload_header = PayloadHeader::default().set_initiator(false).set_exchange_id(id);
                 
@@ -1743,17 +1765,21 @@ pub mod exchange_context {
                 let sh_copy = sh.clone();
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
-                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+                assert!(handle.with(
+                        |ec: &ExchangeContext| ec.match_exchange(&sh_copy, &packet_header, &payload_header)).is_ok_and(|b| !b));
 
-                ec.do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
 
             #[test]
             fn not_matched_exchange_initiator() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let id = 1u16;
+                // set initiator = true
                 let payload_header = PayloadHeader::default().set_initiator(true).set_exchange_id(id);
                 
                 // to ensure is_encrypted() == true
@@ -1769,18 +1795,19 @@ pub mod exchange_context {
                 let sh_copy = sh.clone();
 
                 // this imply dispatch::is_encrypted = true
-                let mut ec = ExchangeContext::new_with(
-                    Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
-                assert!(!ec.match_exchange(&sh_copy, &packet_header, &payload_header));
+                assert!(handle.with(
+                        |ec: &ExchangeContext| ec.match_exchange(&sh_copy, &packet_header, &payload_header)).is_ok_and(|b| !b));
 
-                ec.do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
 
-            /*
             #[test]
             fn notify_response_timeout() {
-                let mut pool = new_exchange_context_alloactor();
+                let mut alloactor = new_exchange_context_alloactor();
 
                 let id = 1u16;
                 let mut mgr = ExchangeManager::new();
@@ -1794,27 +1821,24 @@ pub mod exchange_context {
                 // delegate
                 let delegate = MockDelegate::new();
 
-                // this imply dispatch::is_encrypted = true
-                let sec = try_new_with(
-                    addr_of_mut!(pool), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
                     Some(NonNull::from_ref(&delegate)), false);
-                assert!(sec.is_ok());
-                let sec = sec.unwrap();
-                println!("second sec ptr {:p}", sec.as_ptr());
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
 
                 // to ensure calling on session defunct
-                sec.try_borrow_mut().unwrap().set_waiting_for_response_or_ack(true);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
 
                 assert_eq!(0, delegate.on_response_timeout_calls);
                 //ec.notify_response_timeout(false);
-                sec.try_borrow_mut().unwrap().notify_response_timeout(false);
+                //sec.try_borrow_mut().unwrap().notify_response_timeout(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(false));
                 //assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
                 assert_eq!(1, delegate.on_response_timeout_calls);
 
                 //ec.do_close(false);
-                sec.try_borrow_mut().unwrap().do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
-            */
         } // end of with_mock_session_mgr
     } // end of mod tests
 } // end of mod exchange context
