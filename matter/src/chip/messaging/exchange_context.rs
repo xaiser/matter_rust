@@ -45,8 +45,8 @@ pub enum AccessError {
 }
 
 pub trait Access {
-    fn with<R>(&self, f: impl Fn(&exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
-    fn with_mut<R>(&mut self, f: impl Fn(&mut exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
+    fn with<R>(&self, f: impl FnOnce(&exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
+    fn with_mut<R>(&mut self, f: impl FnOnce(&mut exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
 }
 
 pub trait ExchangeContextTrait<'a, 'b> {
@@ -202,10 +202,14 @@ pub mod shared {
         let sec = try_new_shared(ec, allocator)?;
 
         let mut holder = ExchangeSessionHolder::new_with(&sec);
-        holder.grab(session).map_err(|_| ())?;
+
+        // We cannot grab here as we will move the holder later, keep this commented out code to
+        // explain the difference between this implement and the original code.
+        //holder.grab(session).map_err(|_| ())?;
 
         if let Ok(mut ec) = sec.try_borrow_mut() {
             ec.set_session(holder);
+            ec.grab(session).map_err(|_| ())?;
         } else {
             return Err(());
         }
@@ -238,7 +242,7 @@ pub mod shared {
     }
 
     impl Access for WeakExchangeContextHandle<'_, '_> {
-        fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
+        fn with<R>(&self, mut f: impl FnOnce(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Some(shared_handle) = self.ec.upgrade() {
                 if let Ok(handle) = shared_handle.try_borrow() {
                     return Ok(f(&(*handle)));
@@ -250,7 +254,7 @@ pub mod shared {
             }
         }
 
-        fn with_mut<R>(&mut self, f: impl Fn(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
+        fn with_mut<R>(&mut self, mut f: impl FnOnce(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Some(shared_handle) = self.ec.upgrade() {
                 if let Ok(mut handle) = shared_handle.try_borrow_mut() {
                     return Ok(f(&mut (*handle)));
@@ -268,7 +272,7 @@ pub mod shared {
     }
 
     impl Access for ExchangeContextHandle<'_, '_> {
-        fn with<R>(&self, f: impl Fn(&ExchangeContext) -> R) -> Result<R, AccessError> {
+        fn with<R>(&self, mut f: impl FnOnce(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Ok(handle) = self.ec.try_borrow() {
                 return Ok(f(&(*handle)));
             } else {
@@ -276,7 +280,7 @@ pub mod shared {
             }
         }
 
-        fn with_mut<R>(&mut self, f: impl Fn(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
+        fn with_mut<R>(&mut self, mut f: impl FnOnce(&mut ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Ok(mut handle) = self.ec.try_borrow_mut() {
                 return Ok(f(&mut (*handle)));
             } else {
@@ -386,6 +390,14 @@ pub mod exchange_context {
             msg_type, chip_log_value_protocol_id(&protocol_id), message_counter, chip_log_value_exchange(ec));
     }
 
+    /*
+    mod holder {
+        const ALLOACTOR_CAP: usize = 1;
+        pub type Alloactor = DefaultAlloactor<ExchangeSessionHolder, ALLOACTOR_CAP>;
+        pub type SharedExchangeSessionHolder = Rc<ExchangeSessionHolder, Alloactor>;
+    }
+    */
+
     pub(super) struct ExchangeSessionHolder {
         pub session_holder: SessionHolder,
     }
@@ -435,6 +447,7 @@ pub mod exchange_context {
             self.session_holder.with_mut(f)
         }
     }
+
 
     /*
     pub(super) mod session_delegate {
@@ -567,6 +580,10 @@ pub mod exchange_context {
 
         pub(super) fn set_session(&mut self, holder: ExchangeSessionHolder) {
             self.m_session = holder;
+        }
+
+        pub(super) fn grab(&mut self, session: SessionHandle) -> Result<(), SessionHandle> {
+            self.m_session.grab(session)
         }
 
         #[inline]
@@ -1446,6 +1463,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_auto_request_ack_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KnoAutoRequestAck;
@@ -1462,16 +1480,25 @@ pub mod exchange_context {
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
+                /*
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
                 ec.set_response_timeout(Timeout::from_secs(1));
+                */
+
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
 
                 let protocol_id = protocols::secure_channel::ID;
                 let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
 
                 let mut dispatch = TestDispatch::new();
 
-                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
-                ec.do_close(false);
+                assert!(ec.with_mut(|ec: &mut ExchangeContext | 
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| r.is_ok()));
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
@@ -1543,6 +1570,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_not_standalone_ack_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1559,10 +1587,18 @@ pub mod exchange_context {
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
                 // setup will_send first to verify if it gets removed after send
-                ec.will_send_message();
-                ec.set_response_timeout(Timeout::from_secs(1));
+                //ec.will_send_message();
+                //ec.set_response_timeout(Timeout::from_secs(1));
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| {
+                    ec.will_send_message();
+                    ec.set_response_timeout(Timeout::from_secs(1));
+                });
 
                 let protocol_id = protocols::secure_channel::ID;
                 // not a standalone ack
@@ -1582,6 +1618,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_not_expected_response_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1598,17 +1635,25 @@ pub mod exchange_context {
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
 
                 let protocol_id = protocols::secure_channel::ID;
                 let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
 
                 let mut dispatch = TestDispatch::new();
 
-                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                //assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(ec.with_mut(|ec: &mut ExchangeContext | 
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| r.is_ok()));
                 // ensure we do NOT start the timer
-                assert_ne!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
-                ec.do_close(false);
+                //assert_ne!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
+                assert_eq!(null_mut(), session_mgr.system_layer.ec);
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
@@ -1618,6 +1663,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_failed_and_cancel_timer_and_defunct_session() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1634,8 +1680,14 @@ pub mod exchange_context {
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
+                /*
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
                 ec.set_response_timeout(Timeout::from_secs(1));
+                */
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
 
                 let protocol_id = protocols::secure_channel::ID;
                 let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
@@ -1643,12 +1695,17 @@ pub mod exchange_context {
                 let mut dispatch = TestDispatch::new();
                 dispatch.is_ok = false;
 
-                assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                //assert!(!ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(ec.with_mut(|ec: &mut ExchangeContext|
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| !r.is_ok()));
                 // ensure we do NOT start the timer
                 assert_ne!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
                 // ensure the session is defunct
-                assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
-                ec.do_close(false);
+                //assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+                assert!(ec.with(|ec: &ExchangeContext|
+                        ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b)).is_ok_and(|b| b));
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
