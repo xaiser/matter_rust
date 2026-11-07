@@ -106,30 +106,27 @@ pub trait ExchangeContextTrait<'a, 'b> {
 }
 
 pub struct ExchangeContextSessionDelegate {
-    //m_ec: shared::WeakExchangeContextHandle,
-    m_ec: u8,
+    m_ec: shared::WeakExchangeContextHandle,
 }
 
 impl ExchangeContextSessionDelegate {
-    pub(super) fn new_with<'a, 'b>(_weak_ec: shared::WeakSharedExchangeContext<'a, 'b>) -> Self 
+    pub(super) fn new_with<'a, 'b>(weak_ec: shared::WeakSharedExchangeContext<'a, 'b>) -> Self 
         where
             'a: 'a,
             'b: 'b,
     {
         Self {
-            //m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
-            m_ec: 0,
+            m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
         }
     }
 
-    pub(super) fn new_with_hanele<'a, 'b>(_weak_ec: shared::WeakExchangeContextHandle<'a, 'b>) -> Self 
+    pub(super) fn new_with_hanele<'a, 'b>(weak_ec: shared::WeakExchangeContextHandle<'a, 'b>) -> Self 
         where
             'a: 'a,
             'b: 'b,
     {
         Self {
-            //m_ec: weak_ec,
-            m_ec: 0,
+            m_ec: weak_ec,
         }
     }
 }

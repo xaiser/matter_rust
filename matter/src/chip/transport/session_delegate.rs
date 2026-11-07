@@ -57,7 +57,9 @@ pub trait SessionDelegateTrait {
      *   Called when a session is unresponsive for a while (detected by MRP). Callees SHALL NOT make synchronous calls into
      * SessionManager to allocate a new session. If they desire to do so, it MUST be done asynchronously.
      */
-    fn on_session_hang(&self) -> Option<SessionHangOp>;
+    fn on_session_hang(&self) -> Option<SessionHangOp> {
+        None
+    }
 }
 
 pub enum SessionDelegate {
