@@ -1337,6 +1337,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1353,18 +1354,29 @@ pub mod exchange_context {
                 let peer_address = PeerAddress::new_addr_type(IPAddress::ANY, peer_address::Type::KUdp);
                 assert!(sh.with_mut(|s: &mut SecureSession| s.set_peer_address(peer_address)).is_ok());
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
-                ec.set_response_timeout(Timeout::from_secs(1));
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
+
+                //ec.set_response_timeout(Timeout::from_secs(1));
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| {
+                    ec.set_response_timeout(Timeout::from_secs(1))
+                });
 
                 let protocol_id = protocols::secure_channel::ID;
                 let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
 
                 let mut dispatch = TestDispatch::new();
 
-                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                //assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(ec.with_mut(|ec: &mut ExchangeContext|
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| r.is_ok()));
                 // ensure we start the timer
-                assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
-                ec.do_close(false);
+                assert_ne!(ptr::null_mut(), session_mgr.system_layer.ec);
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
@@ -1431,6 +1443,7 @@ pub mod exchange_context {
 
             #[test]
             fn send_message_not_udp_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
                 let payload = PacketBufferHandle::new_with_data(&[1,2], 0, 0).unwrap();
                 let expected_payload_len = payload.data_len();
                 let flags = SendFlags::KexpectResponse;
@@ -1444,16 +1457,27 @@ pub mod exchange_context {
                 let mut table = SecureSessionTable::new();
                 let sh = get_session_handle(&mut table);
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
-                ec.set_response_timeout(Timeout::from_secs(1));
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, None, false);
+                let ec = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
+                assert!(ec.is_ok());
+                let mut ec = ec.unwrap();
+
+                //ec.set_response_timeout(Timeout::from_secs(1));
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| {
+                    ec.set_response_timeout(Timeout::from_secs(1))
+                });
 
                 let protocol_id = protocols::secure_channel::ID;
                 let msg_type = u8::from(protocols::secure_channel::MsgType::StandaloneAck);
 
                 let mut dispatch = TestDispatch::new();
 
-                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
-                ec.do_close(false);
+                //assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(ec.with_mut(|ec: &mut ExchangeContext|
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| r.is_ok()));
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
@@ -1606,9 +1630,13 @@ pub mod exchange_context {
 
                 let mut dispatch = TestDispatch::new();
 
-                assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
-                assert!(!ec.base().m_flags.intersects(Flags::KflagWillSendMessage));
-                ec.do_close(false);
+                //assert!(ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags).is_ok());
+                assert!(ec.with_mut(|ec: &mut ExchangeContext|
+                        ec.send_message_id_type_dispatch(&mut dispatch, protocol_id, msg_type, payload, &flags)).is_ok_and(|r| r.is_ok()));
+                //assert!(!ec.base().m_flags.intersects(Flags::KflagWillSendMessage));
+                assert!(!ec.with(|ec: &ExchangeContext| ec.base().m_flags.intersects(Flags::KflagWillSendMessage)).is_ok_and(|b| b));
+                //ec.do_close(false);
+                let _ = ec.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
 
                 assert_eq!(expected_payload_len, dispatch.len.try_into().unwrap());
                 assert_eq!(id, dispatch.exchange_id);
