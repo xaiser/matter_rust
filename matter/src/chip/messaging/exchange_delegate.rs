@@ -18,7 +18,15 @@ use crate::{
     chip_sdk_error,
 };
 
-pub trait ExchangeDelegate {
+macro_rules! call_on_all_variants {
+    ($self:expr, $method:ident $(, $args:expr)*) => {
+        match $self {
+            ExchangeDelegate::Tmp(tmp) => tmp.$method($($args),*),
+        }
+    };
+}
+
+pub trait ExchangeDelegateTrait {
     /*
      * @brief
      *   This function is the protocol callback for handling a received CHIP
@@ -34,7 +42,7 @@ pub trait ExchangeDelegate {
      *   Consumers that don't do one of those things MUST NOT retain a pointer
      *   to the exchange.
      */
-    fn on_message_received(&mut self, ec: &mut ExchangeContext, payload_header: &PayloadHeader, payload: PacketBufferHandle) -> ChipErrorResult;
+    fn on_message_received(&mut self, ec: *mut ExchangeContext, payload_header: &PayloadHeader, payload: PacketBufferHandle) -> ChipErrorResult;
 
     /*
      * @brief
@@ -51,7 +59,7 @@ pub trait ExchangeDelegate {
      *   Consumers that don't do one of those things MUST NOT retain a pointer
      *   to the exchange.
      */
-    fn on_response_timeout(&mut self, ec: &mut ExchangeContext);
+    fn on_response_timeout(&mut self, ec: *mut ExchangeContext);
 
     /*
      * @brief
@@ -68,9 +76,101 @@ pub trait ExchangeDelegate {
      *   OnExchangeClosing() notification is allowed in this situation.
      *
      */
-    fn on_exchange_closing(&mut self, ec: &mut ExchangeContext);
+    fn on_exchange_closing(&mut self, ec: *mut ExchangeContext);
 
     fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle;
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub struct TestDelegate {
+        pub delegate: Box<dyn ExchangeDelegateTrait>,
+    }
+
+    impl TestDelegate {
+        pub fn new(delegate: impl ExchangeDelegateTrait) -> Self {
+            Self {
+                delegate: Box::new(delegate),
+            }
+        }
+    }
+
+    impl ExchangeDelegateTrait for TestDelegate {
+        fn on_message_received(&mut self, ec: *mut ExchangeContext, payload_header: &PayloadHeader, payload: PacketBufferHandle) -> ChipErrorResult {
+            self.delegate.on_message_received(ec, payload_header, payload)
+        }
+
+        fn on_response_timeout(&mut self, ec: *mut ExchangeContext) {
+            self.delegate.on_response_timeout(ec)
+        }
+
+        fn on_exchange_closing(&mut self, _ec: *mut ExchangeContext) {
+            self.delegate.on_exchange_closing(ec)
+        }
+
+        fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
+            self.delegate.get_message_dispatch()
+        }
+    }
+}
+
+pub struct Tmp;
+
+impl ExchangeDelegateTrait for Tmp {
+    fn on_message_received(&mut self, _ec: *mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+        chip_ok!()
+    }
+
+    fn on_response_timeout(&mut self, _ec: *mut ExchangeContext) {}
+
+    fn on_exchange_closing(&mut self, _ec: *mut ExchangeContext) {}
+
+    fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
+        ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
+    }
+}
+
+pub enum ExchangeDelegate {
+    Tmp(Tmp),
+    #[cfg(test)]
+    Test(tests::TestDelegate),
+}
+
+impl ExchangeDelegate {
+    pub const fn new_tmp() -> Self {
+        ExchangeDelegate::Tmp(Tmp)
+    }
+
+    #[cfg(test)]
+    pub fn new_test(delegate: impl ExchangeDelegateTrait) -> Self {
+        ExchangeDelegate::Test(tests::TestDelegate::new(delegate))
+    }
+
+    pub fn dump_to_log(&self) -> &'static str{
+        match self {
+            ExchangeDelegate::Tmp => "Tmp",
+        }
+    }
+}
+
+impl ExchangeDelegateTrait for ExchangeDelegate {
+    fn on_message_received(&mut self, ec: *mut ExchangeContext, payload_header: &PayloadHeader, payload: PacketBufferHandle) -> ChipErrorResult {
+        call_on_all_variants!(self, on_message_received)
+    }
+
+    fn on_response_timeout(&mut self, ec: *mut ExchangeContext) {
+        call_on_all_variants!(self, on_response_timeout)
+    }
+
+    fn on_exchange_closing(&mut self, ec: *mut ExchangeContext) {
+        call_on_all_variants!(self, on_exchange_closing)
+    }
+
+    fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
+        call_on_all_variants!(self, get_message_dispatch)
+    }
 }
 
 pub trait UnsolicatedMessageHandler {
@@ -83,13 +183,13 @@ pub trait UnsolicatedMessageHandler {
      *
      *   If the implementation returns an error, message processing will be aborted for this message.
      */
-    fn on_unsolicated_message_session_received<D: ExchangeDelegate>(&mut self, payload_header: &PayloadHeader, _session: &SessionHandle,
+    fn on_unsolicated_message_session_received<D: ExchangeDelegateTrait>(&mut self, payload_header: &PayloadHeader, _session: &SessionHandle,
         new_delegate: &mut &mut D) -> ChipErrorResult
     {
         self.on_unsolicated_message_received(payload_header, new_delegate)
     }
 
-    fn on_unsolicated_message_received<D: ExchangeDelegate>(&mut self, _payload_header: &PayloadHeader, _new_delegate: &mut &mut D) -> ChipErrorResult {
+    fn on_unsolicated_message_received<D: ExchangeDelegateTrait>(&mut self, _payload_header: &PayloadHeader, _new_delegate: &mut &mut D) -> ChipErrorResult {
         Err(chip_error_not_implemented!())
     }
 
@@ -101,5 +201,5 @@ pub trait UnsolicatedMessageHandler {
      *   Once an exchange is created with the delegate, the OnExchangeClosing notification can be used to free the delegate as
      *   needed.
      */
-    fn on_exchange_creation_failed<D: ExchangeDelegate>(&mut self, _delegate: &mut D) {}
+    fn on_exchange_creation_failed<D: ExchangeDelegateTrait>(&mut self, _delegate: &mut D) {}
 }

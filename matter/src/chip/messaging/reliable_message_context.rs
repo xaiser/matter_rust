@@ -90,7 +90,7 @@ bitflags! {
     }
 }
 
-pub trait ReliableMessageContext<'a, 'b> {
+pub trait ReliableMessageContext<'b> {
     fn base(&self) -> &BaseReliableMessageContext;
     fn base_mut(&mut self) -> &mut BaseReliableMessageContext;
 
@@ -229,9 +229,9 @@ pub trait ReliableMessageContext<'a, 'b> {
      */
     fn get_reliable_message_mgr(&self) -> Option<SharedReliableMessageMgr>;
 
-    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'a, 'b>;
+    fn get_exchange_context(&mut self) -> &mut ExchangeContext<'b>;
 
-    fn get_exchange_context_const(&self) -> &ExchangeContext<'a, 'b>;
+    fn get_exchange_context_const(&self) -> &ExchangeContext<'b>;
 
     fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
         where

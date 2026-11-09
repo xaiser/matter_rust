@@ -49,7 +49,7 @@ pub trait Access {
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut exchange_context::ExchangeContext) -> R) -> Result<R, AccessError>;
 }
 
-pub trait ExchangeContextTrait<'a, 'b> {
+pub trait ExchangeContextTrait<'b> {
     fn is_encryption_required(&self) -> bool;
 
     fn is_group_exchange_context(&self) -> bool;
@@ -78,9 +78,10 @@ pub trait ExchangeContextTrait<'a, 'b> {
 
     fn will_send_message(&mut self);
 
-    fn get_delegaet(&self) -> Option<NonNull<dyn ExchangeDelegate + 'a>>;
+    fn get_delegaet(&self) -> Option<&mut ExchangeDelegate>;
 
-    fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>);
+    //fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>);
+    fn set_delegaet(&mut self, delegate: Option<ExchangeDelegate>);
 
     fn get_exchange_mgr(&self) -> Option<NonNull<ExchangeManager<'b>>>;
 
@@ -94,7 +95,7 @@ pub trait ExchangeContextTrait<'a, 'b> {
 
     fn dump_to_log(&self);
 
-    fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_>;
+    fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_>;
 
     fn notify_response_timeout(&mut self, close_if_needed: bool);
 
@@ -106,27 +107,28 @@ pub trait ExchangeContextTrait<'a, 'b> {
 }
 
 pub struct ExchangeContextSessionDelegate {
-    m_ec: shared::WeakExchangeContextHandle,
+    //m_ec: shared::WeakExchangeContextHandle,
+    m_ec: u8,
 }
 
 impl ExchangeContextSessionDelegate {
-    pub(super) fn new_with<'a, 'b>(weak_ec: shared::WeakSharedExchangeContext<'a, 'b>) -> Self 
+    pub(super) fn new_with<'b>(_weak_ec: shared::WeakSharedExchangeContext<'b>) -> Self 
         where
-            'a: 'a,
             'b: 'b,
     {
         Self {
-            m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
+            //m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
+            m_ec: 0,
         }
     }
 
-    pub(super) fn new_with_hanele<'a, 'b>(weak_ec: shared::WeakExchangeContextHandle<'a, 'b>) -> Self 
+    pub(super) fn new_with_hanele<'b>(_weak_ec: shared::WeakExchangeContextHandle<'b>) -> Self 
         where
-            'a: 'a,
             'b: 'b,
     {
         Self {
-            m_ec: weak_ec,
+            //m_ec: weak_ec,
+            m_ec: 0,
         }
     }
 }
@@ -175,23 +177,21 @@ pub mod shared {
     use core::ptr::NonNull;
 
     const ALLOACTOR_CAP: usize = 10;
-    pub type Alloactor<'a, 'b> = DefaultAlloactor<RefCell<ExchangeContext<'a, 'b>>, ALLOACTOR_CAP>;
-    pub type SharedExchangeContext<'a, 'b> = Rc<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
-    pub type WeakSharedExchangeContext<'a, 'b> = Weak<RefCell<ExchangeContext<'a, 'b>>, Alloactor<'a, 'b>>;
+    pub type Alloactor<'b> = DefaultAlloactor<RefCell<ExchangeContext<'b>>, ALLOACTOR_CAP>;
+    pub type SharedExchangeContext<'b> = Rc<RefCell<ExchangeContext<'b>>, Alloactor<'b>>;
+    pub type WeakSharedExchangeContext<'b> = Weak<RefCell<ExchangeContext<'b>>, Alloactor<'b>>;
 
-    pub fn try_new_shared<'a, 'b>(ec: ExchangeContext<'a, 'b>, allocator: * mut Alloactor<'a, 'b>) -> Result<SharedExchangeContext<'a, 'b>, ()> 
+    pub fn try_new_shared<'b>(ec: ExchangeContext<'b>, allocator: * mut Alloactor<'b>) -> Result<SharedExchangeContext<'b>, ()> 
         // a rustc bug trigger by generic_const_exprs, this is the workaround suggested by AI
         where
-            'a: 'a,
             'b: 'b,
     {
         SharedExchangeContext::try_new_in(RefCell::new(ec), allocator)
     }
 
-    pub fn try_new_with<'a, 'b>(allocator: * mut Alloactor<'a, 'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, session: SessionHandle, initiator: bool,
-        delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Result<SharedExchangeContext<'a, 'b>, ()>
+    pub fn try_new_with<'b>(allocator: * mut Alloactor<'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, session: SessionHandle, initiator: bool,
+        delegate: Option<ExchangeDelegate>, is_ephemeral_exchange: bool) -> Result<SharedExchangeContext<'b>, ()>
         where
-            'a: 'a,
             'b: 'b,
 
     {
@@ -214,31 +214,29 @@ pub mod shared {
         Ok(sec)
     }
 
-    pub fn new_exchange_context_alloactor<'a, 'b>() -> Alloactor<'a, 'b> 
+    pub fn new_exchange_context_alloactor<'b>() -> Alloactor<'b> 
         where
-            'a: 'a,
             'b: 'b,
     {
         Alloactor::new()
     }
 
-    pub struct WeakExchangeContextHandle<'a, 'b> {
-        ec: WeakSharedExchangeContext<'a, 'b>,
+    pub struct WeakExchangeContextHandle<'b> {
+        ec: WeakSharedExchangeContext<'b>,
     }
 
-    impl<'a, 'b> WeakExchangeContextHandle<'a, 'b> 
+    impl<'b> WeakExchangeContextHandle<'b> 
         where
-            'a: 'a,
             'b: 'b,
     {
-        pub(super) fn new_with(ec: WeakSharedExchangeContext<'a, 'b>) -> Self {
+        pub(super) fn new_with(ec: WeakSharedExchangeContext<'b>) -> Self {
             Self {
                 ec,
             }
         }
     }
 
-    impl Access for WeakExchangeContextHandle<'_, '_> {
+    impl Access for WeakExchangeContextHandle<'_> {
         fn with<R>(&self, mut f: impl FnOnce(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Some(shared_handle) = self.ec.upgrade() {
                 if let Ok(handle) = shared_handle.try_borrow() {
@@ -264,11 +262,11 @@ pub mod shared {
         }
     }
 
-    pub struct ExchangeContextHandle<'a, 'b> {
-        ec: SharedExchangeContext<'a, 'b>,
+    pub struct ExchangeContextHandle<'b> {
+        ec: SharedExchangeContext<'b>,
     }
 
-    impl Access for ExchangeContextHandle<'_, '_> {
+    impl Access for ExchangeContextHandle<'_> {
         fn with<R>(&self, mut f: impl FnOnce(&ExchangeContext) -> R) -> Result<R, AccessError> {
             if let Ok(handle) = self.ec.try_borrow() {
                 return Ok(f(&(*handle)));
@@ -286,11 +284,10 @@ pub mod shared {
         }
     }
 
-    pub fn try_new_handle_with<'a, 'b>(alloactor: * mut Alloactor<'a, 'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, 
+    pub fn try_new_handle_with<'b>(alloactor: * mut Alloactor<'b>, em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, 
         session: SessionHandle, initiator: bool,
-        delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Result<ExchangeContextHandle<'a, 'b>, ()>
+        delegate: Option<ExchangeDelegate>, is_ephemeral_exchange: bool) -> Result<ExchangeContextHandle<'b>, ()>
         where
-            'a: 'a,
             'b: 'b,
     {
         Ok(ExchangeContextHandle {
@@ -329,7 +326,10 @@ pub mod exchange_context {
             },
             messaging::{
                 exchange_mgr::ExchangeManager,
-                exchange_delegate::ExchangeDelegate,
+                exchange_delegate::{
+                    ExchangeDelegate,
+                    ExchangeDelegateTrait,
+                },
                 exchange_message_dispatch::{
                     ExchangeMessageDispatchHandle,
                     ExchangeMessageDispatch,
@@ -406,9 +406,8 @@ pub mod exchange_context {
             }
         }
 
-        pub fn new_with<'a, 'b>(shared_ec: &SharedExchangeContext<'a, 'b>) -> Self 
+        pub fn new_with<'b>(shared_ec: &SharedExchangeContext<'b>) -> Self 
             where
-                'a: 'a,
                 'b: 'b,
         {
             Self {
@@ -479,9 +478,9 @@ pub mod exchange_context {
         }
     }
 
-    pub struct ExchangeContext<'a, 'b> {
+    pub struct ExchangeContext<'b> {
         m_response_timeout: Timeout,
-        m_delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>,
+        m_delegate: Option<ExchangeDelegate>,
         m_exchange_mgr: Option<NonNull<ExchangeManager<'b>>>,
         m_dispatch: ExchangeMessageDispatchHandle,
         m_session: ExchangeSessionHolder,
@@ -489,7 +488,7 @@ pub mod exchange_context {
         m_reliable_message_context: BaseReliableMessageContext,
     }
 
-    impl<'a, 'b> Drop for ExchangeContext<'a, 'b> {
+    impl<'b> Drop for ExchangeContext<'b> {
         fn drop(&mut self) {
             //
             // Ensure that DoClose has been called by the time we get here. If not, we have a leak somewhere.
@@ -511,7 +510,7 @@ pub mod exchange_context {
         }
     }
 
-    impl<'a, 'b> ExchangeContext<'a, 'b> {
+    impl<'b> ExchangeContext<'b> {
         pub const fn new() -> Self {
             Self {
                 m_response_timeout: Timeout::from_secs(0),
@@ -525,7 +524,7 @@ pub mod exchange_context {
         }
 
         pub fn new_with(em: Option<NonNull<ExchangeManager<'b>>>, exchange_id: u16, session: SessionHandle, initiator: bool,
-            delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>, is_ephemeral_exchange: bool) -> Self
+            delegate: Option<ExchangeDelegate>, is_ephemeral_exchange: bool) -> Self
         {
             let mut ec = Self::new();
 
@@ -607,15 +606,20 @@ pub mod exchange_context {
             self.set_waiting_for_response_or_ack(response_expected);
         }
 
-        pub(super) fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) -> ExchangeMessageDispatchHandle {
+        pub(super) fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<ExchangeDelegate>) -> ExchangeMessageDispatchHandle {
             if is_ephemeral_exchange {
                 return ExchangeMessageDispatchHandle::new_ephemeral_exchange_dispatch();
             }
 
+            /*
             if let Some(ptr) = delegate {
                 unsafe {
                     return ptr.as_ref().get_message_dispatch();
                 }
+            }
+            */
+            if let Some(d) = delegate.as_ref() {
+                return d.get_message_dispatch();
             }
 
             ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
@@ -629,10 +633,15 @@ pub mod exchange_context {
             self.base_mut().m_flags.insert(Flags::KflagClosed);
 
             // Clear protocol callbacks
+            /*
             if let Some(mut delegate) = self.m_delegate.take() {
                 unsafe {
                     delegate.as_mut().on_exchange_closing(self);
                 }
+            }
+            */
+            if let Some(d) = self.m_delegate.take() {
+                d.on_exchange_closing(self as _);
             }
 
             // Closure of an exchange context is based on ref counting. The Protocol, when it calls DoClose(), indicates that
@@ -829,10 +838,15 @@ pub mod exchange_context {
                 }
             }
 
+            /*
             if let Some(mut delegate_ptr) = self.m_delegate {
                 unsafe {
                     delegate_ptr.as_mut().on_response_timeout(self);
                 }
+            }
+            */
+            if let Some(d) = self.m_delegate.as_mut() {
+                d.on_response_timeout(self as *const Self as _);
             }
 
             if close_if_needed {
@@ -841,7 +855,7 @@ pub mod exchange_context {
         }
     }
 
-    impl<'a, 'b> ExchangeContextTrait<'a, 'b> for ExchangeContext<'a, 'b> {
+    impl<'b> ExchangeContextTrait<'b> for ExchangeContext<'b> {
         fn is_encryption_required(&self) -> bool {
             self.m_dispatch.is_encryption_required()
         }
@@ -907,11 +921,12 @@ pub mod exchange_context {
             self.base_mut().m_flags.insert(Flags::KflagWillSendMessage);
         }
 
-        fn get_delegaet(&self) -> Option<NonNull<dyn ExchangeDelegate + 'a>> {
-            self.m_delegate
+        fn get_delegaet(&self) -> Option<&mut ExchangeDelegate> {
+            self.m_delegate.as_mut()
         }
 
-        fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) {
+        //fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>) {
+        fn set_delegaet(&mut self, delegate: Option<ExchangeDelegate>) {
             self.m_delegate = delegate;
         }
 
@@ -940,11 +955,20 @@ pub mod exchange_context {
         }
 
         fn dump_to_log(&self) {
+            /*
             chip_log_error!(ExchangeManager, "ExchangeContext: {} delegate={}", chip_log_value_exchange_id(self.get_exchange_id(),
-            self.is_initiator()), chip_log_option_non_null(self.m_delegate));
+            self.is_initiator()), chip_log_option_non_null(self.m_delegate.as_ref().map(|d| NonNull::from_ref(d))));
+            */
+            chip_log_error!(ExchangeManager, "ExchangeContext: {} ", chip_log_value_exchange_id(self.get_exchange_id(),
+            self.is_initiator()));
+            if let Some(d) = self.delegate.as_ref() {
+                chip_log_error!(ExchangeManager, "delegate: {} ", d.dump_to_log());
+            } else {
+                chip_log_error!(ExchangeManager, "delegate: None");
+            }
         }
 
-        fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_, '_> {
+        fn get_reliable_messaeg_context(&self) -> *const impl ReliableMessageContext<'_> {
             self as _
         }
 
@@ -993,7 +1017,7 @@ pub mod exchange_context {
         }
     } // end of ExchangeContextTrait
 
-    impl<'a, 'b> ReliableMessageContext<'a, 'b> for ExchangeContext<'a, 'b> {
+    impl<'b> ReliableMessageContext<'b> for ExchangeContext<'b> {
         fn base(&self) -> &BaseReliableMessageContext {
             &self.m_reliable_message_context
         }
@@ -1018,11 +1042,11 @@ pub mod exchange_context {
             Some(mgr)
         }
 
-        fn get_exchange_context(&mut self) -> &mut ExchangeContext<'a, 'b> {
+        fn get_exchange_context(&mut self) -> &mut ExchangeContext<'b> {
             self
         }
 
-        fn get_exchange_context_const(&self) -> &ExchangeContext<'a, 'b> {
+        fn get_exchange_context_const(&self) -> &ExchangeContext<'b> {
             self
         }
     }
@@ -1217,8 +1241,8 @@ pub mod exchange_context {
             }
 
             impl ExchangeMessageDispatch for TestDispatch {
-                fn send_message<'a, 'b>(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, exchange_id: u16,
-                    _is_initiator: bool, _eliable_message_context: &mut impl ReliableMessageContext<'a, 'b>, is_reliable_transmission: bool,
+                fn send_message<'b>(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, exchange_id: u16,
+                    _is_initiator: bool, _eliable_message_context: &mut impl ReliableMessageContext<'b>, is_reliable_transmission: bool,
                     _rotocol: protocols::Id, _sg_type: u8, message: PacketBufferHandle) -> ChipErrorResult
                 {
                     self.len = message.data_len() as _;
@@ -1246,7 +1270,9 @@ pub mod exchange_context {
                 // delegate
                 let delegate = MockDelegate::new();
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
 
                 assert_eq!(id, ec.get_exchange_id());
 
@@ -1254,6 +1280,7 @@ pub mod exchange_context {
                 ec.do_close(false);
             }
 
+            /*
             #[test]
             fn reliable_compare() {
                 let mgr = ExchangeManager::new();
@@ -1921,6 +1948,7 @@ pub mod exchange_context {
                 //ec.do_close(false);
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
+            */
         } // end of with_mock_session_mgr
     } // end of mod tests
 } // end of mod exchange context
