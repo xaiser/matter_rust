@@ -78,7 +78,7 @@ pub trait ExchangeContextTrait<'b> {
 
     fn will_send_message(&mut self);
 
-    fn get_delegaet(&self) -> Option<&mut ExchangeDelegate>;
+    fn get_delegaet(&mut self) -> Option<&mut ExchangeDelegate>;
 
     //fn set_delegaet(&mut self, delegate: Option<NonNull<dyn ExchangeDelegate + 'a>>);
     fn set_delegaet(&mut self, delegate: Option<ExchangeDelegate>);
@@ -528,7 +528,7 @@ pub mod exchange_context {
         {
             let mut ec = Self::new();
 
-            ec.m_dispatch = Self::get_message_dispatch(is_ephemeral_exchange, delegate);
+            ec.m_dispatch = Self::get_message_dispatch(is_ephemeral_exchange, delegate.as_ref());
             // MUST not register the pointer here as we will move ec later
             //ec.m_session = ExchangeSessionHolder::new_with(ptr::addr_of_mut!(ec) as _);
 
@@ -606,7 +606,7 @@ pub mod exchange_context {
             self.set_waiting_for_response_or_ack(response_expected);
         }
 
-        pub(super) fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<ExchangeDelegate>) -> ExchangeMessageDispatchHandle {
+        pub(super) fn get_message_dispatch(is_ephemeral_exchange: bool, delegate: Option<&ExchangeDelegate>) -> ExchangeMessageDispatchHandle {
             if is_ephemeral_exchange {
                 return ExchangeMessageDispatchHandle::new_ephemeral_exchange_dispatch();
             }
@@ -640,7 +640,7 @@ pub mod exchange_context {
                 }
             }
             */
-            if let Some(d) = self.m_delegate.take() {
+            if let Some(mut d) = self.m_delegate.take() {
                 d.on_exchange_closing(self as _);
             }
 
@@ -845,8 +845,10 @@ pub mod exchange_context {
                 }
             }
             */
+            let ptr = self as *mut Self;
             if let Some(d) = self.m_delegate.as_mut() {
-                d.on_response_timeout(self as *const Self as _);
+                //d.on_response_timeout(self as *const Self as _);
+                d.on_response_timeout(ptr);
             }
 
             if close_if_needed {
@@ -921,7 +923,7 @@ pub mod exchange_context {
             self.base_mut().m_flags.insert(Flags::KflagWillSendMessage);
         }
 
-        fn get_delegaet(&self) -> Option<&mut ExchangeDelegate> {
+        fn get_delegaet(&mut self) -> Option<&mut ExchangeDelegate> {
             self.m_delegate.as_mut()
         }
 
@@ -961,7 +963,7 @@ pub mod exchange_context {
             */
             chip_log_error!(ExchangeManager, "ExchangeContext: {} ", chip_log_value_exchange_id(self.get_exchange_id(),
             self.is_initiator()));
-            if let Some(d) = self.delegate.as_ref() {
+            if let Some(d) = self.m_delegate.as_ref() {
                 chip_log_error!(ExchangeManager, "delegate: {} ", d.dump_to_log());
             } else {
                 chip_log_error!(ExchangeManager, "delegate: None");
@@ -1191,16 +1193,16 @@ pub mod exchange_context {
                 }
             }
 
-            impl ExchangeDelegate for MockDelegate {
-                fn on_message_received(&mut self, _ec: &mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+            impl ExchangeDelegateTrait for MockDelegate {
+                fn on_message_received(&mut self, _ec: *mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
                     chip_ok!()
                 }
 
-                fn on_response_timeout(&mut self, _ec: &mut ExchangeContext) {
+                fn on_response_timeout(&mut self, _ec: *mut ExchangeContext) {
                     self.on_response_timeout_calls += 1;
                 }
 
-                fn on_exchange_closing(&mut self, _ec: &mut ExchangeContext) {
+                fn on_exchange_closing(&mut self, _ec: *mut ExchangeContext) {
                     self.on_exchange_closing_calls += 1;
                 }
 

@@ -16,12 +16,15 @@ use crate::{
     chip_error_not_implemented,
     chip_core_error,
     chip_sdk_error,
+    chip_ok,
 };
 
 macro_rules! call_on_all_variants {
     ($self:expr, $method:ident $(, $args:expr)*) => {
         match $self {
             ExchangeDelegate::Tmp(tmp) => tmp.$method($($args),*),
+            #[cfg(test)]
+            ExchangeDelegate::Test(test) => test.$method($($args),*),
         }
     };
 }
@@ -90,7 +93,7 @@ pub mod tests {
     }
 
     impl TestDelegate {
-        pub fn new(delegate: impl ExchangeDelegateTrait) -> Self {
+        pub fn new(delegate: impl ExchangeDelegateTrait + 'static) -> Self {
             Self {
                 delegate: Box::new(delegate),
             }
@@ -106,7 +109,7 @@ pub mod tests {
             self.delegate.on_response_timeout(ec)
         }
 
-        fn on_exchange_closing(&mut self, _ec: *mut ExchangeContext) {
+        fn on_exchange_closing(&mut self, ec: *mut ExchangeContext) {
             self.delegate.on_exchange_closing(ec)
         }
 
@@ -144,28 +147,30 @@ impl ExchangeDelegate {
     }
 
     #[cfg(test)]
-    pub fn new_test(delegate: impl ExchangeDelegateTrait) -> Self {
+    pub fn new_test(delegate: impl ExchangeDelegateTrait + 'static) -> Self {
         ExchangeDelegate::Test(tests::TestDelegate::new(delegate))
     }
 
     pub fn dump_to_log(&self) -> &'static str{
         match self {
-            ExchangeDelegate::Tmp => "Tmp",
+            ExchangeDelegate::Tmp(_) => "Tmp",
+            #[cfg(test)]
+            ExchangeDelegate::Test(_) => "Test",
         }
     }
 }
 
 impl ExchangeDelegateTrait for ExchangeDelegate {
     fn on_message_received(&mut self, ec: *mut ExchangeContext, payload_header: &PayloadHeader, payload: PacketBufferHandle) -> ChipErrorResult {
-        call_on_all_variants!(self, on_message_received)
+        call_on_all_variants!(self, on_message_received, ec, payload_header, payload)
     }
 
     fn on_response_timeout(&mut self, ec: *mut ExchangeContext) {
-        call_on_all_variants!(self, on_response_timeout)
+        call_on_all_variants!(self, on_response_timeout, ec)
     }
 
     fn on_exchange_closing(&mut self, ec: *mut ExchangeContext) {
-        call_on_all_variants!(self, on_exchange_closing)
+        call_on_all_variants!(self, on_exchange_closing, ec)
     }
 
     fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {

@@ -51,7 +51,7 @@ impl ReliableMessageMgr {
      *  Iterate through active exchange contexts and retrans table entries. Clear the entry matching
      *  the specified ExchangeContext and the message ID from the retransmision table.
      */
-    pub fn check_and_rem_retrans_table<'a, 'b, Context: ReliableMessageContext<'a, 'b>>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
+    pub fn check_and_rem_retrans_table<'b, Context: ReliableMessageContext<'b>>(&mut self, _rc: &mut Context, _ack_message_counter: u32) -> bool {
         false
     }
 
@@ -69,7 +69,7 @@ impl ReliableMessageMgr {
      *
      *
      */
-    pub fn clear_retrans_table<'a, 'b>(&mut self, _rc: &impl ReliableMessageContext<'a, 'b>) {
+    pub fn clear_retrans_table<'b>(&mut self, _rc: &impl ReliableMessageContext<'b>) {
     }
 
     pub fn get_backoff(base_interval: Duration, send_count: u8, compute_max_possible: bool) -> Duration {
