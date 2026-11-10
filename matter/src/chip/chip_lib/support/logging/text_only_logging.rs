@@ -47,7 +47,7 @@ pub fn chip_log_value_exchange_id_from_received_header(payload_header: &PayloadH
     chip_log_value_exchange_id(payload_header.get_exchange_id(), payload_header.is_initiator())
 }
 
-pub fn chip_log_value_exchange<'b>(ec: &impl ExchangeContextTrait<'b>) -> DefaultString<EXCHANGED_ID_MAX_LENGTH>{
+pub fn chip_log_value_exchange(ec: &impl ExchangeContextTrait) -> DefaultString<EXCHANGED_ID_MAX_LENGTH>{
     chip_log_value_exchange_id(ec.get_exchange_id(), ec.is_initiator())
 }
 

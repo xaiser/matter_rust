@@ -27,8 +27,8 @@ pub trait ExchangeMessageDispatch {
         true
     }
 
-    fn send_message<'b>(&mut self, session_manager: &mut dyn SessionManagerTrait, session: &SessionHandle, exchange_id: u16,
-        is_initiator: bool, reliable_message_context: &mut impl ReliableMessageContext<'b>, is_reliable_transmission: bool,
+    fn send_message(&mut self, session_manager: &mut dyn SessionManagerTrait, session: &SessionHandle, exchange_id: u16,
+        is_initiator: bool, reliable_message_context: &mut impl ReliableMessageContext, is_reliable_transmission: bool,
         protocol: protocols::Id, msg_type: u8, message: PacketBufferHandle) -> ChipErrorResult;
 }
 
@@ -79,8 +79,8 @@ impl ExchangeMessageDispatchHandle {
 }
 
 impl ExchangeMessageDispatch for ExchangeMessageDispatchHandle {
-    fn send_message<'b>(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, _exchange_id: u16,
-        _is_initiator: bool, _reliable_message_context: &mut impl ReliableMessageContext<'b>, _is_reliable_transmission: bool,
+    fn send_message(&mut self, _session_manager: &mut dyn SessionManagerTrait, _session: &SessionHandle, _exchange_id: u16,
+        _is_initiator: bool, _reliable_message_context: &mut impl ReliableMessageContext, _is_reliable_transmission: bool,
         _protocol: protocols::Id, _msg_type: u8, _message: PacketBufferHandle) -> ChipErrorResult
     {
         chip_ok!()
