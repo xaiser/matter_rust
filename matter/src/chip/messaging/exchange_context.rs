@@ -1067,6 +1067,7 @@ pub mod exchange_context {
         };
 
         use core::ptr::{NonNull, addr_of, addr_eq, null_mut, addr_of_mut};
+        use core::sync::atomic::{Ordering, AtomicUsize};
 
         mod with_mock_session_mgr {
             use super::*;
@@ -1099,7 +1100,7 @@ pub mod exchange_context {
                     self.ec = app_state;
                 }
 
-                fn cancel_timer(&mut self, complete: TimerCompleteCallback, app_state: TimerCallbackContext) {
+                fn cancel_timer(&mut self, _complete: TimerCompleteCallback, _app_state: TimerCallbackContext) {
                     self.ec = null_mut();
                 }
             }
@@ -1138,31 +1139,33 @@ pub mod exchange_context {
                 fn system_layer(&mut self) -> Option<&mut dyn Layer> { Some(&mut self.system_layer as _) }
             }
 
-            struct MockDelegate {
-                pub on_exchange_closing_calls: usize,
-                pub on_response_timeout_calls: usize,
+            struct MockDelegate<'a> {
+                pub on_exchange_closing_calls: &'a AtomicUsize,
+                pub on_response_timeout_calls: &'a AtomicUsize,
             }
 
-            impl MockDelegate {
-                pub const fn new() -> Self {
+            impl<'a> MockDelegate<'a> {
+                pub const fn new(on_exchange_closing_calls: &'a AtomicUsize, on_response_timeout_calls: &'a AtomicUsize) -> Self {
                     Self {
-                        on_exchange_closing_calls: 0,
-                        on_response_timeout_calls: 0,
+                        on_exchange_closing_calls,
+                        on_response_timeout_calls,
                     }
                 }
             }
 
-            impl ExchangeDelegateTrait for MockDelegate {
+            impl ExchangeDelegateTrait for MockDelegate<'_> {
                 fn on_message_received(&mut self, _ec: *mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
                     chip_ok!()
                 }
 
                 fn on_response_timeout(&mut self, _ec: *mut ExchangeContext) {
-                    self.on_response_timeout_calls += 1;
+                    //self.on_response_timeout_calls += 1;
+                    self.on_response_timeout_calls.fetch_add(1, Ordering::Relaxed);
                 }
 
                 fn on_exchange_closing(&mut self, _ec: *mut ExchangeContext) {
-                    self.on_exchange_closing_calls += 1;
+                    //self.on_exchange_closing_calls += 1;
+                    self.on_exchange_closing_calls.fetch_add(1, Ordering::Relaxed);
                 }
 
                 fn get_message_dispatch(&self) -> ExchangeMessageDispatchHandle {
@@ -1229,7 +1232,9 @@ pub mod exchange_context {
                 let sh = get_session_handle(&mut table);
 
                 // delegate
-                let delegate = MockDelegate::new();
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
                 //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
@@ -1241,7 +1246,6 @@ pub mod exchange_context {
                 ec.do_close(false);
             }
 
-            /*
             #[test]
             fn reliable_compare() {
                 let mgr = ExchangeManager::new();
@@ -1252,9 +1256,11 @@ pub mod exchange_context {
                 let sh = get_session_handle(&mut table);
 
                 // delegate
-                let delegate = MockDelegate::new();
+                //let delegate = MockDelegate::new();
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    None, false);
 
                 let ep = addr_of!(ec);
                 let rp: *const dyn crate::chip::messaging::reliable_message_context::ReliableMessageContext = addr_of!(ec) as _;
@@ -1278,16 +1284,22 @@ pub mod exchange_context {
                 let sh = get_session_handle(&mut table);
 
                 // delegate
-                let delegate = MockDelegate::new();
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
                 ec.set_response_expected(true);
                 assert!(ec.start_response_timer().is_ok());
 
-                assert_eq!(0, delegate.on_exchange_closing_calls);
+                //assert_eq!(0, delegate.on_exchange_closing_calls);
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
                 assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
                 ec.do_close(true);
-                assert_eq!(1, delegate.on_exchange_closing_calls);
+                //assert_eq!(1, delegate.on_exchange_closing_calls);
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
                 assert_eq!(null_mut(), session_mgr.system_layer.ec);
             }
 
@@ -1304,20 +1316,27 @@ pub mod exchange_context {
                 let sh = get_session_handle(&mut table);
 
                 // delegate
-                let delegate = MockDelegate::new();
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
-                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
+                let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
                 ec.set_response_expected(true);
                 assert!(ec.start_response_timer().is_ok());
 
-                assert_eq!(0, delegate.on_exchange_closing_calls);
+                //assert_eq!(0, delegate.on_exchange_closing_calls);
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
                 assert_eq!(ptr::addr_of!(ec).cast(), session_mgr.system_layer.ec);
                 ec.do_close(true);
-                assert_eq!(1, delegate.on_exchange_closing_calls);
+                //assert_eq!(1, delegate.on_exchange_closing_calls);
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
                 assert_eq!(null_mut(), session_mgr.system_layer.ec);
 
                 ec.do_close(true);
-                assert_eq!(1, delegate.on_exchange_closing_calls);
+                //assert_eq!(1, delegate.on_exchange_closing_calls);
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
             }
 
             #[test]
@@ -1889,27 +1908,30 @@ pub mod exchange_context {
                 let sh = get_session_handle(&mut table);
 
                 // delegate
-                let delegate = MockDelegate::new();
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
-                    Some(NonNull::from_ref(&delegate)), false);
+                    Some(ExchangeDelegate::new_test(delegate)), false);
                 assert!(handle.is_ok());
                 let mut handle = handle.unwrap();
 
                 // to ensure calling on session defunct
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
 
-                assert_eq!(0, delegate.on_response_timeout_calls);
+                //assert_eq!(0, delegate.on_response_timeout_calls);
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
                 //ec.notify_response_timeout(false);
                 //sec.try_borrow_mut().unwrap().notify_response_timeout(false);
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(false));
                 //assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
-                assert_eq!(1, delegate.on_response_timeout_calls);
+                //assert_eq!(1, delegate.on_response_timeout_calls);
+                assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
 
                 //ec.do_close(false);
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
-            */
         } // end of with_mock_session_mgr
     } // end of mod tests
 } // end of mod exchange context
