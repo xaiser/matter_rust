@@ -1906,6 +1906,9 @@ pub mod exchange_context {
                 // to create a secure session
                 let mut table = SecureSessionTable::new();
                 let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
 
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -1920,16 +1923,51 @@ pub mod exchange_context {
                 // to ensure calling on session defunct
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
 
-                //assert_eq!(0, delegate.on_response_timeout_calls);
                 assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
-                //ec.notify_response_timeout(false);
-                //sec.try_borrow_mut().unwrap().notify_response_timeout(false);
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(false));
-                //assert!(ec.m_session.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
-                //assert_eq!(1, delegate.on_response_timeout_calls);
                 assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                // session is NOT active
+                assert!(sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
 
-                //ec.do_close(false);
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
+            }
+
+            #[test]
+            fn notify_response_timeout_and_close() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+
+                // to ensure calling on session defunct
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(true));
+                assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
+                // session is NOT active
+                assert!(sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
         } // end of with_mock_session_mgr
