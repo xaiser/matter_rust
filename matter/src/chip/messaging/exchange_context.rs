@@ -107,24 +107,24 @@ pub trait ExchangeContextTrait {
 }
 
 pub struct ExchangeContextSessionDelegate {
-    //m_ec: shared::WeakExchangeContextHandle,
-    m_ec: u8,
+    m_ec: shared::WeakExchangeContextHandle,
+    //m_ec: u8,
 }
 
 impl ExchangeContextSessionDelegate {
-    pub(super) fn new_with(_weak_ec: shared::WeakSharedExchangeContext) -> Self 
+    pub(super) fn new_with(weak_ec: shared::WeakSharedExchangeContext) -> Self 
     {
         Self {
-            //m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
-            m_ec: 0,
+            m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
+            //m_ec: 0,
         }
     }
 
-    pub(super) fn new_with_hanele(_weak_ec: shared::WeakExchangeContextHandle) -> Self 
+    pub(super) fn new_with_hanele(weak_ec: shared::WeakExchangeContextHandle) -> Self 
     {
         Self {
-            //m_ec: weak_ec,
-            m_ec: 0,
+            m_ec: weak_ec,
+            //m_ec: 0,
         }
     }
 }
@@ -1953,7 +1953,8 @@ pub mod exchange_context {
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
                 let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
-                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                // ensure initiator is false to trigger close calls
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
                     Some(ExchangeDelegate::new_test(delegate)), false);
                 assert!(handle.is_ok());
                 let mut handle = handle.unwrap();
@@ -1968,7 +1969,8 @@ pub mod exchange_context {
                 // session is NOT active
                 assert!(sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
 
-                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
+                // no need to close
+                //let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
         } // end of with_mock_session_mgr
     } // end of mod tests
