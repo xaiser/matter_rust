@@ -194,9 +194,8 @@ where
 
     fn deallocate(&mut self, obj: &mut RcInner<ElementType>) {
         let element = ptr::from_mut(obj);
-        unsafe {
-            ptr::drop_in_place(element);
-        }
+
+        // RC will drop the element, no need to drop again here
 
         self.deallocate(element);
     }
