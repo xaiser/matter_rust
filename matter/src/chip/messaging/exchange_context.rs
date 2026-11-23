@@ -34,8 +34,13 @@ use crate::{
         },
     },
     ChipErrorResult,
+
+    chip_internal_log,
+    chip_internal_log_impl,
+    chip_log_error,
 };
 
+use core::str::FromStr;
 use core::ptr::NonNull;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -108,7 +113,6 @@ pub trait ExchangeContextTrait {
 
 pub struct ExchangeContextSessionDelegate {
     m_ec: shared::WeakExchangeContextHandle,
-    //m_ec: u8,
 }
 
 impl ExchangeContextSessionDelegate {
@@ -116,7 +120,6 @@ impl ExchangeContextSessionDelegate {
     {
         Self {
             m_ec: shared::WeakExchangeContextHandle::new_with(weak_ec)
-            //m_ec: 0,
         }
     }
 
@@ -124,7 +127,6 @@ impl ExchangeContextSessionDelegate {
     {
         Self {
             m_ec: weak_ec,
-            //m_ec: 0,
         }
     }
 }
@@ -134,7 +136,44 @@ impl SessionDelegateTrait for ExchangeContextSessionDelegate {
         NewSessionHandlingPolicy::KstayAtOldSession
     }
 
-    fn on_session_released(&self) {}
+    fn on_session_released(&self) {
+        use exchange_context::ExchangeContext;
+
+        if self.m_ec.with(|ec: &ExchangeContext| {
+            ec.should_ignore_session_release()
+        }).is_ok_and(|b| b) {
+            return;
+        }
+
+        let handle = self.m_ec.get_handle();
+        if handle.is_err() {
+            return;
+        }
+        let mut handle = handle.unwrap();
+
+        if handle.with_mut(|ec: &mut ExchangeContext| {
+            if ec.base().m_flags.intersects(Flags::KflagIgnoreSessionRelease) {
+                let exchange_mgr = {
+                    if let Some(mut mgr_ptr) = ec.get_exchange_mgr() {
+                        unsafe { mgr_ptr.as_mut() }
+                    } else {
+                        chip_log_error!(ExchangeManager, "no ec manager");
+                        return false;
+                    }
+                };
+
+                // Exchange is already being closed. It may occur when closing an exchange after sending
+                // RemoveFabric response which triggers removal of all sessions for the given fabric.
+                exchange_mgr.get_reliable_message_mgr().clear_retrans_table(ec);
+
+                return true;
+            } else {
+                return false;
+            }
+        }).is_ok_and(|b| b) {
+            return;
+        }
+    }
 
     fn on_session_hang(&self) -> Option<SessionHangOp> {
         None
@@ -221,6 +260,14 @@ pub mod shared {
                 ec,
             }
         }
+
+        pub(super) fn get_handle(&self) -> Result<ExchangeContextHandle, AccessError> {
+            if let Some(shared_handle) = self.ec.upgrade() {
+                Ok(ExchangeContextHandle::new(shared_handle.clone()))
+            } else {
+                return Err(AccessError::Invalid);
+            }
+        }
     }
 
     impl Access for WeakExchangeContextHandle {
@@ -251,6 +298,14 @@ pub mod shared {
 
     pub struct ExchangeContextHandle {
         ec: SharedExchangeContext,
+    }
+
+    impl ExchangeContextHandle {
+        pub fn new(ec: SharedExchangeContext) -> ExchangeContextHandle {
+            Self {
+                ec,
+            }
+        }
     }
 
     impl Access for ExchangeContextHandle {
@@ -547,7 +602,7 @@ pub mod exchange_context {
         }
 
         #[inline]
-        fn should_ignore_session_release(&self) -> bool {
+        pub(super) fn should_ignore_session_release(&self) -> bool {
             self.base().m_flags.intersects(Flags::KflagIgnoreSessionRelease)
         }
 
@@ -769,51 +824,6 @@ pub mod exchange_context {
             chip_ok!()
         }
 
-        fn notify_response_timeout(&mut self, close_if_needed: bool) {
-            // Grab the value of WaitingForResponseOrAck() before we mess with our state.
-            let got_mrp_ack = !self.waiting_for_response_or_ack();
-
-            self.set_response_expected(false);
-
-            // Hold a ref to ourselves so we can make calls into our delegate that might
-            // decrease our refcount (e.g. by expiring out session) without worrying
-            // about use-after-free.
-            //TODO: ensure we have a copy here
-            
-            // mSession might be null if this timeout is due to the session being
-            // evicted.
-            if self.m_session.is_some() {
-                // If we timed out _after_ getting an ack for the message, that means
-                // the session is probably fine (since our message and the ack got
-                // through), so don't mark the session defunct if we got an MRP ack.
-                if !got_mrp_ack {
-                    if self.m_session.with(|s: &SecureSession| s.is_case_session()).is_ok_and(|b| b) {
-                        if self.m_session.with_mut(|s: &mut SecureSession| s.mark_as_defunct()).is_err() {
-                            chip_log_error!(ExchangeManager, "cannot mark session defunct");
-                        }
-                    }
-                    let mut session = self.get_session_handle();
-                    session.notify_session_hang();
-                }
-            }
-
-            /*
-            if let Some(mut delegate_ptr) = self.m_delegate {
-                unsafe {
-                    delegate_ptr.as_mut().on_response_timeout(self);
-                }
-            }
-            */
-            let ptr = self as *mut Self;
-            if let Some(d) = self.m_delegate.as_mut() {
-                //d.on_response_timeout(self as *const Self as _);
-                d.on_response_timeout(ptr);
-            }
-
-            if close_if_needed {
-                self.message_handled();
-            }
-        }
     }
 
     impl ExchangeContextTrait for ExchangeContext {
@@ -933,7 +943,47 @@ pub mod exchange_context {
             self as _
         }
 
+        /*
         fn notify_response_timeout(&mut self, _close_if_needed: bool) {
+        }
+        */
+        fn notify_response_timeout(&mut self, close_if_needed: bool) {
+            // Grab the value of WaitingForResponseOrAck() before we mess with our state.
+            let got_mrp_ack = !self.waiting_for_response_or_ack();
+
+            self.set_response_expected(false);
+
+            // Hold a ref to ourselves so we can make calls into our delegate that might
+            // decrease our refcount (e.g. by expiring out session) without worrying
+            // about use-after-free.
+            //TODO: ensure we have a copy here
+            
+            // mSession might be null if this timeout is due to the session being
+            // evicted.
+            if self.m_session.is_some() {
+                // If we timed out _after_ getting an ack for the message, that means
+                // the session is probably fine (since our message and the ack got
+                // through), so don't mark the session defunct if we got an MRP ack.
+                if !got_mrp_ack {
+                    if self.m_session.with(|s: &SecureSession| s.is_case_session()).is_ok_and(|b| b) {
+                        if self.m_session.with_mut(|s: &mut SecureSession| s.mark_as_defunct()).is_err() {
+                            chip_log_error!(ExchangeManager, "cannot mark session defunct");
+                        }
+                    }
+                    let mut session = self.get_session_handle();
+                    session.notify_session_hang();
+                }
+            }
+
+            let ptr = self as *mut Self;
+            if let Some(d) = self.m_delegate.as_mut() {
+                //d.on_response_timeout(self as *const Self as _);
+                d.on_response_timeout(ptr);
+            }
+
+            if close_if_needed {
+                self.message_handled();
+            }
         }
 
         fn close(&mut self) {
