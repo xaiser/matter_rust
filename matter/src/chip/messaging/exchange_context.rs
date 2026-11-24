@@ -164,7 +164,10 @@ impl SessionDelegateTrait for ExchangeContextSessionDelegate {
 
                 // Exchange is already being closed. It may occur when closing an exchange after sending
                 // RemoveFabric response which triggers removal of all sessions for the given fabric.
-                exchange_mgr.get_reliable_message_mgr().clear_retrans_table(ec);
+                let reliable_mgr = unsafe {
+                    exchange_mgr.get_reliable_message_mgr().as_mut()
+                };
+                reliable_mgr.clear_retrans_table(ec);
 
                 return true;
             } else {
@@ -173,6 +176,28 @@ impl SessionDelegateTrait for ExchangeContextSessionDelegate {
         }).is_ok_and(|b| b) {
             return;
         }
+
+        let _ = handle.with_mut(|ec: &mut ExchangeContext| {
+            //
+            // If a send is not expected (either because we're waiting for a response OR
+            // we're in the middle of processing a OnMessageReceived call), we can go ahead
+            // and notify our delegate and abort the exchange since we still own the ref.
+            //
+            if !ec.is_send_expected() {
+                if ec.is_response_expected() {
+                    // If we're waiting on a response, we now know it's never going to show up
+                    // and we should notify our delegate accordingly.
+                    ec.cancel_response_timer();
+                    // We want to Abort, not just Close, so that RMP bits are cleared, so
+                    // don't let NotifyResponseTimeout close us.
+                    ec.notify_response_timeout(false);
+                }
+
+                ec.abort();
+            } else {
+                ec.do_close(true);
+            }
+        });
     }
 
     fn on_session_hang(&self) -> Option<SessionHangOp> {
@@ -639,7 +664,7 @@ pub mod exchange_context {
             ExchangeMessageDispatchHandle::new_application_exchange_dispatch()
         }
 
-        fn do_close(&mut self, clear_retrans_table: bool) {
+        pub(super) fn do_close(&mut self, clear_retrans_table: bool) {
             if self.base().m_flags.intersects(Flags::KflagClosed) {
                 return;
             }
@@ -696,7 +721,7 @@ pub mod exchange_context {
             }
         }
 
-        fn cancel_response_timer(&self) {
+        pub(super) fn cancel_response_timer(&self) {
             unsafe {
                 if let Some(exchange_mgr) = self.m_exchange_mgr &&
                     let Some(session_mgr) = exchange_mgr.as_ref().get_session_manager() &&
@@ -2021,6 +2046,51 @@ pub mod exchange_context {
 
                 // no need to close
                 //let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
+            }
+
+            #[test]
+            fn on_session_released() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let mut sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+
+                // release session
+                sh_copy.notify_session_released();
+                // TODO: more check here
+                assert!(false);
+
+                /*
+                // to ensure calling on session defunct
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(false));
+                assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                // session is NOT active
+                assert!(sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                */
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
         } // end of with_mock_session_mgr
     } // end of mod tests
