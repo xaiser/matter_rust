@@ -152,7 +152,7 @@ impl SessionDelegateTrait for ExchangeContextSessionDelegate {
         let mut handle = handle.unwrap();
 
         if handle.with_mut(|ec: &mut ExchangeContext| {
-            if ec.base().m_flags.intersects(Flags::KflagIgnoreSessionRelease) {
+            if ec.base().m_flags.intersects(Flags::KflagClosed) {
                 let exchange_mgr = {
                     if let Some(mut mgr_ptr) = ec.get_exchange_mgr() {
                         unsafe { mgr_ptr.as_mut() }
@@ -622,7 +622,7 @@ pub mod exchange_context {
         }
 
         #[inline]
-        fn set_ignor_session_release(&mut self, should_ignore: bool) {
+        fn set_ignore_session_release(&mut self, should_ignore: bool) {
             self.base_mut().m_flags.set(Flags::KflagIgnoreSessionRelease, should_ignore);
         }
 
@@ -2069,27 +2069,127 @@ pub mod exchange_context {
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
                 let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
 
+                // initiator = false to ensure send_expected is false
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+                // release session
+                sh_copy.notify_session_released();
+                assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
+            }
+
+            #[test]
+            fn on_session_released_send_expected() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let mut sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
                     Some(ExchangeDelegate::new_test(delegate)), false);
                 assert!(handle.is_ok());
                 let mut handle = handle.unwrap();
-
-                // release session
-                sh_copy.notify_session_released();
-                // TODO: more check here
-                assert!(false);
-
-                /*
-                // to ensure calling on session defunct
-                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_waiting_for_response_or_ack(true));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
 
                 assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
-                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.notify_response_timeout(false));
-                assert_eq!(1, TIMEOUT_CALLS.load(Ordering::Relaxed));
-                // session is NOT active
-                assert!(sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+                // release session
+                sh_copy.notify_session_released();
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(1, CLOSE_CALLS.load(Ordering::Relaxed));
+            }
 
-                */
+            #[test]
+            fn on_session_released_after_close() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let mut sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
+                // initiator = false to ensure send_expected is false
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                // release session
+                sh_copy.notify_session_released();
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+            }
+
+            #[test]
+            fn ignore_on_session_released() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let mut sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
+                // initiator = false to ensure send_expected is false
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_ignore_session_release(true));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+                // release session
+                sh_copy.notify_session_released();
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
             }
         } // end of with_mock_session_mgr
