@@ -17,7 +17,7 @@ use crate::{
             },
             reliable_message_mgr::SharedReliableMessageMgr,
             reliable_message_protocol_config::CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT,
-            flags::{MessageFlagValues, SendMessageFlags},
+            flags::{MessageFlags as Flags, SendMessageFlags},
         },
         system::{
             system_clock::Timestamp,
@@ -257,7 +257,7 @@ pub trait ReliableMessageContext {
         }
     }
 
-    fn handle_needs_ack(&mut self, message_counter: u32, message_flags: MessageFlagValues) -> ChipErrorResult {
+    fn handle_needs_ack(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
         let result = self.handle_needs_ack_inner(message_counter, message_flags);
 
         // Schedule next physical wakeup on function exit
@@ -277,10 +277,10 @@ pub trait ReliableMessageContext {
         result
     }
 
-    fn handle_needs_ack_inner(&mut self, message_counter: u32, message_flags: MessageFlagValues) -> ChipErrorResult {
+    fn handle_needs_ack_inner(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
         // If the message IS a duplicate there will never be a response to it, so we
         // should not wait for one and just immediately send a standalone ack.
-        if message_flags.intersects(MessageFlagValues::KduplicateMessage) {
+        if message_flags.intersects(Flags::KduplicateMessage) {
             chip_log_detail!(ExchangeManager,
                 "Forcing tx of solitary ack for duplicate MessageCounter: {} on exchange {}",
                 message_counter, chip_log_value_exchange(self.get_exchange_context()));

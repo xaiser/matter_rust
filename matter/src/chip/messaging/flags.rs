@@ -2,7 +2,7 @@ use bitflags::bitflags;
 
 bitflags! {
     #[derive(Copy,Clone)]
-    pub struct MessageFlagValues: u32 {
+    pub struct MessageFlags: u32 {
         /* Indicates that the message is a duplicate of a previously received message. */
         const KduplicateMessage = 0x00000001;
     }

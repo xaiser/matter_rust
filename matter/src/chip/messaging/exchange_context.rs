@@ -19,7 +19,7 @@ use crate::{
             },
             reliable_message_mgr::SharedReliableMessageMgr,
             reliable_message_context::{ReliableMessageContext, BaseReliableMessageContext, MessageFlags as Flags},
-            flags::SendMessageFlags as SendFlags,
+            flags::{SendMessageFlags as SendFlags, MessageFlags as MessagingFlags},
         },
         transport::{
             raw::{
@@ -109,6 +109,9 @@ pub trait ExchangeContextTrait {
     fn abort(&mut self);
 
     fn match_exchange(&self, session: &SessionHandle, packet_header: &PacketHeader, payload_header: &PayloadHeader) -> bool;
+
+    fn handle_message(&mut self, message_counter: u32, payload_header: &PayloadHeader, msg_flags: MessagingFlags, 
+        msg_buf: PacketBufferHandle) -> ChipErrorResult;
 }
 
 pub struct ExchangeContextSessionDelegate {
@@ -401,7 +404,7 @@ pub mod exchange_context {
                 },
                 reliable_message_mgr::SharedReliableMessageMgr,
                 reliable_message_context::{ReliableMessageContext, BaseReliableMessageContext, MessageFlags as Flags},
-                flags::SendMessageFlags as SendFlags,
+                flags::{SendMessageFlags as SendFlags, MessageFlags as MessagingFlags},
             },
             transport::{
                 raw::{
@@ -1050,6 +1053,96 @@ pub mod exchange_context {
                 //    case, the initiator is ill defined)
 
                 && (payload_header.is_initiator() != self.is_initiator());
+        }
+
+        fn handle_message(&mut self, message_counter: u32, payload_header: &PayloadHeader, msg_flags: MessagingFlags, 
+            msg_buf: PacketBufferHandle) -> ChipErrorResult
+        {
+            // We hold a reference to the ExchangeContext here to
+            // guard against Close() calls(decrementing the reference
+            // count) by the protocol before the CHIP Exchange
+            // layer has completed its work on the ExchangeContext.
+            //
+            // Maybe we don't need this one as long as the we force user call this on the
+            // ExchangeContextHandle
+            //
+            // ExchangeHandle ref(*this);
+            
+            let is_standalone_ack = payload_header.has_message_type(protocols::secure_channel::MsgType::StandaloneAck.into());
+            let is_duplicate = msg_flags.intersects(MessagingFlags::KduplicateMessage);
+
+            let mut this = scopeguard::guard(self, |ec| {
+                // Duplicates and standalone acks are not application-level messages, so they should generally not lead to any state
+                // changes.  The one exception to that is that if we have a null mDelegate then our lifetime is not application-defined,
+                // since we don't interact with the application at that point.  That can happen when we are already closed (in which case
+                // MessageHandled is a no-op) or if we were just created to send a standalone ack for this incoming message, in which case
+                // we should treat it as an app-level message for purposes of our state.
+                if (is_standalone_ack || is_duplicate) && ec.m_delegate.is_some() {
+                    return;
+                }
+                ec.message_handled()
+            });
+
+            if this.m_session.with(|session: &Session| session.allows_mrp()).is_ok_and(|b| b) {
+                if this.m_dispatch.is_reliable_transmission_allowed() {
+                    if !msg_flags.intersects(MessagingFlags::KduplicateMessage) && payload_header.is_ack_msg() &&
+                        payload_header.get_ack_message_counter().is_some()
+                    {
+                        this.handle_rcvd_ack(payload_header.get_ack_message_counter().clone().unwrap());
+                    }
+
+                    if payload_header.is_needs_ack() {
+                        // An acknowledgment needs to be sent back to the peer for this message on this exchange,
+                        let _ = this.handle_needs_ack(message_counter, msg_flags).inspect_err(|e| {
+                            chip_log_error!(ExchangeManager, "handle needs ack error: {}", e);
+                        });
+                    }
+                }
+
+                if this.is_ack_pending() && this.m_delegate.is_none() {
+                    // The incoming message wants an ack, but we have no delegate, so
+                    // there's not going to be a response to piggyback on.  Just flush the
+                    // ack out right now.
+                    this.flush_acks()?;
+                }
+
+                // The SecureChannel::StandaloneAck message type is only used for MRP; do not pass such messages to the application layer.
+                if is_standalone_ack {
+                    return chip_ok!();
+                }
+            } // allows mrp
+
+            // Since the message is duplicate, let's not forward it up the stack
+            if is_duplicate {
+                return chip_ok!();
+            }
+
+            if this.m_session.with(|session: &Session| session.allows_mrp()).is_ok_and(|b| b) {
+                if this.is_ephemeral_exchange() {
+                    // The EphemeralExchange has done its job, since StandaloneAck is sent in previous FlushAcks() call.
+                    return chip_ok!();
+                }
+
+                if this.is_waiting_for_ack() {
+                    // The only way we can get here is a spec violation on the other side:
+                    // we sent a message that needs an ack, and the other side responded
+                    // with a message that does not contain an ack for the message we sent.
+                    // Just drop this message; if we delivered it to our delegate it might
+                    // try to send another message-needing-an-ack in response, which would
+                    // violate our internal invariants.
+                    chip_log_error!(ExchangeManager, "Dropping message without piggyback ack when we are waiting for an ack.");
+                    return Err(chip_error_incorrect_state!());
+                }
+            } // allow mrp
+              
+            // Set kFlagReceivedAtLeastOneMessage to true since we have received at least one new application level message
+            this.set_has_received_at_least_one_message(true);
+
+            // Don't send messages on to our delegate if our dispatch does not allow
+            // those messages.  Those messages should also not be treated as responses,
+            // since if our delegate is expecting a response we will not notify it about
+            // these messages.
+            chip_ok!()
         }
     } // end of ExchangeContextTrait
 

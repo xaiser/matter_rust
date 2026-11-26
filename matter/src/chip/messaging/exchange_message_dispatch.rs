@@ -30,6 +30,10 @@ pub trait ExchangeMessageDispatch {
     fn send_message(&mut self, session_manager: &mut dyn SessionManagerTrait, session: &SessionHandle, exchange_id: u16,
         is_initiator: bool, reliable_message_context: &mut impl ReliableMessageContext, is_reliable_transmission: bool,
         protocol: protocols::Id, msg_type: u8, message: PacketBufferHandle) -> ChipErrorResult;
+
+    fn is_reliable_transmission_allowed(&self) -> bool {
+        true
+    }
 }
 
 mod inner {
