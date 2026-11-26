@@ -1071,6 +1071,7 @@ pub mod exchange_context {
             let is_standalone_ack = payload_header.has_message_type(protocols::secure_channel::MsgType::StandaloneAck.into());
             let is_duplicate = msg_flags.intersects(MessagingFlags::KduplicateMessage);
 
+            let ec_ptr: * mut ExchangeContext = core::ptr::from_ref(self) as _;
             let mut this = scopeguard::guard(self, |ec| {
                 // Duplicates and standalone acks are not application-level messages, so they should generally not lead to any state
                 // changes.  The one exception to that is that if we have a null mDelegate then our lifetime is not application-defined,
@@ -1142,6 +1143,24 @@ pub mod exchange_context {
             // those messages.  Those messages should also not be treated as responses,
             // since if our delegate is expecting a response we will not notify it about
             // these messages.
+            if this.m_dispatch.message_permitted(payload_header.get_protocol_id(), payload_header.get_message_type()) {
+                if this.is_response_expected() {
+                    // Since we got the response, cancel the response timer.
+                    this.cancel_response_timer();
+
+                    // If the context was expecting a response to a previously sent message, this message
+                    // is implicitly that response.
+                    this.set_response_expected(false);
+                }
+
+                if let Some(delegate) = this.m_delegate.as_mut() {
+                    return delegate.on_message_received(ec_ptr, payload_header, msg_buf);
+                }
+            }
+
+            default_on_message_received(&this, payload_header.get_protocol_id(), payload_header.get_message_type(),
+                message_counter, msg_buf);
+
             chip_ok!()
         }
     } // end of ExchangeContextTrait
@@ -1235,7 +1254,7 @@ pub mod exchange_context {
         };
 
         use core::ptr::{NonNull, addr_of, addr_eq, null_mut, addr_of_mut};
-        use core::sync::atomic::{Ordering, AtomicUsize};
+        use core::sync::atomic::{Ordering, AtomicUsize, AtomicU8, AtomicU32};
 
         mod with_mock_session_mgr {
             use super::*;
@@ -1310,13 +1329,18 @@ pub mod exchange_context {
             struct MockDelegate<'a> {
                 pub on_exchange_closing_calls: &'a AtomicUsize,
                 pub on_response_timeout_calls: &'a AtomicUsize,
+                pub message_type: &'a AtomicU8,
+                pub ack_counter: Option<&'a AtomicU32>,
             }
 
             impl<'a> MockDelegate<'a> {
-                pub const fn new(on_exchange_closing_calls: &'a AtomicUsize, on_response_timeout_calls: &'a AtomicUsize) -> Self {
+                pub const fn new(on_exchange_closing_calls: &'a AtomicUsize, on_response_timeout_calls: &'a AtomicUsize
+                    message_type: &'a AtomicU8, ack_counter: Option<&'a AtomicU32>,) -> Self {
                     Self {
                         on_exchange_closing_calls,
                         on_response_timeout_calls,
+                        message_type,
+                        ack_counter,
                     }
                 }
             }
@@ -1402,7 +1426,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
@@ -2267,6 +2293,47 @@ pub mod exchange_context {
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
                 let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+
+                // initiator = false to ensure send_expected is false
+                let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
+                    Some(ExchangeDelegate::new_test(delegate)), false);
+                assert!(handle.is_ok());
+                let mut handle = handle.unwrap();
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_ignore_session_release(true));
+
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+                // release session
+                sh_copy.notify_session_released();
+                assert_eq!(0, TIMEOUT_CALLS.load(Ordering::Relaxed));
+                assert_eq!(0, CLOSE_CALLS.load(Ordering::Relaxed));
+
+                let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.do_close(false));
+            }
+
+            #[test]
+            fn handle_message_successfully() {
+                let mut alloactor = new_exchange_context_alloactor();
+
+                let id = 1u16;
+                let mut mgr = ExchangeManager::new();
+                let session_mgr = MockSessionMgr::new();
+                let _ = mgr.init(NonNull::from_ref(&session_mgr));
+
+                // to create a secure session
+                let mut table = SecureSessionTable::new();
+                let sh = get_session_handle(&mut table);
+                let mut sh_copy = sh.clone();
+                // session is active
+                assert!(!sh_copy.with(|s: &SecureSession| s.is_defunct()).is_ok_and(|b| b));
+
+                // delegate
+                static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 // initiator = false to ensure send_expected is false
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 

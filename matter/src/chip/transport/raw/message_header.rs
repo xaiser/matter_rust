@@ -94,6 +94,7 @@ pub mod header {
     }
 
     bitflags! {
+        #[derive(Debug, Clone, PartialEq)]
         pub struct ExFlagValues: u8 {
             // Set when current message is sent by the initiator of an exchange.
             const KExchangeFlagInitiator = 0x01;
@@ -714,6 +715,7 @@ impl PacketHeader {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PayloadHeader {
     m_message_type: u8,
     m_exchange_id: u16,

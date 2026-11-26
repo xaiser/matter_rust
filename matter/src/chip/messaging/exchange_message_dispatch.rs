@@ -34,6 +34,10 @@ pub trait ExchangeMessageDispatch {
     fn is_reliable_transmission_allowed(&self) -> bool {
         true
     }
+
+    fn message_permitted(&self, protocol: protocols::Id, the_type: u8) -> bool {
+        true
+    }
 }
 
 mod inner {
