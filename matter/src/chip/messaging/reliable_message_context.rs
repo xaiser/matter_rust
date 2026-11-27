@@ -15,7 +15,7 @@ use crate::{
                 ExchangeContextTrait,
                 exchange_context::ExchangeContext,
             },
-            reliable_message_mgr::SharedReliableMessageMgr,
+            reliable_message_mgr::ReliableMessageMgrTrait,
             reliable_message_protocol_config::CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT,
             flags::{MessageFlags as Flags, SendMessageFlags},
         },
@@ -90,255 +90,259 @@ bitflags! {
     }
 }
 
-pub trait ReliableMessageContext {
-    fn base(&self) -> &BaseReliableMessageContext;
-    fn base_mut(&mut self) -> &mut BaseReliableMessageContext;
+pub mod trait {
+    use super::*;
 
-    /*
-     * Flush the pending Ack for current exchange.
-     *
-     */
-    fn flush_acks(&mut self) -> ChipErrorResult {
-        if self.is_ack_pending() {
-            self.send_standalone_ack_message()?;
+    pub trait ReliableMessageContext<Mgr: ReliableMessageMgrTrait> {
+        fn base(&self) -> &BaseReliableMessageContext;
+        fn base_mut(&mut self) -> &mut BaseReliableMessageContext;
 
-            chip_log_detail!(ExchangeManager, "Flushed pending ack for MessageCounter:{} on exchange {:p}",
-                self.base().m_pending_peer_ack_message_counter, self.get_exchange_context_const());
+        /*
+         * Flush the pending Ack for current exchange.
+         *
+         */
+        fn flush_acks(&mut self) -> ChipErrorResult {
+            if self.is_ack_pending() {
+                self.send_standalone_ack_message()?;
+
+                chip_log_detail!(ExchangeManager, "Flushed pending ack for MessageCounter:{} on exchange {:p}",
+                    self.base().m_pending_peer_ack_message_counter, self.get_exchange_context_const());
+            }
+
+            chip_ok!()
         }
 
-        chip_ok!()
-    }
+        /*
+         * Take the pending peer ack message counter from the context.  This must
+         * only be called when HasPiggybackAckPending() is true.  After this call,
+         * IsAckPending() will be false; it's the caller's responsibility to send
+         * the ack.
+         */
+        fn take_pending_peer_ack_message_counter(&mut self) -> u32 {
+            self.base_mut().set_ack_pending(false);
 
-    /*
-     * Take the pending peer ack message counter from the context.  This must
-     * only be called when HasPiggybackAckPending() is true.  After this call,
-     * IsAckPending() will be false; it's the caller's responsibility to send
-     * the ack.
-     */
-    fn take_pending_peer_ack_message_counter(&mut self) -> u32 {
-        self.base_mut().set_ack_pending(false);
+            self.base().m_pending_peer_ack_message_counter
+        }
 
-        self.base().m_pending_peer_ack_message_counter
-    }
+        /*
+         * Check whether we have a mPendingPeerAckMessageCounter. The counter is
+         * valid once we receive a message which requests an ack. Once
+         * mPendingPeerAckMessageCounter is valid, it never stops being valid.
+         */
+        fn has_piggyback_ack_pending(&self) -> bool {
+            self.base().has_piggyback_ack_pending()
+        }
 
-    /*
-     * Check whether we have a mPendingPeerAckMessageCounter. The counter is
-     * valid once we receive a message which requests an ack. Once
-     * mPendingPeerAckMessageCounter is valid, it never stops being valid.
-     */
-    fn has_piggyback_ack_pending(&self) -> bool {
-        self.base().has_piggyback_ack_pending()
-    }
+        /*
+         *  Send a SecureChannel::StandaloneAck message.
+         *
+         *  @note  When sent via UDP, the null message is sent *without* requesting an acknowledgment,
+         *  even in the case where the auto-request acknowledgment feature has been enabled on the
+         *  exchange.
+         */
+        fn send_standalone_ack_message(&mut self) -> ChipErrorResult {
+            // Allocate a buffer for the null message
+            let msg_buf = match session_mgr::message_packet_buffer::new(0) {
+                Some(buf) => {
+                    if buf.is_null() {
+                        return Err(chip_error_no_memory!());
+                    }
 
-    /*
-     *  Send a SecureChannel::StandaloneAck message.
-     *
-     *  @note  When sent via UDP, the null message is sent *without* requesting an acknowledgment,
-     *  even in the case where the auto-request acknowledgment feature has been enabled on the
-     *  exchange.
-     */
-    fn send_standalone_ack_message(&mut self) -> ChipErrorResult {
-        // Allocate a buffer for the null message
-        let msg_buf = match session_mgr::message_packet_buffer::new(0) {
-            Some(buf) => {
-                if buf.is_null() {
+                    buf
+                },
+                None => {
                     return Err(chip_error_no_memory!());
                 }
+            };
 
-                buf
-            },
-            None => {
-                return Err(chip_error_no_memory!());
+            let result =  self.get_exchange_context().send_message(protocols::secure_channel::MsgType::StandaloneAck, msg_buf,
+                &SendMessageFlags::KnoAutoRequestAck);
+
+            match result {
+                Ok(()) => {
+                    // do nothing
+                },
+                Err(e) => {
+                    if is_send_error_non_critical(e.clone()) {
+                        chip_log_error!(ExchangeManager,
+                            "Non-crit err {} sending solitary ack for MessageCounter: {} on exchange {}",
+                            e, self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+                        return chip_ok!();
+                    } else {
+                        chip_log_error!(ExchangeManager,
+                            "Failed to send Solitary ack for MessageCounter {} on exchange {} : {}",
+                            self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()), e);
+                    }
+                }
             }
-        };
 
-        let result =  self.get_exchange_context().send_message(protocols::secure_channel::MsgType::StandaloneAck, msg_buf,
-            &SendMessageFlags::KnoAutoRequestAck);
+            result
+        }
 
-        match result {
-            Ok(()) => {
-                // do nothing
-            },
-            Err(e) => {
-                if is_send_error_non_critical(e.clone()) {
-                    chip_log_error!(ExchangeManager,
-                        "Non-crit err {} sending solitary ack for MessageCounter: {} on exchange {}",
-                        e, self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
-                    return chip_ok!();
+        /*
+         *  Determine whether an acknowledgment will be requested whenever a message is sent for the exchange.
+         *
+         *  @return Returns 'true' an acknowledgment will be requested whenever a message is sent, else 'false'.
+         */
+        fn auto_request_ack(&self) -> bool {
+            self.base().auto_request_ack()
+        }
+
+        /*
+         * Set whether an acknowledgment should be requested whenever a message is sent.
+         *
+         * @param[in] autoReqAck            A Boolean indicating whether or not an
+         *                                  acknowledgment should be requested whenever a
+         *                                  message is sent.
+         */
+        fn set_auto_request_ack(&mut self, auto_req_ack: bool) {
+            self.base_mut().set_auto_request_ack(auto_req_ack)
+        }
+
+        /*
+         *  Determine whether there is already an acknowledgment pending to be sent to the peer on this exchange.
+         *
+         *  @return Returns 'true' if there is already an acknowledgment pending  on this exchange, else 'false'.
+         */
+        fn is_ack_pending(&self) -> bool {
+            self.base().is_ack_pending()
+        }
+
+        // Determine whether the reliable message context is waiting for an ack.
+        fn is_waiting_for_ack(&self) -> bool {
+            self.base().is_waiting_for_ack()
+        }
+
+        // Set whether the reliable message context is waiting for an ack.
+        fn set_waiting_for_ack(&mut self, waiting_for_ack: bool) {
+            self.base_mut().set_waiting_ack(waiting_for_ack)
+        }
+
+        // Set if this exchange is requesting Sleepy End Device active mode
+        fn set_requesting_active_mode(&mut self, active_mode: bool);
+
+        // Determine whether this exchange is a EphemeralExchange for replying a StandaloneAck
+        fn is_ephemeral_exchange(&self) -> bool {
+            self.base().is_ephemeral_exchange()
+        }
+
+        /*
+         * Get the reliable message manager that corresponds to this reliable
+         * message context.
+         */
+        fn get_reliable_message_mgr(&self) -> Option<Mgr::SharedReliableMessageMgr>;
+
+        fn get_exchange_context(&mut self) -> &mut ExchangeContext;
+
+        fn get_exchange_context_const(&self) -> &ExchangeContext;
+
+        fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
+            where
+                Self: Sized,
+        {
+            let mut mgr = {
+                if let Some(mgr) = self.get_reliable_message_mgr() {
+                    mgr
                 } else {
-                    chip_log_error!(ExchangeManager,
-                        "Failed to send Solitary ack for MessageCounter {} on exchange {} : {}",
-                        self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()), e);
+                    chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
+                    return;
+                }
+            };
+            unsafe {
+                if mgr.as_mut().check_and_rem_retrans_table(self, ack_message_counter) {
+                    self.base_mut().set_waiting_for_response_or_ack(false);
+                } else {
+                    // This can happen quite easily due to a packet with a piggyback ack
+                    // being lost and retransmitted.
+                    chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
+                        ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
                 }
             }
         }
 
-        result
-    }
+        fn handle_needs_ack(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
+            let result = self.handle_needs_ack_inner(message_counter, message_flags);
 
-    /*
-     *  Determine whether an acknowledgment will be requested whenever a message is sent for the exchange.
-     *
-     *  @return Returns 'true' an acknowledgment will be requested whenever a message is sent, else 'false'.
-     */
-    fn auto_request_ack(&self) -> bool {
-        self.base().auto_request_ack()
-    }
-
-    /*
-     * Set whether an acknowledgment should be requested whenever a message is sent.
-     *
-     * @param[in] autoReqAck            A Boolean indicating whether or not an
-     *                                  acknowledgment should be requested whenever a
-     *                                  message is sent.
-     */
-    fn set_auto_request_ack(&mut self, auto_req_ack: bool) {
-        self.base_mut().set_auto_request_ack(auto_req_ack)
-    }
-
-    /*
-     *  Determine whether there is already an acknowledgment pending to be sent to the peer on this exchange.
-     *
-     *  @return Returns 'true' if there is already an acknowledgment pending  on this exchange, else 'false'.
-     */
-    fn is_ack_pending(&self) -> bool {
-        self.base().is_ack_pending()
-    }
-
-    // Determine whether the reliable message context is waiting for an ack.
-    fn is_waiting_for_ack(&self) -> bool {
-        self.base().is_waiting_for_ack()
-    }
-
-    // Set whether the reliable message context is waiting for an ack.
-    fn set_waiting_for_ack(&mut self, waiting_for_ack: bool) {
-        self.base_mut().set_waiting_ack(waiting_for_ack)
-    }
-
-    // Set if this exchange is requesting Sleepy End Device active mode
-    fn set_requesting_active_mode(&mut self, active_mode: bool);
-
-    // Determine whether this exchange is a EphemeralExchange for replying a StandaloneAck
-    fn is_ephemeral_exchange(&self) -> bool {
-        self.base().is_ephemeral_exchange()
-    }
-
-    /*
-     * Get the reliable message manager that corresponds to this reliable
-     * message context.
-     */
-    fn get_reliable_message_mgr(&self) -> Option<SharedReliableMessageMgr>;
-
-    fn get_exchange_context(&mut self) -> &mut ExchangeContext;
-
-    fn get_exchange_context_const(&self) -> &ExchangeContext;
-
-    fn handle_rcvd_ack(&mut self, ack_message_counter: u32) 
-        where
-            Self: Sized,
-    {
-        let mut mgr = {
-            if let Some(mgr) = self.get_reliable_message_mgr() {
-                mgr
-            } else {
-                chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
-                return;
+            // Schedule next physical wakeup on function exit
+            //let mgr = self.get_reliable_message_mgr();
+            let mut mgr = {
+                if let Some(mgr) = self.get_reliable_message_mgr() {
+                    mgr
+                } else {
+                    chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
+                    return Err(chip_error_no_memory!());
+                }
+            };
+            unsafe {
+                mgr.as_mut().start_timer();
             }
-        };
-        unsafe {
-            if mgr.as_mut().check_and_rem_retrans_table(self, ack_message_counter) {
-                self.base_mut().set_waiting_for_response_or_ack(false);
-            } else {
-                // This can happen quite easily due to a packet with a piggyback ack
-                // being lost and retransmitted.
-                chip_log_detail!(ExchangeManager, "CHIP MessageCounter:{} not in RetransTable on exchange {}",
-                    ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
-            }
-        }
-    }
 
-    fn handle_needs_ack(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
-        let result = self.handle_needs_ack_inner(message_counter, message_flags);
-
-        // Schedule next physical wakeup on function exit
-        //let mgr = self.get_reliable_message_mgr();
-        let mut mgr = {
-            if let Some(mgr) = self.get_reliable_message_mgr() {
-                mgr
-            } else {
-                chip_log_error!(ExchangeManager, "cannot find reliable message mgr");
-                return Err(chip_error_no_memory!());
-            }
-        };
-        unsafe {
-            mgr.as_mut().start_timer();
+            result
         }
 
-        result
-    }
+        fn handle_needs_ack_inner(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
+            // If the message IS a duplicate there will never be a response to it, so we
+            // should not wait for one and just immediately send a standalone ack.
+            if message_flags.intersects(Flags::KduplicateMessage) {
+                chip_log_detail!(ExchangeManager,
+                    "Forcing tx of solitary ack for duplicate MessageCounter: {} on exchange {}",
+                    message_counter, chip_log_value_exchange(self.get_exchange_context()));
 
-    fn handle_needs_ack_inner(&mut self, message_counter: u32, message_flags: Flags) -> ChipErrorResult {
-        // If the message IS a duplicate there will never be a response to it, so we
-        // should not wait for one and just immediately send a standalone ack.
-        if message_flags.intersects(Flags::KduplicateMessage) {
-            chip_log_detail!(ExchangeManager,
-                "Forcing tx of solitary ack for duplicate MessageCounter: {} on exchange {}",
-                message_counter, chip_log_value_exchange(self.get_exchange_context()));
+                let was_ack_pending = self.is_ack_pending() && self.base().m_pending_peer_ack_message_counter != message_counter;
+                let message_counter_was_valid = self.has_piggyback_ack_pending();
+                // Temporary store currently pending ack message counter (even if there is none).
+                let temp_ack_message_counter = self.base().m_pending_peer_ack_message_counter;
 
-            let was_ack_pending = self.is_ack_pending() && self.base().m_pending_peer_ack_message_counter != message_counter;
-            let message_counter_was_valid = self.has_piggyback_ack_pending();
-            // Temporary store currently pending ack message counter (even if there is none).
-            let temp_ack_message_counter = self.base().m_pending_peer_ack_message_counter;
+                self.set_pending_peer_ack_message_counter(message_counter);
+                let err = self.send_standalone_ack_message();
 
+                if was_ack_pending {
+                    // Restore previously pending ack message counter.
+                    self.set_pending_peer_ack_message_counter(temp_ack_message_counter);
+                } else if message_counter_was_valid {
+                    // Restore the previous value, so later piggybacks will pick it up,
+                    // but don't set out "ack is pending" state, because we didn't use
+                    // to have it set.
+                    self.base_mut().m_pending_peer_ack_message_counter = temp_ack_message_counter;
+                }
+
+                // Otherwise don't restore the invalid old mPendingPeerAckMessageCounter
+                // value, so we preserve the invariant that once we have had an ack
+                // pending we always have a valid mPendingPeerAckMessageCounter.
+                return err;
+            }
+            // Otherwise, the message IS NOT a duplicate.
+            if self.is_ack_pending() {
+                chip_log_detail!(ExchangeManager,
+                    "Pending ack queue full; forcing tx of solitary ack for MessageCounter: {} on exchange {}",
+                    self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
+                // Send the Ack for the currently pending Ack in a SecureChannel::StandaloneAck message.
+                self.send_standalone_ack_message()?;
+            }
+
+            // Replace the Pending ack message counter.
             self.set_pending_peer_ack_message_counter(message_counter);
-            let err = self.send_standalone_ack_message();
+            self.base_mut().m_next_ack_time = crate::chip::system::system_clock::get_monotonic_timestamp().saturating_add(
+                CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT);
 
-            if was_ack_pending {
-                // Restore previously pending ack message counter.
-                self.set_pending_peer_ack_message_counter(temp_ack_message_counter);
-            } else if message_counter_was_valid {
-                // Restore the previous value, so later piggybacks will pick it up,
-                // but don't set out "ack is pending" state, because we didn't use
-                // to have it set.
-                self.base_mut().m_pending_peer_ack_message_counter = temp_ack_message_counter;
-            }
-
-            // Otherwise don't restore the invalid old mPendingPeerAckMessageCounter
-            // value, so we preserve the invariant that once we have had an ack
-            // pending we always have a valid mPendingPeerAckMessageCounter.
-            return err;
+            chip_ok!()
         }
-        // Otherwise, the message IS NOT a duplicate.
-        if self.is_ack_pending() {
-            chip_log_detail!(ExchangeManager,
-                "Pending ack queue full; forcing tx of solitary ack for MessageCounter: {} on exchange {}",
-                self.base().m_pending_peer_ack_message_counter, chip_log_value_exchange(self.get_exchange_context_const()));
-            // Send the Ack for the currently pending Ack in a SecureChannel::StandaloneAck message.
-            self.send_standalone_ack_message()?;
+        
+        fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
+            self.base_mut().set_pending_peer_ack_message_counter(peer_ack_message_counter)
         }
 
-        // Replace the Pending ack message counter.
-        self.set_pending_peer_ack_message_counter(message_counter);
-        self.base_mut().m_next_ack_time = crate::chip::system::system_clock::get_monotonic_timestamp().saturating_add(
-            CHIP_CONFIG_RMP_DEFAULT_ACK_TIMEOUT);
+        fn set_waiting_for_response_or_ack(&mut self, waiting_for_response_or_ack: bool) {
+            self.base_mut().set_waiting_for_response_or_ack(waiting_for_response_or_ack)
+        }
 
-        chip_ok!()
-    }
-    
-    fn set_pending_peer_ack_message_counter(&mut self, peer_ack_message_counter: u32) {
-        self.base_mut().set_pending_peer_ack_message_counter(peer_ack_message_counter)
-    }
+        fn set_ack_pending(&mut self, in_ack_pending: bool) {
+            self.base_mut().set_ack_pending(in_ack_pending)
+        }
 
-    fn set_waiting_for_response_or_ack(&mut self, waiting_for_response_or_ack: bool) {
-        self.base_mut().set_waiting_for_response_or_ack(waiting_for_response_or_ack)
-    }
-
-    fn set_ack_pending(&mut self, in_ack_pending: bool) {
-        self.base_mut().set_ack_pending(in_ack_pending)
-    }
-
-    fn waiting_for_response_or_ack(&self) -> bool {
-        self.base().waiting_for_response_or_ack()
+        fn waiting_for_response_or_ack(&self) -> bool {
+            self.base().waiting_for_response_or_ack()
+        }
     }
 }
 

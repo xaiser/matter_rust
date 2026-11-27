@@ -1334,8 +1334,8 @@ pub mod exchange_context {
             }
 
             impl<'a> MockDelegate<'a> {
-                pub const fn new(on_exchange_closing_calls: &'a AtomicUsize, on_response_timeout_calls: &'a AtomicUsize
-                    message_type: &'a AtomicU8, ack_counter: Option<&'a AtomicU32>,) -> Self {
+                pub const fn new(on_exchange_closing_calls: &'a AtomicUsize, on_response_timeout_calls: &'a AtomicUsize,
+                    message_type: &'a AtomicU8, ack_counter: Option<&'a AtomicU32>) -> Self {
                     Self {
                         on_exchange_closing_calls,
                         on_response_timeout_calls,
@@ -1346,7 +1346,20 @@ pub mod exchange_context {
             }
 
             impl ExchangeDelegateTrait for MockDelegate<'_> {
-                fn on_message_received(&mut self, _ec: *mut ExchangeContext, _payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+                fn on_message_received(&mut self, _ec: *mut ExchangeContext, payload_header: &PayloadHeader, _payload: PacketBufferHandle) -> ChipErrorResult {
+                    if self.ack_counter.is_none() {
+                        return Err(chip_error_incorrect_state!());
+                    }
+
+                    self.message_type.store(payload_header.get_message_type(), Ordering::Relaxed);
+                    if let Some(c) = payload_header.get_ack_message_counter() 
+                     && let Some(ac) = self.ack_counter
+                    {
+                        ac.store(*c, Ordering::Relaxed);
+                    } else {
+                        self.ack_counter = None;
+                    }
+
                     chip_ok!()
                 }
 
@@ -1480,7 +1493,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
@@ -1512,7 +1527,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 //let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, Some(NonNull::from_ref(&delegate)), false);
                 let mut ec = ExchangeContext::new_with(Some(NonNull::from_ref(&mgr)), id, sh, true, 
@@ -2107,7 +2124,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
                     Some(ExchangeDelegate::new_test(delegate)), false);
@@ -2145,7 +2164,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 // ensure initiator is false to trigger close calls
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
@@ -2186,7 +2207,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 // initiator = false to ensure send_expected is false
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
@@ -2222,7 +2245,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, true, 
                     Some(ExchangeDelegate::new_test(delegate)), false);
@@ -2257,7 +2282,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 // initiator = false to ensure send_expected is false
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
@@ -2292,7 +2319,9 @@ pub mod exchange_context {
                 // delegate
                 static CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
                 static TIMEOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
-                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS);
+                static MESSAGE_TYPE: AtomicU8 = AtomicU8::new(0);
+                static ACK_COUNTER: AtomicU32 = AtomicU32::new(0);
+                let delegate = MockDelegate::new(&CLOSE_CALLS, &TIMEOUT_CALLS, &MESSAGE_TYPE, Some(&ACK_COUNTER));
 
                 // initiator = false to ensure send_expected is false
                 let handle = try_new_handle_with(addr_of_mut!(alloactor), Some(NonNull::from_ref(&mgr)), id, sh, false, 
@@ -2340,6 +2369,7 @@ pub mod exchange_context {
                     Some(ExchangeDelegate::new_test(delegate)), false);
                 assert!(handle.is_ok());
                 let mut handle = handle.unwrap();
+
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_response_expected(true));
                 let _ = handle.with_mut(|ec: &mut ExchangeContext| ec.set_ignore_session_release(true));
 

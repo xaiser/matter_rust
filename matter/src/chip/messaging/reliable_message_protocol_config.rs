@@ -2,7 +2,7 @@ use crate::{
     //chip_static_assert,
     chip::{
         system::system_clock::{self, Timeout, Milliseconds},
-        messaging::reliable_message_mgr::ReliableMessageMgr,
+        messaging::reliable_message_mgr::get_backoff,
     },
 };
 use core::time::Duration;
@@ -76,7 +76,7 @@ impl ReliableMessageProtocolConfig {
                 } else {
                     active_interval
                 };
-            timeout = timeout.saturating_add(ReliableMessageMgr::get_backoff(base_interval, i.try_into().unwrap(), true));
+            timeout = timeout.saturating_add(get_backoff(base_interval, i.try_into().unwrap(), true));
         }
 
         timeout
